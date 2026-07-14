@@ -1,26 +1,32 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { TerminalHistoryState } from "./TerminalHistoryRow";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  type KeyboardEvent,
+  type ReactElement,
+} from "react";
+import {
+  TerminalHistoryState,
+  type TerminalSubmission,
+} from "./TerminalHistory";
 
-export type InputCaptureHandle = {
+export type InputCaptureHandle = Readonly<{
   focus: () => void;
-};
+}>;
 
-type InputCaptureProps = {
+type InputCaptureProps = Readonly<{
   value: string;
   onInsertText: (value: string) => void;
   onMoveCursorLeft: () => void;
   onMoveCursorRight: () => void;
   onDeleteAtCursor: () => void;
   onBackspaceCursor: () => void;
-  onSubmit: (
-    value: string,
-    state: TerminalHistoryState,
-    result: string,
-  ) => void;
-};
+  onSubmit: (submission: TerminalSubmission) => void;
+}>;
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
-  function InputCapture(props, ref) {
+  function InputCapture(props, ref): ReactElement {
     const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
     useImperativeHandle(ref, () => ({
@@ -31,63 +37,76 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       inputRef.current?.focus();
     }, []);
 
-    const isCtrlC = (e: React.KeyboardEvent<HTMLTextAreaElement>) =>
-      e.ctrlKey && e.key.toLowerCase() === "c";
+    const isCtrlC = (event: KeyboardEvent<HTMLTextAreaElement>): boolean =>
+      event.ctrlKey && event.key.toLowerCase() === "c";
 
-    const isPrintableKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) =>
-      e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey;
+    const isPrintableKey = (
+      event: KeyboardEvent<HTMLTextAreaElement>,
+    ): boolean =>
+      event.key.length === 1 &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.altKey;
 
     const specialKeyHandlers: Partial<
-      Record<string, (e: React.KeyboardEvent<HTMLTextAreaElement>) => void>
+      Record<string, (event: KeyboardEvent<HTMLTextAreaElement>) => void>
     > = {
-      ArrowLeft: (e) => {
-        e.preventDefault();
+      ArrowLeft: (event) => {
+        event.preventDefault();
         props.onMoveCursorLeft();
       },
-      ArrowRight: (e) => {
-        e.preventDefault();
+      ArrowRight: (event) => {
+        event.preventDefault();
         props.onMoveCursorRight();
       },
-      Backspace: (e) => {
-        e.preventDefault();
+      Backspace: (event) => {
+        event.preventDefault();
         props.onBackspaceCursor();
       },
-      Delete: (e) => {
-        e.preventDefault();
+      Delete: (event) => {
+        event.preventDefault();
         props.onDeleteAtCursor();
       },
-      Enter: (e) => {
-        e.preventDefault();
-        if (e.shiftKey) {
+      Enter: (event) => {
+        event.preventDefault();
+        if (event.shiftKey) {
           props.onInsertText("\n");
           return;
         }
 
-        props.onSubmit(props.value, TerminalHistoryState.Success, "");
+        props.onSubmit({
+          value: props.value,
+          state: TerminalHistoryState.Success,
+          result: "",
+        });
       },
-      Tab: (e) => {
-        e.preventDefault();
+      Tab: (event) => {
+        event.preventDefault();
         props.onInsertText("  ");
       },
     };
 
-    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (isCtrlC(e)) {
-        e.preventDefault();
-        props.onSubmit(props.value, TerminalHistoryState.Cancelled, "");
+    const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+      if (isCtrlC(event)) {
+        event.preventDefault();
+        props.onSubmit({
+          value: props.value,
+          state: TerminalHistoryState.Cancelled,
+          result: "",
+        });
         return;
       }
 
-      const specialHandler = specialKeyHandlers[e.key];
+      const specialHandler = specialKeyHandlers[event.key];
 
       if (specialHandler) {
-        specialHandler(e);
+        specialHandler(event);
         return;
       }
 
-      if (isPrintableKey(e)) {
-        e.preventDefault();
-        props.onInsertText(e.key);
+      if (isPrintableKey(event)) {
+        event.preventDefault();
+        props.onInsertText(event.key);
       }
     };
 

@@ -1,29 +1,21 @@
-export const TerminalHistoryState = {
-  Cancelled: "cancelled",
-  Error: "error",
-  Success: "success",
-} as const;
+import type { ReactElement } from "react";
+import {
+  TerminalHistoryState,
+  type TerminalHistoryEntry,
+  type TerminalHistoryState as TerminalHistoryStateValue,
+} from "./TerminalHistory";
 
-export type TerminalHistoryState =
-  (typeof TerminalHistoryState)[keyof typeof TerminalHistoryState];
-
-export type TerminalHistoryProps = {
-  value: string;
-  state: TerminalHistoryState;
-  result: string;
-};
-
-const stateClassMap: Record<TerminalHistoryState, string> = {
+const stateClassMap = {
   [TerminalHistoryState.Cancelled]: "text-neutral-500",
   [TerminalHistoryState.Error]: "text-red-400",
   [TerminalHistoryState.Success]: "text-green-400",
-};
+} satisfies Record<TerminalHistoryStateValue, string>;
 
 export function TerminalHistoryRow({
   value,
   state,
   result,
-}: TerminalHistoryProps) {
+}: TerminalHistoryEntry): ReactElement {
   return (
     <div className="whitespace-pre-wrap wrap-break-words">
       <div className="text-neutral-500">

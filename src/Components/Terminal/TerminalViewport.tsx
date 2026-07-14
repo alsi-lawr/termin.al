@@ -1,26 +1,26 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
 import { InputRow } from "./InputRow";
-import {
-  TerminalHistoryRow,
-  type TerminalHistoryProps,
-} from "./TerminalHistoryRow";
+import { TerminalHistoryRow } from "./TerminalHistoryRow";
+import type { TerminalHistoryEntry } from "./TerminalHistory";
 
-type TerminalViewportProps = {
-  rows: TerminalHistoryProps[];
+type TerminalViewportProps = Readonly<{
+  rows: ReadonlyArray<TerminalHistoryEntry>;
   prompt: string;
   currentInput: string;
   cursorColumn: number;
-};
+}>;
 
 export function TerminalViewport({
   rows,
   prompt,
   currentInput,
   cursorColumn,
-}: TerminalViewportProps) {
+}: TerminalViewportProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const inputMeasureRef = useRef<HTMLDivElement | null>(null);
-  const historyMeasureRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const historyMeasureRefs = useRef<
+    Map<TerminalHistoryEntry["id"], HTMLDivElement>
+  >(new Map());
 
   const [startIndex, setStartIndex] = useState(0);
 
@@ -51,7 +51,13 @@ export function TerminalViewport({
       let nextStartIndex = rows.length;
 
       for (let i = rows.length - 1; i >= 0; i -= 1) {
-        const element = historyMeasureRefs.current.get(i);
+        const row = rows[i];
+
+        if (!row) {
+          continue;
+        }
+
+        const element = historyMeasureRefs.current.get(row.id);
 
         if (!element) {
           continue;
@@ -95,31 +101,27 @@ export function TerminalViewport({
       aria-label="Terminal output"
     >
       <div className="h-full whitespace-pre-wrap wrap-break-words">
-        {visibleRows.map((value, visibleIndex) => {
-          const actualIndex = startIndex + visibleIndex;
-
-          return (
-            <TerminalHistoryRow key={`${actualIndex}-${value}`} {...value} />
-          );
-        })}
+        {visibleRows.map((row) => (
+          <TerminalHistoryRow key={row.id} {...row} />
+        ))}
 
         <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
       </div>
 
       <div className="pointer-events-none absolute inset-0 invisible -z-10 p-4">
         <div className="whitespace-pre-wrap wrap-break-words">
-          {rows.map((value, index) => (
+          {rows.map((row) => (
             <div
-              key={`${index}-${value}`}
+              key={row.id}
               ref={(element) => {
                 if (element) {
-                  historyMeasureRefs.current.set(index, element);
+                  historyMeasureRefs.current.set(row.id, element);
                 } else {
-                  historyMeasureRefs.current.delete(index);
+                  historyMeasureRefs.current.delete(row.id);
                 }
               }}
             >
-              <TerminalHistoryRow {...value} />
+              <TerminalHistoryRow {...row} />
             </div>
           ))}
 

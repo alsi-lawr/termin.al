@@ -1,14 +1,17 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactElement } from "react";
 import { TerminalViewport } from "./TerminalViewport";
 import { InputCapture, type InputCaptureHandle } from "./InputCapture";
-import { type TerminalHistoryProps } from "./TerminalHistoryRow";
+import {
+  createTerminalHistoryEntry,
+  type TerminalHistoryEntry,
+} from "./TerminalHistory";
 
-type TerminalProps = {
+type TerminalProps = Readonly<{
   prompt?: string;
-};
+}>;
 
-export function Terminal({ prompt = "$" }: TerminalProps) {
-  const [rows, setRows] = useState<TerminalHistoryProps[]>([]);
+export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
+  const [rows, setRows] = useState<ReadonlyArray<TerminalHistoryEntry>>([]);
   const [currentInput, setCurrentInput] = useState("");
   const [cursorIndex, setCursorIndex] = useState(0);
   const inputRef = useRef<InputCaptureHandle>(null);
@@ -67,9 +70,16 @@ export function Terminal({ prompt = "$" }: TerminalProps) {
         onMoveCursorRight={moveCursorRight}
         onDeleteAtCursor={deleteAtCursor}
         onBackspaceCursor={backspaceCursor}
-        onSubmit={(value, state, result) => {
-          setRows((x) => [...x, { value, state, result }]);
+        onSubmit={(submission) => {
+          setRows((existingRows) => [
+            ...existingRows,
+            createTerminalHistoryEntry({
+              sequence: existingRows.length + 1,
+              submission,
+            }),
+          ]);
           setCurrentInput("");
+          setCursorIndex(0);
         }}
       />
     </div>
