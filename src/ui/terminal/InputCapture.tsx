@@ -7,9 +7,9 @@ import {
   type ReactElement,
 } from "react";
 import {
-  TerminalHistoryState,
-  type TerminalSubmission,
-} from "./TerminalHistory";
+  CommandExecutionState,
+  type CommandExecution,
+} from "../../application/commands/CommandExecution";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -22,7 +22,7 @@ type InputCaptureProps = Readonly<{
   onMoveCursorRight: () => void;
   onDeleteAtCursor: () => void;
   onBackspaceCursor: () => void;
-  onSubmit: (submission: TerminalSubmission) => void;
+  onSubmit: (execution: CommandExecution) => void;
 }>;
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
@@ -75,9 +75,9 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         }
 
         props.onSubmit({
-          value: props.value,
-          state: TerminalHistoryState.Success,
-          result: "",
+          input: props.value,
+          state: CommandExecutionState.Success,
+          output: "",
         });
       },
       Tab: (event) => {
@@ -90,9 +90,9 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       if (isCtrlC(event)) {
         event.preventDefault();
         props.onSubmit({
-          value: props.value,
-          state: TerminalHistoryState.Cancelled,
-          result: "",
+          input: props.value,
+          state: CommandExecutionState.Cancelled,
+          output: "",
         });
         return;
       }

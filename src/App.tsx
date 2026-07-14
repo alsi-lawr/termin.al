@@ -1,4 +1,4 @@
-import { Terminal } from "./Components/Terminal/Terminal";
+import { Terminal } from "./ui/terminal/Terminal";
 
 function App() {
   return (
