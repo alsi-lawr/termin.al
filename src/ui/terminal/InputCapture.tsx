@@ -6,10 +6,6 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from "react";
-import {
-  CommandExecutionState,
-  type CommandExecution,
-} from "../../application/commands/CommandExecution";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -22,7 +18,8 @@ type InputCaptureProps = Readonly<{
   onMoveCursorRight: () => void;
   onDeleteAtCursor: () => void;
   onBackspaceCursor: () => void;
-  onSubmit: (execution: CommandExecution) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
 }>;
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
@@ -69,16 +66,13 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       },
       Enter: (event) => {
         event.preventDefault();
+
         if (event.shiftKey) {
           props.onInsertText("\n");
           return;
         }
 
-        props.onSubmit({
-          input: props.value,
-          state: CommandExecutionState.Success,
-          output: "",
-        });
+        props.onSubmit();
       },
       Tab: (event) => {
         event.preventDefault();
@@ -89,11 +83,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
       if (isCtrlC(event)) {
         event.preventDefault();
-        props.onSubmit({
-          input: props.value,
-          state: CommandExecutionState.Cancelled,
-          output: "",
-        });
+        props.onCancel();
         return;
       }
 
@@ -116,7 +106,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         value={props.value}
         onKeyDown={handleKeyDown}
         onChange={() => {}}
-        className="absolute left-0 top-0 h-0 w-0 opacity-0 pointer-events-none"
+        className="pointer-events-none absolute left-0 top-0 h-0 w-0 opacity-0"
         autoCapitalize="off"
         autoComplete="off"
         autoCorrect="off"

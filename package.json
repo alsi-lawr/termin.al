@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test src/domain/terminal/TerminalInput.test.ts",
+    "test": "node --experimental-strip-types --test src/domain/terminal/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

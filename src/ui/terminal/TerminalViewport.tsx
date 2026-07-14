@@ -1,10 +1,10 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import type { ShellHistoryEntry } from "../../domain/terminal/Shell.ts";
 import { InputRow } from "./InputRow";
 import { TerminalHistoryRow } from "./TerminalHistoryRow";
-import type { TerminalHistoryEntry } from "./TerminalHistory";
 
 type TerminalViewportProps = Readonly<{
-  rows: ReadonlyArray<TerminalHistoryEntry>;
+  rows: ReadonlyArray<ShellHistoryEntry>;
   prompt: string;
   currentInput: string;
   cursorColumn: number;
@@ -19,7 +19,7 @@ export function TerminalViewport({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const inputMeasureRef = useRef<HTMLDivElement | null>(null);
   const historyMeasureRefs = useRef<
-    Map<TerminalHistoryEntry["id"], HTMLDivElement>
+    Map<ShellHistoryEntry["id"], HTMLDivElement>
   >(new Map());
 
   const [startIndex, setStartIndex] = useState(0);
@@ -102,7 +102,7 @@ export function TerminalViewport({
     >
       <div className="h-full whitespace-pre-wrap wrap-break-words">
         {visibleRows.map((row) => (
-          <TerminalHistoryRow key={row.id} {...row} />
+          <TerminalHistoryRow key={row.id} entry={row} />
         ))}
 
         <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
@@ -121,7 +121,7 @@ export function TerminalViewport({
                 }
               }}
             >
-              <TerminalHistoryRow {...row} />
+              <TerminalHistoryRow entry={row} />
             </div>
           ))}
 

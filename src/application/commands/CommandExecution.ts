@@ -1,14 +1,162 @@
-export const CommandExecutionState = {
-  Cancelled: "cancelled",
-  Error: "error",
-  Success: "success",
-} as const;
+import {
+  lexArguments,
+  type ArgumentLexerError,
+} from "../../domain/terminal/ArgumentLexer.ts";
+import type {
+  CommandOutcome,
+  ShellDiagnostic,
+  ShellCommandRequest,
+} from "../../domain/terminal/Shell.ts";
+import {
+  resolveCommand,
+  type CommandRegistry,
+} from "./CommandRegistry.ts";
 
-export type CommandExecutionState =
-  (typeof CommandExecutionState)[keyof typeof CommandExecutionState];
-
-export type CommandExecution = Readonly<{
-  input: string;
-  state: CommandExecutionState;
-  output: string;
+export type ExecuteCommandLineOptions = Readonly<{
+  registry: CommandRegistry;
+  request: ShellCommandRequest;
+  signal: AbortSignal;
 }>;
+
+function cancelledOutcome(): CommandOutcome {
+  return {
+    kind: "cancelled",
+    diagnostic: {
+      kind: "runtime",
+      code: "runtime.cancelled",
+      message: "Command cancelled.",
+    },
+  };
+}
+
+function parseDiagnostic(error: ArgumentLexerError): ShellDiagnostic {
+  switch (error.kind) {
+    case "unterminated-single-quote":
+      return {
+        kind: "parse",
+        code: "parse.unterminated-single-quote",
+        message: "A single-quoted argument was not closed.",
+        position: error.position,
+      };
+    case "unterminated-double-quote":
+      return {
+        kind: "parse",
+        code: "parse.unterminated-double-quote",
+        message: "A double-quoted argument was not closed.",
+        position: error.position,
+      };
+    case "trailing-escape":
+      return {
+        kind: "parse",
+        code: "parse.trailing-escape",
+        message: "An escape character must be followed by a character.",
+        position: error.position,
+      };
+  }
+}
+
+function parseFailureOutcome(error: ArgumentLexerError): CommandOutcome {
+  return {
+    kind: "failed",
+    failure: { kind: "parse-error", error },
+    diagnostics: [parseDiagnostic(error)],
+  };
+}
+
+function emptyCommandOutcome(): CommandOutcome {
+  return {
+    kind: "failed",
+    failure: { kind: "empty-command" },
+    diagnostics: [
+      {
+        kind: "command",
+        code: "command.empty",
+        message: "Enter a command before submitting.",
+      },
+    ],
+  };
+}
+
+function missingCommandOutcome(commandName: string): CommandOutcome {
+  return {
+    kind: "failed",
+    failure: { kind: "command-not-found", commandName },
+    diagnostics: [
+      {
+        kind: "command",
+        code: "command.not-found",
+        message: `Command not found: ${commandName}`,
+      },
+    ],
+  };
+}
+
+function executionFailureOutcome(commandName: string): CommandOutcome {
+  return {
+    kind: "failed",
+    failure: { kind: "execution-error", commandName },
+    diagnostics: [
+      {
+        kind: "runtime",
+        code: "runtime.execution-failed",
+        message: "The command could not complete.",
+      },
+    ],
+  };
+}
+
+export async function executeCommandLine({
+  registry,
+  request,
+  signal,
+}: ExecuteCommandLineOptions): Promise<CommandOutcome> {
+  if (signal.aborted) {
+    return cancelledOutcome();
+  }
+
+  const lexicalResult = lexArguments(request.source);
+
+  if (lexicalResult.kind === "error") {
+    return parseFailureOutcome(lexicalResult.error);
+  }
+
+  const [commandArgument, ...argumentsList] = lexicalResult.arguments;
+
+  if (!commandArgument) {
+    return emptyCommandOutcome();
+  }
+
+  const resolution = resolveCommand(registry, commandArgument.value);
+
+  if (resolution.kind === "missing") {
+    return missingCommandOutcome(resolution.requestedName);
+  }
+
+  try {
+    const outcome = await resolution.command.execute(
+      {
+        source: request.source,
+        name: resolution.command.metadata.name,
+        arguments: argumentsList.map((argument) => argument.value),
+        optionTerminator: lexicalResult.optionTerminator,
+      },
+      {
+        shellId: request.shellId,
+        sessionId: request.sessionId,
+        signal,
+      },
+    );
+
+    if (signal.aborted) {
+      return cancelledOutcome();
+    }
+
+    return outcome;
+  } catch {
+    if (signal.aborted) {
+      return cancelledOutcome();
+    }
+
+    return executionFailureOutcome(resolution.command.metadata.name);
+  }
+}
