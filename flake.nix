@@ -1,5 +1,5 @@
 {
-  description = "React dev shell";
+  description = "termin.al development shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -15,6 +15,7 @@
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           nodejs_24
+          dotnet-sdk_10
           git
         ];
       };

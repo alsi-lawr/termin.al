@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/host/">
+    <Project Path="host/Termin.Al.Host/Termin.Al.Host.fsproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Termin.Al.Host.Tests/Termin.Al.Host.Tests.fsproj" />
+  </Folder>
+</Solution>
