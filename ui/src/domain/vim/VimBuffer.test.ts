@@ -4,8 +4,15 @@ import {
   VimMode,
   appendVimCommandInput,
   applyNormalVimKey,
+  applyVimPromptKey,
+  backspaceVimInsertText,
   createVimBuffer,
+  createVimPromptBuffer,
+  deleteVimInsertText,
   insertVimText,
+  normalVimPromptKeyFromKeyboard,
+  replaceVimInsertText,
+  vimPromptMode,
   isVimBufferDirty,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
@@ -308,4 +315,94 @@ test("maps multiline native editor offsets through Unicode-safe Vim cursors", ()
   assert.equal(vimBufferCursorOffset(normalized), 1);
   assert.deepEqual(secondLine.cursor, { line: 1, column: 0 });
   assert.equal(vimBufferCursorOffset(secondLine), 4);
+});
+
+test("projects one-line prompt editing through shared Vim transitions", () => {
+  const prompt = createVimPromptBuffer({
+    text: "one two three",
+    mode: VimMode.Normal,
+    register: { kind: "empty" },
+  });
+  const atStart = applyVimPromptKey(prompt, { kind: "digit", digit: 0 });
+  const counted = applyVimPromptKey(atStart, { kind: "digit", digit: 2 });
+  const deleting = applyVimPromptKey(counted, {
+    kind: "operator",
+    operator: "delete",
+  });
+  const deleted = applyVimPromptKey(deleting, {
+    kind: "motion",
+    motion: "word-forward",
+  });
+  const pasted = applyVimPromptKey(deleted, { kind: "paste-before" });
+  const wholeLineDeleted = applyVimPromptKey(
+    applyVimPromptKey(
+      createVimPromptBuffer({
+        text: "abc",
+        mode: VimMode.Normal,
+        register: { kind: "empty" },
+      }),
+      { kind: "operator", operator: "delete" },
+    ),
+    { kind: "operator", operator: "delete" },
+  );
+  const wholeLinePasted = applyVimPromptKey(wholeLineDeleted, {
+    kind: "paste-after",
+  });
+  const inserted = replaceVimInsertText(
+    createVimPromptBuffer({
+      text: "",
+      mode: VimMode.Insert,
+      register: { kind: "character", text: "kept" },
+    }),
+    "a😀b",
+    2,
+  );
+  const deletedAstral = deleteVimInsertText(inserted);
+  const backspaced = backspaceVimInsertText(
+    moveVimInsertCursorToTextOffset(inserted, 3),
+  );
+
+  assert.equal(vimBufferCursorOffset(prompt), 12);
+  assert.equal(vimBufferText(deleted), "three");
+  assert.deepEqual(deleted.register, { kind: "character", text: "one two " });
+  assert.equal(vimBufferText(pasted), "one two three");
+  assert.deepEqual(wholeLineDeleted.register, {
+    kind: "character",
+    text: "abc",
+  });
+  assert.equal(vimBufferText(wholeLinePasted), "abc");
+  assert.equal(vimBufferCursorOffset(inserted), 1);
+  assert.equal(vimBufferText(deletedAstral), "ab");
+  assert.equal(vimBufferText(backspaced), "ab");
+  assert.deepEqual(inserted.register, { kind: "character", text: "kept" });
+  assert.deepEqual(vimPromptMode(pasted), VimMode.Normal);
+});
+
+test("keeps prompt key and snapshot behavior concrete and bounded", () => {
+  let prompt = createVimPromptBuffer({
+    text: "",
+    mode: VimMode.Insert,
+    register: { kind: "empty" },
+  });
+
+  for (let index = 0; index < 101; index += 1) {
+    prompt = insertVimText(prompt, "x");
+  }
+
+  assert.equal(prompt.undoStack.length, 100);
+  assert.deepEqual(normalVimPromptKeyFromKeyboard("j", false, false), {
+    kind: "recognized",
+    key: { kind: "history-newer" },
+  });
+  assert.deepEqual(normalVimPromptKeyFromKeyboard("k", false, false), {
+    kind: "recognized",
+    key: { kind: "history-older" },
+  });
+  assert.deepEqual(normalVimPromptKeyFromKeyboard("Home", false, false), {
+    kind: "recognized",
+    key: { kind: "motion", motion: "line-start" },
+  });
+  assert.deepEqual(normalVimPromptKeyFromKeyboard("y", false, false), {
+    kind: "unrecognized",
+  });
 });

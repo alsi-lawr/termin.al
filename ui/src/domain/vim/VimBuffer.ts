@@ -118,6 +118,51 @@ export type VimNormalKeyMatch =
     }>
   | Readonly<{ kind: "unrecognized" }>;
 
+export type VimPromptMode = Extract<
+  VimMode,
+  Readonly<{ kind: "normal" | "insert" }>
+>;
+
+export type VimPromptKey =
+  | Readonly<{
+      kind: "digit";
+      digit: VimDigit;
+    }>
+  | Readonly<{
+      kind: "motion";
+      motion:
+        | "left"
+        | "right"
+        | "word-forward"
+        | "word-backward"
+        | "word-end"
+        | "line-start"
+        | "line-end";
+    }>
+  | Readonly<{
+      kind: "operator";
+      operator: "delete" | "change";
+    }>
+  | Readonly<{ kind: "delete-character" }>
+  | Readonly<{ kind: "paste-after" }>
+  | Readonly<{ kind: "paste-before" }>
+  | Readonly<{ kind: "undo" }>
+  | Readonly<{ kind: "redo" }>
+  | Readonly<{ kind: "history-older" }>
+  | Readonly<{ kind: "history-newer" }>
+  | Readonly<{ kind: "insert-before" }>
+  | Readonly<{ kind: "insert-after" }>
+  | Readonly<{ kind: "insert-line-start" }>
+  | Readonly<{ kind: "insert-line-end" }>
+  | Readonly<{ kind: "escape" }>;
+
+export type VimPromptKeyMatch =
+  | Readonly<{
+      kind: "recognized";
+      key: VimPromptKey;
+    }>
+  | Readonly<{ kind: "unrecognized" }>;
+
 export type VimParsedCommand =
   | Readonly<{ kind: "write" }>
   | Readonly<{ kind: "quit" }>
@@ -196,6 +241,12 @@ export type VimBuffer = Readonly<{
 export type CreateVimBufferOptions = Readonly<{
   text: string;
   mode: Extract<VimMode, { kind: "normal" | "insert" }>;
+}>;
+
+export type CreateVimPromptBufferOptions = Readonly<{
+  text: string;
+  mode: VimPromptMode;
+  register: VimRegister;
 }>;
 
 const wordCharacterPattern = /[\p{L}\p{N}_]/u;
@@ -1253,12 +1304,54 @@ export function createEmptyVimBuffer(): VimBuffer {
   return createVimBuffer({ text: "", mode: VimMode.Insert });
 }
 
+function normaliseVimPromptRegister(register: VimRegister): VimRegister {
+  if (register.kind !== "line") {
+    return register;
+  }
+
+  return { kind: "character", text: register.lines.join("\n") };
+}
+
+export function createVimPromptBuffer({
+  text,
+  mode,
+  register,
+}: CreateVimPromptBufferOptions): VimBuffer {
+  const buffer = createVimBuffer({ text, mode });
+  const cursorOffset =
+    mode.kind === "normal"
+      ? previousUnicodeCursorOffset(text, text.length)
+      : text.length;
+
+  return {
+    ...buffer,
+    cursor: positionForTextOffset(buffer.lines, cursorOffset, mode),
+    register: normaliseVimPromptRegister(register),
+  };
+}
+
+export function createEmptyVimPromptBuffer(): VimBuffer {
+  return createVimPromptBuffer({
+    text: "",
+    mode: VimMode.Insert,
+    register: { kind: "empty" },
+  });
+}
+
 export function vimBufferText(buffer: VimBuffer): string {
   return joinLines(buffer.lines);
 }
 
 export function vimBufferCursorOffset(buffer: VimBuffer): number {
   return textOffsetForPosition(buffer.lines, buffer.cursor);
+}
+
+export function vimPromptMode(buffer: VimBuffer): VimPromptMode {
+  if (buffer.mode.kind === "normal" || buffer.mode.kind === "insert") {
+    return buffer.mode;
+  }
+
+  throw new Error("Vim prompt buffers must remain in normal or insert mode.");
 }
 
 export function isVimBufferDirty(buffer: VimBuffer): boolean {
@@ -1315,6 +1408,73 @@ export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
     buffer,
     createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
     buffer.register,
+  );
+}
+
+function deleteVimInsertRange(
+  buffer: VimBuffer,
+  start: number,
+  end: number,
+): VimBuffer {
+  const text = vimBufferText(buffer);
+  const safeStart = normalizeUnicodeCursorOffset(text, start);
+  const safeEnd = Math.max(
+    safeStart,
+    normalizeUnicodeCursorOffset(text, end),
+  );
+
+  if (safeStart === safeEnd) {
+    return buffer;
+  }
+
+  const lines = splitText(text.slice(0, safeStart) + text.slice(safeEnd));
+
+  return commitEdit(
+    buffer,
+    createTextState(
+      lines,
+      positionForTextOffset(lines, safeStart, VimMode.Insert),
+      VimMode.Insert,
+      { kind: "none" },
+    ),
+    buffer.register,
+  );
+}
+
+export function backspaceVimInsertText(buffer: VimBuffer): VimBuffer {
+  if (buffer.mode.kind !== "insert") {
+    return buffer;
+  }
+
+  const cursorOffset = vimBufferCursorOffset(buffer);
+
+  if (cursorOffset === 0) {
+    return buffer;
+  }
+
+  return deleteVimInsertRange(
+    buffer,
+    previousUnicodeCursorOffset(vimBufferText(buffer), cursorOffset),
+    cursorOffset,
+  );
+}
+
+export function deleteVimInsertText(buffer: VimBuffer): VimBuffer {
+  if (buffer.mode.kind !== "insert") {
+    return buffer;
+  }
+
+  const text = vimBufferText(buffer);
+  const cursorOffset = vimBufferCursorOffset(buffer);
+
+  if (cursorOffset === text.length) {
+    return buffer;
+  }
+
+  return deleteVimInsertRange(
+    buffer,
+    cursorOffset,
+    nextUnicodeCursorOffset(text, cursorOffset),
   );
 }
 
@@ -1429,6 +1589,26 @@ export function applyNormalVimKey(
     case "escape":
       return enterNormalMode(buffer);
   }
+}
+
+export function applyVimPromptKey(
+  buffer: VimBuffer,
+  key: VimPromptKey,
+): VimBuffer {
+  if (key.kind === "history-older" || key.kind === "history-newer") {
+    return resetPending(buffer);
+  }
+
+  const next = applyNormalVimKey(buffer, key);
+
+  if (next.register.kind !== "line") {
+    return next;
+  }
+
+  return {
+    ...next,
+    register: normaliseVimPromptRegister(next.register),
+  };
 }
 
 export function appendVimCommandInput(
@@ -1630,4 +1810,93 @@ export function normalVimKeyFromKeyboard(
     default:
       return { kind: "unrecognized" };
   }
+}
+
+function vimPromptKeyMatch(key: VimNormalKey): VimPromptKeyMatch {
+  if (key.kind === "digit") {
+    return { kind: "recognized", key };
+  }
+
+  if (key.kind === "motion") {
+    switch (key.motion) {
+      case "left":
+      case "right":
+      case "word-forward":
+      case "word-backward":
+      case "word-end":
+      case "line-start":
+      case "line-end":
+        return {
+          kind: "recognized",
+          key: { kind: "motion", motion: key.motion },
+        };
+      case "line-previous":
+      case "line-next":
+      case "document-start":
+      case "document-end":
+        return { kind: "unrecognized" };
+    }
+  }
+
+  if (key.kind === "operator") {
+    if (key.operator === "delete" || key.operator === "change") {
+      return {
+        kind: "recognized",
+        key: { kind: "operator", operator: key.operator },
+      };
+    }
+
+    return { kind: "unrecognized" };
+  }
+
+  switch (key.kind) {
+    case "delete-character":
+    case "paste-after":
+    case "paste-before":
+    case "undo":
+    case "redo":
+    case "insert-before":
+    case "insert-after":
+    case "insert-line-start":
+    case "insert-line-end":
+    case "escape":
+      return { kind: "recognized", key };
+    case "enter-visual-line":
+    case "enter-command":
+    case "enter-search":
+    case "search-next":
+    case "search-previous":
+      return { kind: "unrecognized" };
+  }
+}
+
+export function normalVimPromptKeyFromKeyboard(
+  key: string,
+  ctrlKey: boolean,
+  metaKey: boolean,
+): VimPromptKeyMatch {
+  if (!ctrlKey && !metaKey) {
+    if (key === "j") {
+      return { kind: "recognized", key: { kind: "history-newer" } };
+    }
+
+    if (key === "k") {
+      return { kind: "recognized", key: { kind: "history-older" } };
+    }
+
+    if (key === "Home") {
+      return {
+        kind: "recognized",
+        key: { kind: "motion", motion: "line-start" },
+      };
+    }
+  }
+
+  const match = normalVimKeyFromKeyboard(key, ctrlKey, metaKey);
+
+  if (match.kind === "unrecognized") {
+    return match;
+  }
+
+  return vimPromptKeyMatch(match.key);
 }
