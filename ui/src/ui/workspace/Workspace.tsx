@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import { paneLeaves } from "../../domain/workspace/PaneTree.ts";
+import { useTheme } from "../../theme/useTheme.ts";
 import { DirtyCloseConfirmation } from "./DirtyCloseConfirmation";
 import { MobilePaneSwitcher } from "./MobilePaneSwitcher";
 import { PaneTreeView } from "./PaneTreeView";
@@ -7,12 +8,16 @@ import { usePaneWorkspace } from "./usePaneWorkspace";
 
 export function Workspace(): ReactElement {
   const controller = usePaneWorkspace();
+  const theme = useTheme();
   const panes = paneLeaves(controller.workspace.tree);
   const closeConfirmationOpen =
     controller.closeConfirmation.kind === "requested";
 
   return (
-    <main className="flex min-h-dvh w-full flex-col bg-neutral-950">
+    <main
+      className="flex min-h-dvh w-full flex-col bg-surface-deepest"
+      data-theme={theme.status.theme}
+    >
       <div className="flex min-h-0 flex-1 flex-col" inert={closeConfirmationOpen}>
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <PaneTreeView
@@ -30,6 +35,7 @@ export function Workspace(): ReactElement {
             onToggleMobileCtrl={controller.onToggleMobileCtrl}
             onConsumeMobileCtrl={controller.onConsumeMobileCtrl}
             resolveMobileCtrlInput={controller.resolveMobileCtrlInput}
+            themeController={theme.controller}
           />
         </div>
         <MobilePaneSwitcher

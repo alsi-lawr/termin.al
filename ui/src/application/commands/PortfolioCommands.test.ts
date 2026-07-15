@@ -14,14 +14,44 @@ import {
   type CommandOutcome,
   type ShellCommandRequest,
 } from "../../domain/terminal/Shell.ts";
+import {
+  createThemeState,
+  systemThemePreference,
+  themeNames,
+  themeStatus,
+  withThemePreference,
+  type ThemeController,
+  type ThemeName,
+  type ThemeState,
+  type ThemeStatus,
+} from "../../theme/Theme.ts";
 import { executeCommandLine } from "./CommandExecution.ts";
 import { createPaneCommandDefinition } from "./PaneCommand.ts";
 import { createPortfolioCommandDefinitions } from "./PortfolioCommands.ts";
 import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
 import { createCommandRegistry, type CommandRegistry } from "./CommandRegistry.ts";
 
+function createThemeController(): ThemeController {
+  let state: ThemeState = createThemeState(systemThemePreference, "dark");
+  const status = (): ThemeStatus => themeStatus(state);
+
+  return {
+    list: () => themeNames,
+    current: status,
+    set: (theme: ThemeName) => {
+      state = withThemePreference(state, { kind: "explicit", theme });
+      return status();
+    },
+    followSystem: () => {
+      state = withThemePreference(state, systemThemePreference);
+      return status();
+    },
+  };
+}
+
 function createRegistry(
   documents: VirtualDocumentSupplier = developmentFixtureCorpus.documents,
+  themes: ThemeController = createThemeController(),
 ): CommandRegistry {
   return createCommandRegistry({
     commands: [
@@ -33,6 +63,7 @@ function createRegistry(
       ...createPortfolioCommandDefinitions({
         filesystem: developmentFixtureCorpus.filesystem,
         documents,
+        themes,
       }),
       createPaneCommandDefinition(createPaneId("pane-1"), () => ({
         kind: "rejected",
@@ -167,6 +198,49 @@ test("routes portfolio supplier failures through the execution boundary", async 
   );
 });
 
+test("lists, selects, and clears terminal theme selections", async () => {
+  const themes = createThemeController();
+  const registry = createRegistry(developmentFixtureCorpus.documents, themes);
+  const current = succeeded(await execute("theme", registry));
+  const list = succeeded(await execute("theme list", registry));
+  const set = succeeded(await execute("theme set gruber-lighter", registry));
+  const explicit = succeeded(await execute("theme", registry));
+  const system = succeeded(await execute("theme system", registry));
+  const invalid = await execute("theme set not-a-theme", registry);
+
+  const currentOutput = current.outputs[0];
+  const listOutput = list.outputs[0];
+  const setOutput = set.outputs[0];
+  const explicitOutput = explicit.outputs[0];
+  const systemOutput = system.outputs[0];
+
+  if (
+    currentOutput === undefined ||
+    listOutput === undefined ||
+    setOutput === undefined ||
+    explicitOutput === undefined ||
+    systemOutput === undefined ||
+    currentOutput.kind !== "text" ||
+    listOutput.kind !== "text" ||
+    setOutput.kind !== "text" ||
+    explicitOutput.kind !== "text" ||
+    systemOutput.kind !== "text"
+  ) {
+    assert.fail("Expected terminal theme text output.");
+  }
+
+  assert.equal(currentOutput.text, "Current theme: gruber-dark-muted (system)");
+  assert.match(listOutput.text, /gruber-lighter/u);
+  assert.match(listOutput.text, /gruber-dark-muted \(current\)/u);
+  assert.equal(setOutput.text, "Theme set: Current theme: gruber-lighter (explicit)");
+  assert.equal(explicitOutput.text, "Current theme: gruber-lighter (explicit)");
+  assert.equal(
+    systemOutput.text,
+    "Theme follows system: Current theme: gruber-dark-muted (system)",
+  );
+  assert.equal(invalid.kind, "failed");
+});
+
 test("provides discoverable navigation commands and useful unavailable-feature diagnostics", async () => {
   const registry = createRegistry();
   const about = succeeded(await execute("about", registry));
@@ -174,7 +248,7 @@ test("provides discoverable navigation commands and useful unavailable-feature d
   const cv = await execute("cv", registry);
   const invalidOpen = await execute("open --split diagonal about.md", registry);
   const unavailable = await Promise.all(
-    ["theme list", "stats", "login", "logout", "edit about.md"].map(
+    ["stats", "login", "logout", "edit about.md"].map(
       async (source) => execute(source, registry),
     ),
   );
@@ -196,6 +270,6 @@ test("provides discoverable navigation commands and useful unavailable-feature d
   assert.equal(invalidOpen.kind, "failed");
   assert.deepEqual(
     unavailable.map((outcome) => outcome.kind),
-    ["failed", "failed", "failed", "failed", "failed"],
+    ["failed", "failed", "failed", "failed"],
   );
 });

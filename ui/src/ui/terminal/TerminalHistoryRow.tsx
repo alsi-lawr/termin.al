@@ -13,9 +13,9 @@ type TerminalHistoryRowProps = Readonly<{
 }>;
 
 const outcomeClassMap = {
-  succeeded: "text-green-400",
-  failed: "text-red-400",
-  cancelled: "text-neutral-500",
+  succeeded: "text-diagnostic-success",
+  failed: "text-diagnostic-error",
+  cancelled: "text-text-muted",
 } as const satisfies Readonly<{
   [Kind in ShellHistoryOutcome["kind"]]: string;
 }>;
@@ -67,7 +67,7 @@ export function TerminalHistoryRow({
       aria-labelledby={commandLabelId}
     >
       <div id={commandLabelId} className="whitespace-pre-wrap wrap-break-words">
-        <span className="mr-1 text-neutral-500" aria-hidden="true">
+        <span className="mr-1 text-text-muted" aria-hidden="true">
           &gt;
         </span>
         <span className={outcomeClassMap[entry.outcome.kind]}>

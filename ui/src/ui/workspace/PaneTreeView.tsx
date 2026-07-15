@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
+import type { ThemeController } from "../../theme/Theme.ts";
 import type {
   PaneId,
   PaneOperation,
@@ -41,6 +42,7 @@ type PaneTreeViewProps = Readonly<{
   resolveMobileCtrlInput: (
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
+  themeController: ThemeController;
 }>;
 
 const firstPaneBasisClass = {
@@ -106,6 +108,7 @@ function PaneLeaf({
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
+  themeController,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -114,7 +117,7 @@ function PaneLeaf({
   };
   const commandHandler: PaneCommandHandler = onOperation;
   const paneClass = isActive
-    ? "h-full min-h-0 min-w-0 flex-1 rounded-md ring-1 ring-green-500"
+    ? "h-full min-h-0 min-w-0 flex-1 rounded-md ring-1 ring-ui-focus"
     : "h-full min-h-0 min-w-0 flex-1 rounded-md";
 
   switch (pane.content.kind) {
@@ -141,6 +144,7 @@ function PaneLeaf({
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
             paneCommandHandler={commandHandler}
+            themeController={themeController}
           />
         </div>
       );
@@ -203,6 +207,7 @@ export function PaneTreeView({
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
+  themeController,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -220,6 +225,7 @@ export function PaneTreeView({
         onToggleMobileCtrl={onToggleMobileCtrl}
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}
+        themeController={themeController}
       />
     );
   }
@@ -233,8 +239,8 @@ export function PaneTreeView({
     tree.orientation === "horizontal" ? "flex-col md:flex-row" : "flex-col";
   const dividerClass =
     tree.orientation === "horizontal"
-      ? "md:border-r md:border-neutral-800"
-      : "md:border-b md:border-neutral-800";
+      ? "md:border-r md:border-surface-border"
+      : "md:border-b md:border-surface-border";
 
   return (
     <div className={"flex min-h-0 min-w-0 flex-1 " + directionClass}>
@@ -265,6 +271,7 @@ export function PaneTreeView({
           onToggleMobileCtrl={onToggleMobileCtrl}
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}
+          themeController={themeController}
         />
       </div>
       <div
@@ -290,6 +297,7 @@ export function PaneTreeView({
           onToggleMobileCtrl={onToggleMobileCtrl}
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}
+          themeController={themeController}
         />
       </div>
     </div>

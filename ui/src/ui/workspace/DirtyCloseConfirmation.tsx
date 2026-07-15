@@ -64,25 +64,25 @@ export function DirtyCloseConfirmation({
 
   return (
     <div
-      className="fixed inset-0 z-10 grid place-items-center bg-neutral-950/80 p-4"
+      className="fixed inset-0 z-10 grid place-items-center bg-surface-deepest/80 p-4"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="dirty-pane-close-title"
       aria-describedby="dirty-pane-close-description"
       onKeyDown={handleKeyDown}
     >
-      <section className="w-full max-w-md rounded-md border border-neutral-700 bg-neutral-900 p-4 text-neutral-100">
+      <section className="w-full max-w-md rounded-md border border-surface-border bg-surface-dark p-4 text-text-primary">
         <h2 id="dirty-pane-close-title" className="text-lg font-semibold">
           Discard editor changes?
         </h2>
-        <p id="dirty-pane-close-description" className="mt-2 text-neutral-300">
+        <p id="dirty-pane-close-description" className="mt-2 text-text-bright">
           {paneLabel(pane)} has unsaved changes.
         </p>
         <div className="mt-4 flex justify-end gap-2">
           <button
             ref={cancelRef}
             type="button"
-            className="rounded border border-neutral-600 px-3 py-2"
+            className="rounded border border-surface-border px-3 py-2"
             onClick={onCancel}
           >
             Keep editing
@@ -90,7 +90,7 @@ export function DirtyCloseConfirmation({
           <button
             ref={confirmRef}
             type="button"
-            className="rounded border border-red-500 px-3 py-2 text-red-200"
+            className="rounded border border-diagnostic-error px-3 py-2 text-diagnostic-error"
             onClick={onConfirm}
           >
             Close pane

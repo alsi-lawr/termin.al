@@ -113,7 +113,7 @@ export function TerminalViewport({
   };
 
   return (
-    <div className="relative h-full min-h-0 rounded-md bg-neutral-950 font-mono text-sm text-neutral-100">
+    <div className="relative h-full min-h-0 rounded-md bg-surface-deepest font-mono text-sm text-text-primary">
       <div
         id={scrollbackId}
         ref={viewportRef}
@@ -139,7 +139,7 @@ export function TerminalViewport({
             role="status"
             aria-live="polite"
             aria-atomic="true"
-            className="whitespace-pre-wrap wrap-break-words text-red-400"
+            className="whitespace-pre-wrap wrap-break-words text-diagnostic-error"
           >
             {transientDiagnostic}
           </div>
@@ -157,7 +157,7 @@ export function TerminalViewport({
       {scrollMode.kind === "manual" ? (
         <button
           type="button"
-          className="absolute bottom-4 right-4 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-100"
+          className="absolute bottom-4 right-4 rounded-md border border-surface-border bg-surface-deepest px-2 py-1 text-text-primary"
           aria-controls={scrollbackId}
           onClick={followLatest}
         >

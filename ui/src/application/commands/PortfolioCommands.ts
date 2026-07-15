@@ -18,6 +18,11 @@ import {
   type CommandOutcome,
   type ShellOutput,
 } from "../../domain/terminal/Shell.ts";
+import {
+  themeNameFrom,
+  type ThemeController,
+  type ThemeStatus,
+} from "../../theme/Theme.ts";
 import type {
   CommandDefinition,
   CommandExecutionContext,
@@ -28,6 +33,7 @@ import type {
 export type CreatePortfolioCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  themes: ThemeController;
 }>;
 
 type OpenCommandOptions = Readonly<{
@@ -371,6 +377,80 @@ function createUnavailableCommand(
   };
 }
 
+function currentThemeMessage(status: ThemeStatus): string {
+  switch (status.preference.kind) {
+    case "system":
+      return `Current theme: ${status.theme} (system)`;
+    case "explicit":
+      return `Current theme: ${status.theme} (explicit)`;
+  }
+}
+
+function themeListMessage(themes: ThemeController): string {
+  const current = themes.current().theme;
+  const entries = themes.list().map((theme) =>
+    theme === current ? `${theme} (current)` : theme,
+  );
+
+  return `Available themes:\n${entries.join("\n")}`;
+}
+
+function themeOutput(id: string, text: string): CommandOutcome {
+  return succeededOutcome([
+    {
+      kind: "text",
+      id: createShellOutputId(id),
+      text,
+    },
+  ]);
+}
+
+function createThemeCommand(themes: ThemeController): CommandDefinition {
+  return {
+    metadata: {
+      group: "application",
+      name: "theme",
+      aliases: [],
+      summary: "List, select, or follow the system terminal theme.",
+      usage: "theme [list|set <name>|system]",
+      examples: ["theme list", "theme set gruber-darker", "theme system"],
+    },
+    execute: async (invocation) => {
+      const [operation, value, ...remaining] = invocation.arguments;
+
+      if (operation === undefined) {
+        return themeOutput("theme-current", currentThemeMessage(themes.current()));
+      }
+
+      if (operation === "list" && value === undefined) {
+        return themeOutput("theme-list", themeListMessage(themes));
+      }
+
+      if (operation === "system" && value === undefined) {
+        return themeOutput(
+          "theme-system",
+          `Theme follows system: ${currentThemeMessage(themes.followSystem())}`,
+        );
+      }
+
+      if (operation === "set" && value !== undefined && remaining.length === 0) {
+        const theme = themeNameFrom(value);
+
+        if (theme === undefined) {
+          return rejectedOutcome("theme", `Unknown theme: ${value}`);
+        }
+
+        return themeOutput(
+          "theme-set",
+          `Theme set: ${currentThemeMessage(themes.set(theme))}`,
+        );
+      }
+
+      return rejectedOutcome("theme", "Usage: theme [list|set <name>|system]");
+    },
+  };
+}
+
 function createNavigationCommand(
   name:
     | "about"
@@ -432,17 +512,12 @@ function createNavigationCommand(
 export function createPortfolioCommandDefinitions({
   filesystem,
   documents,
+  themes,
 }: CreatePortfolioCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   return [
     createHelpCommand(),
     createOpenCommand(filesystem, documents),
-    createUnavailableCommand(
-      "theme",
-      "Change the terminal theme.",
-      "theme <list|set|system>",
-      "theme list",
-      "Themes are unavailable until the theme work is implemented.",
-    ),
+    createThemeCommand(themes),
     createUnavailableCommand(
       "stats",
       "Show aggregate site statistics.",

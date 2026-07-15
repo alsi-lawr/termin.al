@@ -38,7 +38,7 @@ export function TerminalDiagnosticBlock({
   diagnostic,
 }: TerminalDiagnosticBlockProps): ReactElement {
   return (
-    <div className="whitespace-pre-wrap wrap-break-words text-red-400">
+    <div className="whitespace-pre-wrap wrap-break-words text-diagnostic-error">
       <span className="font-semibold">{diagnosticLabel(diagnostic)}:</span>{" "}
       <span>{diagnostic.message}</span>
     </div>
@@ -59,7 +59,7 @@ export function TerminalOutputBlock({
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-left">
             <caption className="sr-only">Command output table</caption>
-            <thead className="border-b border-neutral-800 text-neutral-500">
+            <thead className="border-b border-surface-border text-text-muted">
               <tr>
                 {output.columns.map((column) => (
                   <th
@@ -75,7 +75,7 @@ export function TerminalOutputBlock({
             </thead>
             <tbody>
               {output.rows.map((row) => (
-                <tr key={row.id} className="border-b border-neutral-800">
+                <tr key={row.id} className="border-b border-surface-border">
                   {row.cells.map((cell) => (
                     <td
                       key={cell.id}
@@ -96,18 +96,18 @@ export function TerminalOutputBlock({
     case "prompt":
       return (
         <div className="whitespace-pre-wrap wrap-break-words">
-          <span className="font-semibold text-neutral-500">{output.label}:</span>{" "}
+          <span className="font-semibold text-text-muted">{output.label}:</span>{" "}
           <span>{output.message}</span>
         </div>
       );
     case "rich":
       return (
         <section aria-label={output.title}>
-          <h3 className="font-semibold text-green-400">{output.title}</h3>
+          <h3 className="font-semibold text-ui-accent">{output.title}</h3>
           <dl>
             {output.fields.map((field) => (
               <div key={field.id} className="grid grid-cols-1 gap-1 py-1 sm:grid-cols-2">
-                <dt className="font-semibold text-neutral-500">{field.label}</dt>
+                <dt className="font-semibold text-text-muted">{field.label}</dt>
                 <dd className="whitespace-pre-wrap wrap-break-words">{field.value}</dd>
               </div>
             ))}

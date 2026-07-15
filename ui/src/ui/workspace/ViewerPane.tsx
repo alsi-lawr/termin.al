@@ -169,7 +169,7 @@ export function ViewerPane({
     switch (viewer.kind) {
       case "placeholder":
         return (
-          <p className="mt-2 whitespace-pre-wrap wrap-break-words text-neutral-300">
+          <p className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright">
             Viewer placeholder. Content rendering arrives with the Markdown work.
           </p>
         );
@@ -183,19 +183,19 @@ export function ViewerPane({
           return (
             <>
               <p
-                className="mt-2 text-neutral-400"
+                className="mt-2 text-text-muted"
                 role="status"
                 aria-live="polite"
               >
                 Raw pager · {statusText}
               </p>
               <pre
-                className="mt-2 whitespace-pre-wrap wrap-break-words text-neutral-300"
+                className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright"
                 aria-label="Current raw pager page"
               >
                 {rawPagerPageText(viewer.document.text, rawPagerState)}
               </pre>
-              <p className="mt-3 text-xs text-neutral-500">
+              <p className="mt-3 text-xs text-text-muted">
                 ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · Esc/q return
               </p>
             </>
@@ -203,15 +203,15 @@ export function ViewerPane({
         }
 
         return (
-          <pre className="mt-2 whitespace-pre-wrap wrap-break-words text-neutral-300">
+          <pre className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright">
             {viewer.document.text}
           </pre>
         );
       case "directory":
         return (
           <>
-            <p className="mt-2 text-neutral-500">{viewer.path}</p>
-            <ul className="mt-2 space-y-1 text-neutral-300">
+            <p className="mt-2 text-text-muted">{viewer.path}</p>
+            <ul className="mt-2 space-y-1 text-text-bright">
               {viewer.entries.map((entry) => (
                 <li key={entry.name}>
                   {entry.kind === "directory" ? `${entry.name}/` : entry.name}
@@ -227,7 +227,7 @@ export function ViewerPane({
   return (
     <section
       ref={viewerRef}
-      className="flex h-full min-h-0 flex-col rounded-md bg-neutral-950 font-mono text-sm text-neutral-100 outline-none"
+      className="flex h-full min-h-0 flex-col rounded-md bg-surface-deepest font-mono text-sm text-text-primary outline-none"
       tabIndex={0}
       aria-label={title + " viewer"}
       onFocus={onActivate}
@@ -236,11 +236,11 @@ export function ViewerPane({
     >
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold text-green-400">{title}</h2>
+          <h2 className="text-lg font-semibold text-ui-accent">{title}</h2>
           {onClose === undefined ? null : (
             <button
               type="button"
-              className="rounded border border-neutral-700 px-2 py-1 text-neutral-300 hover:border-green-500 hover:text-green-400"
+              className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent"
               onClick={onClose}
             >
               Return

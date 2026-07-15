@@ -35,20 +35,20 @@ export function MobilePaneControls({
 
   return (
     <div
-      className="flex flex-wrap gap-1 border-t border-neutral-800 bg-neutral-950 p-2 md:hidden"
+      className="flex flex-wrap gap-1 border-t border-surface-border bg-surface-deepest p-2 md:hidden"
       role="toolbar"
       aria-label="Mobile terminal controls"
     >
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         onClick={() => sendControl("escape")}
       >
         Esc
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100 aria-pressed:bg-neutral-700"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary aria-pressed:bg-surface-selected"
         aria-pressed={ctrlPressed}
         onClick={onCtrlToggle}
       >
@@ -56,14 +56,14 @@ export function MobilePaneControls({
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         onClick={() => sendControl("tab")}
       >
         Tab
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         aria-label="Move left"
         onClick={() => sendControl("left")}
       >
@@ -71,7 +71,7 @@ export function MobilePaneControls({
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         aria-label="Move down"
         onClick={() => sendControl("down")}
       >
@@ -79,7 +79,7 @@ export function MobilePaneControls({
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         aria-label="Move up"
         onClick={() => sendControl("up")}
       >
@@ -87,7 +87,7 @@ export function MobilePaneControls({
       </button>
       <button
         type="button"
-        className="rounded border border-neutral-700 px-2 py-1 text-neutral-100"
+        className="rounded border border-surface-border px-2 py-1 text-text-primary"
         aria-label="Move right"
         onClick={() => sendControl("right")}
       >
@@ -95,7 +95,7 @@ export function MobilePaneControls({
       </button>
       <button
         type="button"
-        className="rounded border border-green-500 px-2 py-1 text-green-300"
+        className="rounded border border-ui-accent px-2 py-1 text-ui-accent"
         onClick={sendPrefix}
       >
         Prefix

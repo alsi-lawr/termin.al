@@ -35,7 +35,7 @@ export function TerminalStatus({
   completion,
 }: TerminalStatusProps): ReactElement {
   return (
-    <div className="mt-2 text-neutral-500" role="status" aria-live="polite">
+    <div className="mt-2 text-text-muted" role="status" aria-live="polite">
       <span>{statusMessage(status, completion)}</span>
       {completion.kind === "suggestions" ? (
         <span className="ml-2">

@@ -14,6 +14,7 @@ import {
 } from "../../domain/terminal/Shell.ts";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
+import type { ThemeController } from "../../theme/Theme.ts";
 import type {
   PaneShellPresentation,
   PaneShellRuntimeControl,
@@ -76,6 +77,7 @@ type TerminalProps = Readonly<{
   ) => MobileCtrlInputResolution;
   paneCommandHandler: PaneCommandHandler;
   onCloseInlineViewer: (paneId: PaneId) => void;
+  themeController: ThemeController;
   prompt?: string;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
@@ -97,6 +99,7 @@ export function Terminal({
   resolveMobileCtrlInput,
   paneCommandHandler,
   onCloseInlineViewer,
+  themeController,
   prompt = "$",
   secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
@@ -122,6 +125,7 @@ export function Terminal({
         ...createPortfolioCommandDefinitions({
           filesystem: developmentFixtureCorpus.filesystem,
           documents: developmentFixtureCorpus.documents,
+          themes: themeController,
         }),
         createPaneCommandDefinition(paneId, paneCommandHandler),
       ],
@@ -258,7 +262,7 @@ export function Terminal({
 
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 w-full flex-col rounded-md border border-neutral-800 bg-neutral-950 text-neutral-100"
+      className="flex h-full min-h-0 min-w-0 w-full flex-col rounded-md border border-surface-border bg-surface-deepest text-text-primary"
       onClick={focusInputFromTerminal}
       onFocusCapture={onActivate}
     >

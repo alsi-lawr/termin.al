@@ -379,16 +379,16 @@ export function VimEditorPane({
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col rounded-md bg-neutral-950 font-mono text-sm text-neutral-100"
+      className="flex h-full min-h-0 flex-col rounded-md bg-surface-deepest font-mono text-sm text-text-primary"
       aria-label={title + " editor"}
       onFocus={onActivate}
     >
       <div className="flex min-h-0 flex-1 flex-col p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h2 className="font-semibold text-green-400">{title}</h2>
+          <h2 className="font-semibold text-ui-accent">{title}</h2>
           <span
             id={modeStatusId}
-            className="text-neutral-500"
+            className="text-text-muted"
             role="status"
             aria-live="polite"
           >
@@ -397,7 +397,7 @@ export function VimEditorPane({
         </div>
         <textarea
           ref={inputRef}
-          className="min-h-0 flex-1 resize-none rounded border border-neutral-800 bg-neutral-950 p-2 text-neutral-100 outline-none focus:border-green-500"
+          className="min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 text-text-primary outline-none focus:border-ui-focus"
           value={vimBufferText(buffer)}
           aria-label={title + " editor text"}
           aria-describedby={modeStatusId}
@@ -414,13 +414,13 @@ export function VimEditorPane({
           onFocus={onActivate}
         />
         {buffer.mode.kind === "command" ? (
-          <div className="mt-2 text-neutral-300" role="status" aria-live="polite">
+          <div className="mt-2 text-text-bright" role="status" aria-live="polite">
             {buffer.mode.prompt}
             {buffer.mode.input}
           </div>
         ) : null}
         {commandEffect === undefined ? null : (
-          <div className="mt-2 text-neutral-500" role="status" aria-live="polite">
+          <div className="mt-2 text-text-muted" role="status" aria-live="polite">
             {commandEffect}
           </div>
         )}
