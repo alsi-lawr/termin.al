@@ -47,8 +47,8 @@ import {
 import {
   vimBufferCursorOffset,
   vimBufferText,
-  vimPromptMode,
 } from "../../domain/vim/VimBuffer.ts";
+import { vimPromptMode } from "../../domain/terminal/VimPrompt.ts";
 import {
   MobilePaneControls,
   type MobilePaneControl,

@@ -1,20 +1,22 @@
 import {
   VimMode,
-  applyVimPromptKey,
   backspaceVimInsertText,
-  createEmptyVimPromptBuffer,
-  createVimPromptBuffer,
   deleteVimInsertText,
   insertVimText,
   moveVimInsertCursorToTextOffset,
   replaceVimInsertText,
   vimBufferCursorOffset,
   vimBufferText,
-  vimPromptMode,
   type VimBuffer,
+} from "../vim/VimBuffer.ts";
+import {
+  applyVimPromptKey,
+  createEmptyVimPrompt,
+  createVimPrompt,
+  vimPromptMode,
   type VimPromptKey,
   type VimPromptMode,
-} from "../vim/VimBuffer.ts";
+} from "./VimPrompt.ts";
 import {
   createCompletionEdit,
   type CompletionCandidate,
@@ -528,7 +530,7 @@ function createSecretPromptState(
 ): SecretPromptState {
   return {
     request,
-    buffer: createEmptyVimPromptBuffer(),
+    buffer: createEmptyVimPrompt(),
   };
 }
 
@@ -568,7 +570,7 @@ function browseOlderHistory(state: ShellState): ShellState {
 
   return {
     ...state,
-    input: createVimPromptBuffer({
+    input: createVimPrompt({
       text: entry.source,
       mode: VimMode.Normal,
       register: state.input.register,
@@ -609,7 +611,7 @@ function browseNewerHistory(state: ShellState): ShellState {
 
   return {
     ...state,
-    input: createVimPromptBuffer({
+    input: createVimPrompt({
       text: entry.source,
       mode: VimMode.Normal,
       register: state.input.register,
@@ -725,7 +727,7 @@ export function createShellState({
     id,
     sessionId,
     currentDirectory,
-    input: createEmptyVimPromptBuffer(),
+    input: createEmptyVimPrompt(),
     secretPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
     history: [],
@@ -915,7 +917,7 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyVimPromptBuffer(),
+        input: createEmptyVimPrompt(),
         lifecycle: { kind: "running", command },
         commandHistory,
         historyNavigation: { kind: "not-browsing" },
@@ -961,7 +963,7 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyVimPromptBuffer(),
+        input: createEmptyVimPrompt(),
         historyNavigation: { kind: "not-browsing" },
         completion: { kind: "idle" },
       };

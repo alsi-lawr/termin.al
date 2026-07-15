@@ -12,9 +12,11 @@ import {
 import {
   vimBufferCursorOffset,
   vimBufferText,
+} from "../../domain/vim/VimBuffer.ts";
+import {
   vimPromptMode,
   type VimPromptKey,
-} from "../../domain/vim/VimBuffer.ts";
+} from "../../domain/terminal/VimPrompt.ts";
 import {
   executeCommandLine,
 } from "../../application/commands/CommandExecution.ts";

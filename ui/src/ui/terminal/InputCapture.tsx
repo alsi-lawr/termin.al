@@ -17,7 +17,7 @@ import {
   normalVimPromptKeyFromKeyboard,
   type VimPromptKey,
   type VimPromptMode,
-} from "../../domain/vim/VimBuffer.ts";
+} from "../../domain/terminal/VimPrompt.ts";
 import {
   moveNativeInputSelectionLeft,
   moveNativeInputSelectionRight,
