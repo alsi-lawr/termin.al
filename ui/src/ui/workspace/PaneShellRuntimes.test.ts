@@ -27,7 +27,6 @@ import {
   applyPaneShellAction,
   closePaneShellViewer,
   createPaneShellRuntimes,
-  disposePaneShellRuntimes,
   hasPaneShellRuntime,
   paneShellRuntime,
   reconcilePaneShellRuntimes,
@@ -346,37 +345,15 @@ test("preserves runtime controls across transforms and disposes them when a pane
   assert.equal(completionController.signal.aborted, true);
   assert.equal(hasPaneShellRuntime(runtimes, secondPaneId), false);
   assert.equal(secondRuntime.control.startCompletion(), undefined);
-});
-
-test("releases pane runtime controls when the workspace unmounts", () => {
-  const workspace = createPaneWorkspace({
-    initialContent: createShellPaneContent(),
-  });
-  let runtimes = createPaneShellRuntimes({
-    workspace,
-    currentDirectory: virtualHomeDirectory(),
-  });
-  const paneId = workspace.activePaneId;
-  const runtime = paneShellRuntime(runtimes, paneId);
-  runtimes = submitRunningCommand(runtimes, paneId);
-  const state = stateFor(runtimes, paneId);
-
-  if (state.lifecycle.kind !== "running") {
-    assert.fail("Expected a running command.");
-  }
-
-  const commandController = runtime.control.startCommand(state.lifecycle.command.id);
-  const completionController = runtime.control.startCompletion();
-
-  if (commandController === undefined || completionController === undefined) {
-    assert.fail("Expected the shell runtime to start command and completion work.");
-  }
-
-  disposePaneShellRuntimes(runtimes);
-
-  assert.equal(commandController.signal.aborted, true);
-  assert.equal(completionController.signal.aborted, true);
-  assert.equal(runtime.control.startCompletion(), undefined);
+  assert.equal(
+    secondRuntime.control.finishCommand(
+      running.lifecycle.command.id,
+      commandController,
+      successfulCommandOutcome(),
+    ),
+    false,
+  );
+  assert.equal(secondRuntime.control.finishCompletion(completionController), false);
 });
 
 test("cancels the original command after its pane moves and rejects a late result", () => {

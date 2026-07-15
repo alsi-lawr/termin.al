@@ -239,14 +239,6 @@ export function reconcilePaneShellRuntimes({
   return nextRuntimes;
 }
 
-export function disposePaneShellRuntimes(
-  runtimes: PaneShellRuntimes,
-): void {
-  for (const runtime of runtimes.values()) {
-    runtime.control.dispose();
-  }
-}
-
 export function hasPaneShellRuntime(
   runtimes: PaneShellRuntimes,
   paneId: PaneId,

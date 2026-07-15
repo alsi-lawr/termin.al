@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import {
@@ -15,7 +15,6 @@ import {
   applyPaneShellAction,
   closePaneShellViewer,
   createPaneShellRuntimes,
-  disposePaneShellRuntimes,
   hasPaneShellRuntime,
   reconcilePaneShellRuntimes,
   type PaneShellRuntimes,
@@ -69,13 +68,6 @@ export function usePaneWorkspace(): PaneWorkspaceController {
   const workspaceRef = useRef(workspace);
   const shellRuntimesRef = useRef(shellRuntimes);
   const prefixState = useRef<PanePrefixState>(initialPanePrefixState);
-
-  useEffect(
-    () => () => {
-      disposePaneShellRuntimes(shellRuntimesRef.current);
-    },
-    [],
-  );
 
   const applyOperation = useCallback(
     (operation: PaneOperation): PaneOperationResult => {
