@@ -162,6 +162,9 @@ function PaneLeaf({
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
+            onClose={() => {
+              onOperation({ kind: "close" });
+            }}
           />
         </div>
       );
