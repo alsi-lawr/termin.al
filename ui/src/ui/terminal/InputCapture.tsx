@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
@@ -22,6 +23,10 @@ import {
   moveNativeInputSelectionRight,
   normalizeNativeInputSelection,
 } from "./UnicodeUiBoundary.ts";
+import {
+  selectInputCaptureControl,
+  type InputCapturePromptKind,
+} from "./InputCaptureControl.ts";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -42,7 +47,7 @@ type InputCaptureProps = Readonly<{
   value: string;
   cursor: number;
   mode: PromptMode;
-  isSecret: boolean;
+  promptKind: InputCapturePromptKind;
   isActive: boolean;
   focusVersion: number;
   onNativeValueChange: (value: string, cursor: number) => void;
@@ -58,7 +63,9 @@ type InputCaptureProps = Readonly<{
   ) => InputCapturePaneKeyResult;
 }>;
 
-function selectionCursor(element: HTMLTextAreaElement): number {
+type NativeInputControlElement = HTMLInputElement | HTMLTextAreaElement;
+
+function selectionCursor(element: NativeInputControlElement): number {
   return normalizeNativeInputSelection(
     element.value,
     element.selectionEnd ?? element.value.length,
@@ -67,8 +74,15 @@ function selectionCursor(element: HTMLTextAreaElement): number {
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
   function InputCapture(props, ref): ReactElement {
-    const inputRef = useRef<HTMLTextAreaElement | null>(null);
+    const control = selectInputCaptureControl(props.promptKind);
+    const inputRef = useRef<NativeInputControlElement | null>(null);
     const composing = useRef(false);
+    const setInputRef = useCallback(
+      (element: NativeInputControlElement | null): void => {
+        inputRef.current = element;
+      },
+      [],
+    );
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus(),
@@ -85,7 +99,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       if (props.isActive) {
         inputRef.current?.focus({ preventScroll: true });
       }
-    }, [props.focusVersion, props.isActive]);
+    }, [control.element, props.focusVersion, props.isActive]);
 
     useLayoutEffect(() => {
       const input = inputRef.current;
@@ -96,10 +110,10 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
 
       const cursor = normalizeNativeInputSelection(props.value, props.cursor);
       input.setSelectionRange(cursor, cursor);
-    }, [props.cursor, props.value]);
+    }, [control.element, props.cursor, props.value]);
 
     const synchroniseNativeValue = (
-      event: SyntheticEvent<HTMLTextAreaElement>,
+      event: SyntheticEvent<NativeInputControlElement>,
     ): void => {
       if (props.mode.kind !== "insert") {
         return;
@@ -109,12 +123,14 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       props.onNativeValueChange(input.value, selectionCursor(input));
     };
 
-    const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
+    const handleChange = (
+      event: ChangeEvent<NativeInputControlElement>,
+    ): void => {
       synchroniseNativeValue(event);
     };
 
     const handleSelectionChange = (
-      event: SyntheticEvent<HTMLTextAreaElement>,
+      event: SyntheticEvent<NativeInputControlElement>,
     ): void => {
       if (props.mode.kind !== "insert" || composing.current) {
         return;
@@ -128,19 +144,23 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     };
 
     const handleCompositionEnd = (
-      event: CompositionEvent<HTMLTextAreaElement>,
+      event: CompositionEvent<NativeInputControlElement>,
     ): void => {
       composing.current = false;
       synchroniseNativeValue(event);
     };
 
-    const handleBeforeInput = (event: FormEvent<HTMLTextAreaElement>): void => {
+    const handleBeforeInput = (
+      event: FormEvent<NativeInputControlElement>,
+    ): void => {
       if (props.mode.kind === "normal" && !composing.current) {
         event.preventDefault();
       }
     };
 
-    const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>): void => {
+    const handlePaste = (
+      event: ClipboardEvent<NativeInputControlElement>,
+    ): void => {
       if (props.mode.kind !== "insert") {
         event.preventDefault();
         return;
@@ -151,7 +171,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     };
 
     const handleNormalKey = (
-      event: KeyboardEvent<HTMLTextAreaElement>,
+      event: KeyboardEvent<NativeInputControlElement>,
     ): void => {
       const match = normalPromptKeyFromKeyboard(
         event.key,
@@ -164,7 +184,9 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       }
     };
 
-    const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    const handleKeyDown = (
+      event: KeyboardEvent<NativeInputControlElement>,
+    ): void => {
       if (event.nativeEvent.isComposing || composing.current) {
         return;
       }
@@ -238,29 +260,29 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       }
     };
 
-    const inputLabel = props.isSecret
-      ? "Secret terminal input"
-      : "Terminal command input";
+    const sharedControlProps = {
+      ref: setInputRef,
+      value: props.value,
+      onKeyDown: handleKeyDown,
+      onBeforeInput: handleBeforeInput,
+      onChange: handleChange,
+      onSelect: handleSelectionChange,
+      onCompositionStart: handleCompositionStart,
+      onCompositionEnd: handleCompositionEnd,
+      onPaste: handlePaste,
+      onFocus: props.onFocus,
+      className: "sr-only",
+      autoCapitalize: "off",
+      autoComplete: "off",
+      autoCorrect: "off",
+      spellCheck: false,
+      "aria-label": control.accessibleName,
+    };
 
-    return (
-      <textarea
-        ref={inputRef}
-        value={props.value}
-        onKeyDown={handleKeyDown}
-        onBeforeInput={handleBeforeInput}
-        onChange={handleChange}
-        onSelect={handleSelectionChange}
-        onCompositionStart={handleCompositionStart}
-        onCompositionEnd={handleCompositionEnd}
-        onPaste={handlePaste}
-        onFocus={props.onFocus}
-        className="sr-only"
-        autoCapitalize="off"
-        autoComplete="off"
-        autoCorrect="off"
-        spellCheck={false}
-        aria-label={inputLabel}
-      />
-    );
+    if (control.element === "input") {
+      return <input {...sharedControlProps} type={control.inputType} />;
+    }
+
+    return <textarea {...sharedControlProps} />;
   },
 );

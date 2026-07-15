@@ -278,7 +278,7 @@ export function Terminal({
         value={editor.buffer.value}
         cursor={editor.buffer.cursor}
         mode={editor.buffer.mode}
-        isSecret={activePrompt.kind === "secret"}
+        promptKind={activePrompt.kind}
         isActive={isActive}
         focusVersion={focusVersion}
         onInsertText={shell.insertText}
