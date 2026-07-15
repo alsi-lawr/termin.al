@@ -14,12 +14,28 @@ import {
 import {
   consumePendingSecretPromptEffect,
   createSecretPromptEffectConsumptionState,
+  shouldApplySecretPromptEffectDiagnostic,
+  type SecretPromptEffectConsumptionDiagnostic,
+  type SecretPromptEffectConsumptionState,
 } from "./SecretPromptEffectConsumption.ts";
+import type { SecretPromptOutcomeHandler } from "./SecretPromptDelivery.ts";
 
 type SecretSubmission = Readonly<{
   request: SecretPromptRequest;
   state: ShellState;
   effect: Extract<SecretPromptEffect, { kind: "secret-submitted" }>;
+}>;
+
+type SecretCancellation = Readonly<{
+  request: SecretPromptRequest;
+  state: ShellState;
+  effect: Extract<SecretPromptEffect, { kind: "secret-cancelled" }>;
+}>;
+
+type DeferredSecretPromptHandler = Readonly<{
+  handler: SecretPromptOutcomeHandler;
+  resolve: () => void;
+  reject: (error: Error) => void;
 }>;
 
 function createSecretSubmission(value: string): SecretSubmission {
@@ -44,6 +60,85 @@ function createSecretSubmission(value: string): SecretSubmission {
   }
 
   return { request, state: submitted, effect: submitted.pendingEffect };
+}
+
+function createSecretCancellation(value: string): SecretCancellation {
+  const request = createSecretPromptRequest(
+    createSecretPromptId("cv-key"),
+    "CV access key",
+  );
+  const active = reduceShellState(
+    createShellState({
+      id: createShellId("terminal"),
+      sessionId: createShellSessionId("session"),
+      scrollbackLimit: 3,
+      commandHistoryLimit: 3,
+    }),
+    { kind: "secret.begin", request },
+  );
+  const typed = reduceShellState(active, { kind: "input.insert", text: value });
+  const cancelled = reduceShellState(typed, { kind: "prompt.cancel" });
+
+  if (cancelled.pendingEffect.kind !== "secret-cancelled") {
+    assert.fail("Expected a secret cancellation effect.");
+  }
+
+  return { request, state: cancelled, effect: cancelled.pendingEffect };
+}
+
+function createDeferredSecretPromptHandler(): DeferredSecretPromptHandler {
+  let resolveDeferred: (() => void) | undefined;
+  let rejectDeferred: ((error: Error) => void) | undefined;
+  const promise = new Promise<void>((resolve, reject) => {
+    resolveDeferred = resolve;
+    rejectDeferred = (error: Error) => reject(error);
+  });
+
+  return {
+    handler: () => promise,
+    resolve: () => {
+      const resolve = resolveDeferred;
+
+      if (resolve === undefined) {
+        throw new Error("Expected a deferred handler resolver.");
+      }
+
+      resolve();
+    },
+    reject: (error) => {
+      const reject = rejectDeferred;
+
+      if (reject === undefined) {
+        throw new Error("Expected a deferred handler rejecter.");
+      }
+
+      reject(error);
+    },
+  };
+}
+
+function clearSecretPromptEffect(
+  state: SecretPromptEffectConsumptionState,
+): SecretPromptEffectConsumptionState {
+  const clearance = consumePendingSecretPromptEffect({
+    state,
+    effect: { kind: "none" },
+    handler: undefined,
+  });
+
+  if (clearance.kind !== "not-secret") {
+    assert.fail("Expected the consumed secret effect to clear.");
+  }
+
+  return clearance.state;
+}
+
+function assertSecretIsNotRetained(state: ShellState, secret: string): void {
+  assert.deepEqual(state.pendingEffect, { kind: "none" });
+  assert.deepEqual(state.history, []);
+  assert.deepEqual(state.commandHistory, []);
+  assert.deepEqual(state.completion, { kind: "idle" });
+  assert.equal(JSON.stringify(state).includes(secret), false);
 }
 
 test("consumes one correlated secret submission without retaining it", async () => {
@@ -179,4 +274,201 @@ test("reports a secret-free diagnostic when a submission handler fails", async (
   });
   assert.equal(JSON.stringify(diagnostic).includes(secret), false);
   assert.equal(JSON.stringify(consumption.state).includes(secret), false);
+});
+
+test("suppresses a stale failed secret delivery after a later success with the same request ID", async () => {
+  const olderSecret = "older-sensitive-value";
+  const newerSecret = "newer-sensitive-value";
+  const olderSubmission = createSecretSubmission(olderSecret);
+  const newerSubmission = createSecretSubmission(newerSecret);
+  const olderHandler = createDeferredSecretPromptHandler();
+  const newerHandler = createDeferredSecretPromptHandler();
+
+  assert.equal(olderSubmission.request.id, newerSubmission.request.id);
+
+  const olderConsumption = consumePendingSecretPromptEffect({
+    state: createSecretPromptEffectConsumptionState(),
+    effect: olderSubmission.effect,
+    handler: olderHandler.handler,
+  });
+
+  if (olderConsumption.kind !== "consumed") {
+    assert.fail("Expected the older secret effect to be consumed.");
+  }
+
+  const olderState = reduceShellState(
+    olderSubmission.state,
+    olderConsumption.action,
+  );
+  const afterOlderConsumption = clearSecretPromptEffect(olderConsumption.state);
+  const newerConsumption = consumePendingSecretPromptEffect({
+    state: afterOlderConsumption,
+    effect: newerSubmission.effect,
+    handler: newerHandler.handler,
+  });
+
+  if (newerConsumption.kind !== "consumed") {
+    assert.fail("Expected the newer secret effect to be consumed.");
+  }
+
+  const newerState = reduceShellState(
+    newerSubmission.state,
+    newerConsumption.action,
+  );
+  const afterNewerConsumption = clearSecretPromptEffect(newerConsumption.state);
+  let visibleDiagnostic: SecretPromptEffectConsumptionDiagnostic | undefined;
+
+  newerHandler.resolve();
+  const newerDiagnostic = await newerConsumption.diagnostic;
+
+  if (
+    shouldApplySecretPromptEffectDiagnostic(
+      afterNewerConsumption,
+      newerConsumption.generation,
+    )
+  ) {
+    visibleDiagnostic = newerDiagnostic;
+  }
+
+  olderHandler.reject(new Error(olderSecret));
+  const olderDiagnostic = await olderConsumption.diagnostic;
+
+  assert.equal(newerDiagnostic, undefined);
+  assert.deepEqual(olderDiagnostic, {
+    kind: "secret-prompt-delivery-failed",
+    message: "Secret prompt delivery failed.",
+  });
+  assert.equal(
+    shouldApplySecretPromptEffectDiagnostic(
+      afterNewerConsumption,
+      olderConsumption.generation,
+    ),
+    false,
+  );
+
+  if (
+    shouldApplySecretPromptEffectDiagnostic(
+      afterNewerConsumption,
+      olderConsumption.generation,
+    )
+  ) {
+    visibleDiagnostic = olderDiagnostic;
+  }
+
+  assert.equal(visibleDiagnostic, undefined);
+  assertSecretIsNotRetained(olderState, olderSecret);
+  assertSecretIsNotRetained(newerState, newerSecret);
+  assert.equal(
+    JSON.stringify({ olderConsumption, newerConsumption, visibleDiagnostic }).includes(
+      olderSecret,
+    ),
+    false,
+  );
+  assert.equal(
+    JSON.stringify({ olderConsumption, newerConsumption, visibleDiagnostic }).includes(
+      newerSecret,
+    ),
+    false,
+  );
+});
+
+test("suppresses a stale failed secret delivery after a later cancellation with the same request ID", async () => {
+  const olderSecret = "older-sensitive-value";
+  const cancelledSecret = "cancelled-sensitive-value";
+  const olderSubmission = createSecretSubmission(olderSecret);
+  const laterCancellation = createSecretCancellation(cancelledSecret);
+  const olderHandler = createDeferredSecretPromptHandler();
+  let cancellationHandlerCalls = 0;
+
+  assert.equal(olderSubmission.request.id, laterCancellation.request.id);
+
+  const olderConsumption = consumePendingSecretPromptEffect({
+    state: createSecretPromptEffectConsumptionState(),
+    effect: olderSubmission.effect,
+    handler: olderHandler.handler,
+  });
+
+  if (olderConsumption.kind !== "consumed") {
+    assert.fail("Expected the older secret effect to be consumed.");
+  }
+
+  const olderState = reduceShellState(
+    olderSubmission.state,
+    olderConsumption.action,
+  );
+  const afterOlderConsumption = clearSecretPromptEffect(olderConsumption.state);
+  const cancellationConsumption = consumePendingSecretPromptEffect({
+    state: afterOlderConsumption,
+    effect: laterCancellation.effect,
+    handler: () => {
+      cancellationHandlerCalls += 1;
+    },
+  });
+
+  if (cancellationConsumption.kind !== "consumed") {
+    assert.fail("Expected the cancellation effect to be consumed.");
+  }
+
+  const cancellationState = reduceShellState(
+    laterCancellation.state,
+    cancellationConsumption.action,
+  );
+  const afterCancellation = clearSecretPromptEffect(cancellationConsumption.state);
+  let visibleDiagnostic: SecretPromptEffectConsumptionDiagnostic | undefined;
+  const cancellationDiagnostic = await cancellationConsumption.diagnostic;
+
+  if (
+    shouldApplySecretPromptEffectDiagnostic(
+      afterCancellation,
+      cancellationConsumption.generation,
+    )
+  ) {
+    visibleDiagnostic = cancellationDiagnostic;
+  }
+
+  olderHandler.reject(new Error(olderSecret));
+  const olderDiagnostic = await olderConsumption.diagnostic;
+
+  assert.equal(cancellationHandlerCalls, 0);
+  assert.equal(cancellationDiagnostic, undefined);
+  assert.deepEqual(olderDiagnostic, {
+    kind: "secret-prompt-delivery-failed",
+    message: "Secret prompt delivery failed.",
+  });
+  assert.equal(
+    shouldApplySecretPromptEffectDiagnostic(
+      afterCancellation,
+      olderConsumption.generation,
+    ),
+    false,
+  );
+
+  if (
+    shouldApplySecretPromptEffectDiagnostic(
+      afterCancellation,
+      olderConsumption.generation,
+    )
+  ) {
+    visibleDiagnostic = olderDiagnostic;
+  }
+
+  assert.equal(visibleDiagnostic, undefined);
+  assertSecretIsNotRetained(olderState, olderSecret);
+  assertSecretIsNotRetained(cancellationState, cancelledSecret);
+  assert.equal(
+    JSON.stringify({
+      olderConsumption,
+      cancellationConsumption,
+      visibleDiagnostic,
+    }).includes(olderSecret),
+    false,
+  );
+  assert.equal(
+    JSON.stringify({
+      olderConsumption,
+      cancellationConsumption,
+      visibleDiagnostic,
+    }).includes(cancelledSecret),
+    false,
+  );
 });
