@@ -200,6 +200,7 @@ export type CreateVimBufferOptions = Readonly<{
 
 const wordCharacterPattern = /[\p{L}\p{N}_]/u;
 const normalDigits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
+const vimHistoryCapacity = 100;
 
 function splitText(text: string): ReadonlyArray<string> {
   return text.split("\n");
@@ -337,7 +338,9 @@ function commitEdit(
   return {
     ...buffer,
     ...next,
-    undoStack: [...buffer.undoStack, snapshot(buffer)],
+    undoStack: [...buffer.undoStack, snapshot(buffer)].slice(
+      -vimHistoryCapacity,
+    ),
     redoStack: [],
     register,
     pending: { kind: "none" },
@@ -1140,7 +1143,10 @@ function undo(buffer: VimBuffer): VimBuffer {
     ...buffer,
     ...previous,
     undoStack: buffer.undoStack.slice(0, -1),
-    redoStack: [snapshot(buffer), ...buffer.redoStack],
+    redoStack: [snapshot(buffer), ...buffer.redoStack].slice(
+      0,
+      vimHistoryCapacity,
+    ),
     pending: { kind: "none" },
   };
 }
@@ -1155,7 +1161,9 @@ function redo(buffer: VimBuffer): VimBuffer {
   return {
     ...buffer,
     ...next,
-    undoStack: [...buffer.undoStack, snapshot(buffer)],
+    undoStack: [...buffer.undoStack, snapshot(buffer)].slice(
+      -vimHistoryCapacity,
+    ),
     redoStack: buffer.redoStack.slice(1),
     pending: { kind: "none" },
   };

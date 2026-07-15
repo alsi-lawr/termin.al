@@ -6,6 +6,7 @@ import {
   applyNormalVimKey,
   createVimBuffer,
   insertVimText,
+  isVimBufferDirty,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
   submitVimCommand,
@@ -95,12 +96,122 @@ test("applies delete, change, yank, paste, undo, and redo through the unnamed re
     },
   );
   assert.deepEqual(deleted.register, { kind: "character", text: "one " });
+  assert.deepEqual(undone.register, { kind: "character", text: "one " });
+  assert.deepEqual(restoredPasted.register, {
+    kind: "character",
+    text: "one ",
+  });
+  assert.equal(undone.mode.kind, "normal");
+  assert.equal(restoredPasted.mode.kind, "normal");
+  assert.equal(isVimBufferDirty(undone), true);
+  assert.equal(isVimBufferDirty(restoredPasted), false);
   assert.equal(changed.mode.kind, "insert");
   assert.equal(vimBufferText(inserted), "hi");
   assert.deepEqual(yanked.register, {
     kind: "line",
     lines: ["alpha", "beta"],
   });
+});
+
+test("bounds undo and redo history at 100 snapshots", () => {
+  const initialText = "x".repeat(100);
+  let edited = createVimBuffer({ text: initialText, mode: VimMode.Normal });
+
+  for (let index = 0; index < 100; index += 1) {
+    edited = applyNormalVimKey(edited, { kind: "delete-character" });
+  }
+
+  assert.equal(edited.undoStack.length, 100);
+  assert.equal(edited.redoStack.length, 0);
+  assert.equal(vimBufferText(edited), "");
+  assert.equal(isVimBufferDirty(edited), true);
+
+  let undone = edited;
+
+  for (let index = 0; index < 100; index += 1) {
+    undone = applyNormalVimKey(undone, { kind: "undo" });
+  }
+
+  assert.equal(undone.undoStack.length, 0);
+  assert.equal(undone.redoStack.length, 100);
+  assert.equal(vimBufferText(undone), initialText);
+  assert.equal(undone.mode.kind, "normal");
+  assert.equal(isVimBufferDirty(undone), false);
+
+  let redone = undone;
+
+  for (let index = 0; index < 100; index += 1) {
+    redone = applyNormalVimKey(redone, { kind: "redo" });
+  }
+
+  assert.equal(redone.undoStack.length, 100);
+  assert.equal(redone.redoStack.length, 0);
+  assert.equal(vimBufferText(redone), "");
+  assert.equal(redone.mode.kind, "normal");
+  assert.equal(isVimBufferDirty(redone), true);
+});
+
+test("evicts the oldest snapshot when undo history exceeds 100 entries", () => {
+  const initialText = "x".repeat(101);
+  let edited = createVimBuffer({ text: initialText, mode: VimMode.Normal });
+
+  for (let index = 0; index < 101; index += 1) {
+    edited = applyNormalVimKey(edited, { kind: "delete-character" });
+  }
+
+  assert.equal(edited.undoStack.length, 100);
+
+  let oldestRetained = edited;
+
+  for (let index = 0; index < 100; index += 1) {
+    oldestRetained = applyNormalVimKey(oldestRetained, { kind: "undo" });
+  }
+
+  assert.equal(oldestRetained.redoStack.length, 100);
+  assert.equal(vimBufferText(oldestRetained), "x".repeat(100));
+  assert.equal(
+    vimBufferText(
+      applyNormalVimKey(oldestRetained, { kind: "undo" }),
+    ),
+    "x".repeat(100),
+  );
+});
+
+test("replays redo snapshots in order and clears redo after a new edit", () => {
+  const start = createVimBuffer({ text: "abcd", mode: VimMode.Normal });
+  const first = applyNormalVimKey(start, { kind: "delete-character" });
+  const second = applyNormalVimKey(first, { kind: "delete-character" });
+  const third = applyNormalVimKey(second, { kind: "delete-character" });
+  const undoThird = applyNormalVimKey(third, { kind: "undo" });
+  const undoSecond = applyNormalVimKey(undoThird, { kind: "undo" });
+  const redoSecond = applyNormalVimKey(undoSecond, { kind: "redo" });
+  const redoThird = applyNormalVimKey(redoSecond, { kind: "redo" });
+
+  assert.deepEqual(
+    [
+      vimBufferText(first),
+      vimBufferText(second),
+      vimBufferText(third),
+      vimBufferText(undoThird),
+      vimBufferText(undoSecond),
+      vimBufferText(redoSecond),
+      vimBufferText(redoThird),
+    ],
+    ["bcd", "cd", "d", "cd", "bcd", "cd", "d"],
+  );
+
+  const rewound = applyNormalVimKey(redoThird, { kind: "undo" });
+  const moved = applyNormalVimKey(rewound, {
+    kind: "motion",
+    motion: "right",
+  });
+  const editedAfterUndo = applyNormalVimKey(moved, {
+    kind: "delete-character",
+  });
+  const redoAttempt = applyNormalVimKey(editedAfterUndo, { kind: "redo" });
+
+  assert.equal(editedAfterUndo.redoStack.length, 0);
+  assert.equal(vimBufferText(redoAttempt), "c");
 });
 
 test("keeps linewise visual selections immutable and applies their operator", () => {
