@@ -13,7 +13,6 @@ import {
 import {
   applyRawPagerOperation,
   createRawPagerState,
-  rawPagerOperationFromKey,
   rawPagerPageText,
   rawPagerStatus,
   type RawPagerOperation,
@@ -21,6 +20,7 @@ import {
 import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
 import { MobilePaneControls, type MobilePaneControl } from "./MobilePaneControls";
+import { viewerPaneKeyActionFromInput } from "./ViewerPaneKeyAction.ts";
 
 type ViewerPaneProps = Readonly<{
   viewer: ViewerContent;
@@ -80,31 +80,36 @@ export function ViewerPane({
       return;
     }
 
-    if (isRawPager) {
-      const pagerKey = rawPagerOperationFromKey({
-        key: event.key,
-        altKey: event.altKey,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-      });
+    const keyAction = isRawPager
+      ? viewerPaneKeyActionFromInput({
+          kind: "raw-pager",
+          key: event.key,
+          altKey: event.altKey,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        })
+      : viewerPaneKeyActionFromInput({
+          kind: "viewer",
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        });
 
-      if (pagerKey.kind === "operation") {
+    switch (keyAction.kind) {
+      case "pager-operation":
         event.preventDefault();
-        applyPagerOperation(pagerKey.operation);
+        applyPagerOperation(keyAction.operation);
         return;
-      }
+      case "close":
+        if (!isRawPager && onClose === undefined) {
+          return;
+        }
 
-      return;
-    }
-
-    if (
-      onClose !== undefined &&
-      !event.ctrlKey &&
-      !event.metaKey &&
-      (event.key === "Escape" || event.key === "q")
-    ) {
-      event.preventDefault();
-      onClose();
+        event.preventDefault();
+        onClose?.();
+        return;
+      case "ignored":
+        return;
     }
   };
 
