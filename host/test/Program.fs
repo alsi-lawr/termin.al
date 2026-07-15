@@ -38,6 +38,10 @@ module Program =
         if response.StatusCode <> expectedStatus then
             failwithf "Expected API response %O, but received %O." expectedStatus response.StatusCode
 
+        match response.Headers.TryGetValues("Cache-Control") with
+        | true, _ -> failwith "Problem responses must not set Cache-Control."
+        | false, _ -> ()
+
         match response.Content.Headers.ContentType with
         | null -> failwith "Expected a problem response content type."
         | contentType when contentType.MediaType <> "application/problem+json" ->
@@ -49,7 +53,7 @@ module Program =
         if not (body.Contains($"\"code\":\"{expectedCode}\"", StringComparison.Ordinal)) then
             failwithf "Expected problem code '%s', but received %s." expectedCode body
 
-    let private staleCatalog () =
+    let private catalogWithCacheState cacheState =
         let requireValid (result: ContentDomain.ValidationResult<'value>) : 'value =
             match result with
             | Ok value -> value
@@ -72,7 +76,7 @@ module Program =
 
         let cache =
             ContentDomain.CacheMetadata.tryCreate
-                ContentDomain.Stale
+                cacheState
                 (timestamp "2026-07-15T00:00:00.000Z")
                 (timestamp "2026-07-15T00:05:00.000Z")
                 (timestamp "2026-07-15T01:05:00.000Z")
@@ -89,8 +93,8 @@ module Program =
               ) ]
         |> requireValid
 
-    let private staleContentClient () : ContentClient =
-        let catalog = staleCatalog ()
+    let private contentClientWithCacheState cacheState : ContentClient =
+        let catalog = catalogWithCacheState cacheState
 
         { new ContentClient with
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
@@ -106,6 +110,12 @@ module Program =
 
             member _.GetChangelog _ =
                 Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing.")) }
+
+    let private staleContentClient () =
+        contentClientWithCacheState ContentDomain.Stale
+
+    let private freshContentClient () =
+        contentClientWithCacheState ContentDomain.Fresh
 
     let private runHostContractChecks () =
         HostApplication.create [||]
@@ -149,6 +159,28 @@ module Program =
                 use unknownApiRoute = client.GetAsync("/api/not-here").GetAwaiter().GetResult()
                 assertProblem unknownApiRoute HttpStatusCode.NotFound "not-found")
 
+    let private runFreshCacheEndpointCheck () =
+        HostApplication.createWithContentClient [||] (freshContentClient ())
+        |> fun application ->
+            withRunningHost application (fun client ->
+                use response = client.GetAsync("/api/content/catalog").GetAwaiter().GetResult()
+
+                if response.StatusCode <> HttpStatusCode.OK then
+                    failwithf "Expected fresh catalog response 200, but received %O." response.StatusCode
+
+                let cacheControl =
+                    match response.Headers.TryGetValues("Cache-Control") with
+                    | true, values -> values |> Seq.exactlyOne
+                    | false, _ -> failwith "Fresh content must set Cache-Control."
+
+                if cacheControl <> "public, max-age=300" then
+                    failwithf "Expected fresh content Cache-Control public, max-age=300, but received %s." cacheControl
+
+                let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+                if not (body.Contains("\"state\":\"fresh\"", StringComparison.Ordinal)) then
+                    failwith "Fresh content responses must serialize their fresh cache state.")
+
     let private runStaleCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (staleContentClient ())
         |> fun application ->
@@ -181,6 +213,7 @@ module Program =
             ContentContractsTests.run ()
             GitHubContentClientTests.run ()
             runHostContractChecks ()
+            runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             0
         with error ->

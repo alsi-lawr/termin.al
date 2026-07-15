@@ -24,7 +24,7 @@ module Api =
     let private setCacheHeaders (context: HttpContext) cache =
         match ContentDomain.CacheMetadata.state cache with
         | ContentDomain.Fresh ->
-            context.Response.Headers.CacheControl <- $"public, max-age={ContentDomain.FreshCacheMinutes}"
+            context.Response.Headers.CacheControl <- $"public, max-age={ContentDomain.FreshCacheSeconds}"
         | ContentDomain.Stale ->
             context.Response.Headers.CacheControl <- "public, max-age=0, must-revalidate"
             context.Response.Headers.Append("Warning", "110 - \"Response is stale\"")

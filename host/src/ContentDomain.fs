@@ -17,6 +17,8 @@ module ContentDomain =
     [<Literal>]
     let FreshCacheMinutes = 5
 
+    let FreshCacheSeconds = FreshCacheMinutes * 60
+
     [<Literal>]
     let StaleCacheMinutes = 60
 
