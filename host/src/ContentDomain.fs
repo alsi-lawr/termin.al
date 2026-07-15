@@ -671,6 +671,14 @@ module ContentDomain =
         let updatedAt project = project.UpdatedAt
         let tags project = project.Tags
 
+    let private hasDuplicateProjectRepositoryIdentity (entries: Project list) =
+        let repositories = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+
+        entries
+        |> List.exists (fun project ->
+            let repository = project |> Project.repository |> RepositoryName.value
+            not (repositories.Add repository))
+
     type Projects =
         private
             { Entries: Project list
@@ -690,6 +698,8 @@ module ContentDomain =
                     invalid "projects" "Project identifiers must not be duplicated."
                 elif slugs |> Set.ofList |> Set.count <> List.length slugs then
                     invalid "projects" "Project slugs must not be duplicated."
+                elif hasDuplicateProjectRepositoryIdentity entries then
+                    invalid "projects" "Project repositories must not be duplicated."
                 else
                     Ok
                         { Entries = entries
@@ -819,6 +829,8 @@ module ContentDomain =
                                 invalid "projects" "Project identifiers must not be duplicated."
                             elif slugs |> Set.ofList |> Set.count <> List.length slugs then
                                 invalid "projects" "Project slugs must not be duplicated."
+                            elif hasDuplicateProjectRepositoryIdentity projects then
+                                invalid "projects" "Project repositories must not be duplicated."
                             else
                                 Ok projects)
                 | _ -> invalid "projects" "A project manifest must contain a projects array."

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  ContentByteSize,
   validateContentCatalog,
   validateContentChangelog,
   validateContentDocument,
@@ -28,15 +29,23 @@ test("accepts every shared serialized content contract fixture", () => {
     assert.equal(result.kind, "valid", result.kind === "invalid" ? result.message : "");
   }
 
-  if (catalog.kind !== "valid" || document.kind !== "valid") {
-    assert.fail("Expected catalog and document fixture validation.");
+  if (
+    catalog.kind !== "valid" ||
+    document.kind !== "valid" ||
+    projects.kind !== "valid"
+  ) {
+    assert.fail("Expected catalog, document, and projects fixture validation.");
   }
 
   assert.equal(catalog.value.entries[2]?.kind, "file");
   assert.equal(document.value.id.value, "about");
+  assert.deepEqual(
+    projects.value.projects.map((project) => project.repository.value),
+    ["example-owner/sample-project", "example-owner/second-project"],
+  );
 });
 
-test("rejects malformed paths, duplicates, bounds, and unstable problem shapes", () => {
+test("rejects malformed paths, fractional sizes, duplicate projects, and unstable problem shapes", () => {
   const traversalCatalog: unknown = {
     entries: [
       {
@@ -114,5 +123,15 @@ test("rejects malformed paths, duplicates, bounds, and unstable problem shapes",
 
   assert.equal(validateContentCatalog(traversalCatalog).kind, "invalid");
   assert.equal(validateContentProjects(duplicateProjects).kind, "invalid");
+  assert.equal(ContentByteSize.tryCreate(0.5, "catalog.size").kind, "invalid");
+  assert.equal(validateContentCatalog(fixture("catalog-fractional-size.json")).kind, "invalid");
+  assert.equal(
+    validateContentProjects(fixture("projects-duplicate-repository-exact.json")).kind,
+    "invalid",
+  );
+  assert.equal(
+    validateContentProjects(fixture("projects-duplicate-repository-case.json")).kind,
+    "invalid",
+  );
   assert.equal(validateContentProblem(malformedProblem).kind, "invalid");
 });

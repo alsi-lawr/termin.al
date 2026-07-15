@@ -2,6 +2,7 @@ namespace Termin.Al.Host.Tests
 
 open System
 open System.IO
+open System.Text.Json
 open Termin.Al.Host
 
 [<RequireQualifiedAccess>]
@@ -65,6 +66,11 @@ module ContentContractsTests =
                 expected
                 actual
 
+    let private projectManifest name =
+        use document = JsonDocument.Parse(readFixture name)
+        let projects = document.RootElement.GetProperty("projects").GetRawText()
+        "{\"projects\":" + projects + "}"
+
     let private catalog () =
         ContentDomain.Catalog.tryCreate
             (source "content/catalog.json" "https://github.com/example-owner/content/blob/main/content/catalog.json")
@@ -108,10 +114,9 @@ module ContentContractsTests =
         |> requireValid
 
     let private projects () =
-        let manifest =
-            "{\"projects\":[{\"id\":\"sample-project\",\"slug\":\"sample-project\",\"name\":\"Sample Project\",\"summary\":\"A validated project fixture.\",\"url\":\"https://github.com/example-owner/sample-project\",\"repository\":\"example-owner/sample-project\",\"updatedAt\":\"2026-07-15T00:00:03.000Z\",\"tags\":[\"fsharp\",\"typescript\"]}]}"
-
-        ContentDomain.ProjectManifest.tryParse manifest |> requireValid
+        projectManifest "projects.json"
+        |> ContentDomain.ProjectManifest.tryParse
+        |> requireValid
 
     let private now () =
         ContentDomain.Now.create
@@ -177,10 +182,15 @@ module ContentContractsTests =
         |> ContentWire.serialize
         |> assertFixture "document-about.json"
 
+        let projectEntries = projects ()
+
+        if List.length projectEntries <> 2 then
+            failwith "The shared projects fixture must retain distinct repositories."
+
         ContentDomain.Projects.tryCreate
             (source "content/projects.json" "https://github.com/example-owner/content/blob/main/content/projects.json")
             cache
-            (projects ())
+            projectEntries
         |> requireValid
         |> ContentWire.projects
         |> ContentWire.ProjectsResponse
@@ -222,6 +232,20 @@ module ContentContractsTests =
 
         match ContentDomain.ProjectManifest.tryParse duplicateProjectManifest with
         | Ok _ -> failwith "Duplicate project slugs should not validate."
+        | Error _ -> ()
+
+        match
+            projectManifest "projects-duplicate-repository-exact.json"
+            |> ContentDomain.ProjectManifest.tryParse
+        with
+        | Ok _ -> failwith "Exact duplicate project repositories should not validate."
+        | Error _ -> ()
+
+        match
+            projectManifest "projects-duplicate-repository-case.json"
+            |> ContentDomain.ProjectManifest.tryParse
+        with
+        | Ok _ -> failwith "Case-only duplicate project repositories should not validate."
         | Error _ -> ()
 
         let oversized = String.replicate (ContentDomain.DocumentByteLimit + 1) "a"

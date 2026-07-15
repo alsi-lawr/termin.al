@@ -243,7 +243,7 @@ export class ContentByteSize {
     value: number,
     field: string,
   ): ContentValidation<ContentByteSize> {
-    return value >= 0 && value <= contentDocumentByteLimit
+    return Number.isSafeInteger(value) && value >= 0 && value <= contentDocumentByteLimit
       ? valid(new ContentByteSize(value))
       : invalid(`${field} must be between zero and the document byte limit.`);
   }
@@ -1125,6 +1125,7 @@ export function validateContentProjects(
   const projects: ContentProject[] = [];
   const ids = new Set<string>();
   const slugs = new Set<string>();
+  const repositories = new Set<string>();
 
   for (const projectValue of projectsValue.value) {
     const project = validateContentProject(projectValue);
@@ -1133,15 +1134,19 @@ export function validateContentProjects(
       return project;
     }
 
+    const repositoryIdentity = project.value.repository.value.toLowerCase();
+
     if (
       ids.has(project.value.id.value) ||
-      slugs.has(project.value.slug.value)
+      slugs.has(project.value.slug.value) ||
+      repositories.has(repositoryIdentity)
     ) {
-      return invalid("projects must have unique identifiers and slugs.");
+      return invalid("projects must have unique identifiers, slugs, and repositories.");
     }
 
     ids.add(project.value.id.value);
     slugs.add(project.value.slug.value);
+    repositories.add(repositoryIdentity);
     projects.push(project.value);
   }
 
