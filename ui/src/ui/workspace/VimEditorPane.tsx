@@ -23,8 +23,8 @@ import {
 } from "../../domain/vim/VimBuffer.ts";
 import {
   applyVimCommandInput,
-  vimCommandInputFromKeyboard,
 } from "./VimCommandInput.ts";
+import { handleVimEditorPaneCommandInput } from "./VimEditorPaneCommandHandler.ts";
 import {
   nextUnicodeCursorOffset,
   previousUnicodeCursorOffset,
@@ -225,39 +225,20 @@ export function VimEditorPane({
       return;
     }
 
-    event.preventDefault();
-    onBufferChange(
-      applyVimCommandInput(buffer, {
-        kind: "text",
-        text: event.clipboardData.getData("text"),
-      }),
-    );
+    handleVimEditorPaneCommandInput({
+      buffer,
+      input: { kind: "paste", text: event.clipboardData.getData("text") },
+      onBufferChange,
+      onPaneKeyInput,
+      preventDefault: () => {
+        event.preventDefault();
+      },
+    });
   };
 
   const handleBeforeInput = (event: FormEvent<HTMLTextAreaElement>): void => {
     if (buffer.mode.kind !== "insert" && !composing.current) {
       event.preventDefault();
-    }
-  };
-
-  const handleCommandKey = (
-    event: KeyboardEvent<HTMLTextAreaElement>,
-  ): void => {
-    const result = vimCommandInputFromKeyboard({
-      key: event.key,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-    });
-
-    switch (result.kind) {
-      case "allow-default":
-        return;
-      case "prevent-default":
-        event.preventDefault();
-        return;
-      case "input":
-        event.preventDefault();
-        onBufferChange(applyVimCommandInput(buffer, result.input));
     }
   };
 
@@ -281,6 +262,24 @@ export function VimEditorPane({
       return;
     }
 
+    if (buffer.mode.kind === "command") {
+      handleVimEditorPaneCommandInput({
+        buffer,
+        input: {
+          kind: "keydown",
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        },
+        onBufferChange,
+        onPaneKeyInput,
+        preventDefault: () => {
+          event.preventDefault();
+        },
+      });
+      return;
+    }
+
     const paneKeyResult = onPaneKeyInput({
       key: event.key,
       ctrlKey: event.ctrlKey,
@@ -289,11 +288,6 @@ export function VimEditorPane({
 
     if (paneKeyResult.kind === "handled") {
       event.preventDefault();
-      return;
-    }
-
-    if (buffer.mode.kind === "command") {
-      handleCommandKey(event);
       return;
     }
 
