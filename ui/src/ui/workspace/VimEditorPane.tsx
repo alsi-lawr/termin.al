@@ -3,6 +3,7 @@ import {
   useLayoutEffect,
   useRef,
   type ChangeEvent,
+  type ClipboardEvent,
   type CompositionEvent,
   type FormEvent,
   type KeyboardEvent,
@@ -10,19 +11,20 @@ import {
   type SyntheticEvent,
 } from "react";
 import {
-  appendVimCommandInput,
   applyNormalVimKey,
-  backspaceVimCommandInput,
   insertVimText,
   moveVimInsertCursor,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
   replaceVimInsertText,
-  submitVimCommand,
   vimBufferCursorOffset,
   vimBufferText,
   type VimBuffer,
 } from "../../domain/vim/VimBuffer.ts";
+import {
+  applyVimCommandInput,
+  vimCommandInputFromKeyboard,
+} from "./VimCommandInput.ts";
 import {
   nextUnicodeCursorOffset,
   previousUnicodeCursorOffset,
@@ -195,6 +197,16 @@ export function VimEditorPane({
   ): void => {
     composing.current = false;
 
+    if (buffer.mode.kind === "command") {
+      onBufferChange(
+        applyVimCommandInput(buffer, {
+          kind: "text",
+          text: event.data,
+        }),
+      );
+      return;
+    }
+
     if (buffer.mode.kind === "insert") {
       onBufferChange(
         replaceVimInsertText(
@@ -204,6 +216,22 @@ export function VimEditorPane({
         ),
       );
     }
+  };
+
+  const handlePaste = (
+    event: ClipboardEvent<HTMLTextAreaElement>,
+  ): void => {
+    if (buffer.mode.kind !== "command") {
+      return;
+    }
+
+    event.preventDefault();
+    onBufferChange(
+      applyVimCommandInput(buffer, {
+        kind: "text",
+        text: event.clipboardData.getData("text"),
+      }),
+    );
   };
 
   const handleBeforeInput = (event: FormEvent<HTMLTextAreaElement>): void => {
@@ -217,24 +245,14 @@ export function VimEditorPane({
   ): void => {
     event.preventDefault();
 
-    switch (event.key) {
-      case "Escape":
-        onBufferChange(applyNormalVimKey(buffer, { kind: "escape" }));
-        return;
-      case "Enter":
-        onBufferChange(submitVimCommand(buffer));
-        return;
-      case "Backspace":
-        onBufferChange(backspaceVimCommandInput(buffer));
-        return;
-      default:
-        if (
-          event.key.length === 1 &&
-          !event.ctrlKey &&
-          !event.metaKey
-        ) {
-          onBufferChange(appendVimCommandInput(buffer, event.key));
-        }
+    const input = vimCommandInputFromKeyboard({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+    });
+
+    if (input !== undefined) {
+      onBufferChange(applyVimCommandInput(buffer, input));
     }
   };
 
@@ -305,7 +323,9 @@ export function VimEditorPane({
         return;
       case "tab":
         if (buffer.mode.kind === "command") {
-          onBufferChange(appendVimCommandInput(buffer, "\t"));
+          onBufferChange(
+            applyVimCommandInput(buffer, { kind: "text", text: "\t" }),
+          );
           return;
         }
 
@@ -371,6 +391,7 @@ export function VimEditorPane({
           onSelect={handleSelect}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}
+          onPaste={handlePaste}
           onKeyDown={handleKeyDown}
           onFocus={onActivate}
         />
