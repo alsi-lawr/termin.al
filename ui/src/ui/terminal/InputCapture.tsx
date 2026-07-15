@@ -17,6 +17,11 @@ import {
   type NormalPromptKey,
 } from "../../domain/terminal/PromptEditor.ts";
 import type { PromptMode } from "../../domain/terminal/PromptBuffer.ts";
+import {
+  nextUnicodeCursorOffset,
+  normalizeUnicodeCursorOffset,
+  previousUnicodeCursorOffset,
+} from "../../domain/terminal/UnicodeCursor.ts";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -38,7 +43,10 @@ type InputCaptureProps = Readonly<{
 }>;
 
 function selectionCursor(element: HTMLTextAreaElement): number {
-  return element.selectionEnd ?? element.value.length;
+  return normalizeUnicodeCursorOffset(
+    element.value,
+    element.selectionEnd ?? element.value.length,
+  );
 }
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
@@ -68,7 +76,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      const cursor = Math.max(0, Math.min(props.value.length, props.cursor));
+      const cursor = normalizeUnicodeCursorOffset(props.value, props.cursor);
       input.setSelectionRange(cursor, cursor);
     }, [props.cursor, props.value]);
 
@@ -175,13 +183,15 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        props.onMoveCursor(Math.max(0, props.cursor - 1));
+        props.onMoveCursor(
+          previousUnicodeCursorOffset(props.value, props.cursor),
+        );
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        props.onMoveCursor(Math.min(props.value.length, props.cursor + 1));
+        props.onMoveCursor(nextUnicodeCursorOffset(props.value, props.cursor));
         return;
       }
 

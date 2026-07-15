@@ -72,3 +72,26 @@ test("routes argument completion to the path provider", async () => {
   assert.equal(request.target.kind, "path");
   assert.equal(result.kind, "multiple");
 });
+
+test("normalizes completion cursors at Unicode code-point boundaries", () => {
+  const request = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "😀",
+    1,
+  );
+  const edit = createCompletionEdit(request, {
+    kind: "command",
+    value: "😀",
+    label: "Emoji command",
+  });
+
+  assert.equal(request.cursor, 0);
+  assert.deepEqual(request.target, {
+    kind: "command",
+    prefix: "",
+    start: 0,
+    end: 2,
+  });
+  assert.deepEqual(edit, { value: "😀", cursor: 2 });
+});

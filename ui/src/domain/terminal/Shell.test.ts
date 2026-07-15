@@ -334,3 +334,37 @@ test("applies current single completions and exposes multiple matches", () => {
 
   assert.equal(suggestions.completion.kind, "suggestions");
 });
+
+test("preserves astral input through cursor editing and command submission", () => {
+  const normalized = reduceShellState(createState(), {
+    kind: "input.replace",
+    value: "😀",
+    cursor: 1,
+  });
+  const backspaced = reduceShellState(
+    reduceShellState(createState(), {
+      kind: "input.insert",
+      text: "😀",
+    }),
+    { kind: "input.backspace" },
+  );
+  const deleted = reduceShellState(normalized, { kind: "input.delete" });
+  const submitted = reduceShellState(
+    reduceShellState(createState(), {
+      kind: "input.insert",
+      text: "echo 😀",
+    }),
+    { kind: "prompt.submit" },
+  );
+
+  assert.equal(normalized.input.buffer.cursor, 0);
+  assert.equal(backspaced.input.buffer.value, "");
+  assert.equal(deleted.input.buffer.value, "");
+
+  if (submitted.lifecycle.kind !== "running") {
+    assert.fail("Expected astral input to submit a command.");
+  }
+
+  assert.equal(submitted.lifecycle.command.source, "echo 😀");
+  assert.equal(submitted.commandHistory[0]?.source, "echo 😀");
+});

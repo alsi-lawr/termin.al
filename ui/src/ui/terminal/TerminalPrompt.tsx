@@ -3,6 +3,7 @@ import type {
   ShellCompletion,
   ShellStatus,
 } from "../../domain/terminal/Shell.ts";
+import { normalizeUnicodeCursorOffset } from "../../domain/terminal/UnicodeCursor.ts";
 import { InputRow } from "./InputRow";
 import { TerminalStatus } from "./TerminalStatus";
 
@@ -22,9 +23,9 @@ export function TerminalPrompt({
   completion,
 }: TerminalPromptProps): ReactElement {
   const activeLine = `${prompt} ${currentInput}`;
-  const safeCursorColumn = Math.max(
-    0,
-    Math.min(cursorColumn, currentInput.length),
+  const safeCursorColumn = normalizeUnicodeCursorOffset(
+    currentInput,
+    cursorColumn,
   );
   const cursorIndex = `${prompt} `.length + safeCursorColumn;
 

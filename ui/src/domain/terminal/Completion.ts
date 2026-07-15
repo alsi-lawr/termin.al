@@ -1,4 +1,5 @@
 import type { ShellId, ShellSessionId } from "./Shell.ts";
+import { normalizeUnicodeCursorOffset } from "./UnicodeCursor.ts";
 
 export type CompletionTarget =
   | Readonly<{
@@ -58,37 +59,49 @@ export function createCompletionRequest(
     throw new Error("Completion cursors must reference a character boundary.");
   }
 
-  let start = cursor;
+  const normalizedCursor = normalizeUnicodeCursorOffset(source, cursor);
+  let start: number = normalizedCursor;
 
   while (start > 0 && !isWhitespaceCharacter(source[start - 1] ?? "")) {
     start -= 1;
   }
 
-  let end = cursor;
+  let end: number = normalizedCursor;
 
   while (end < source.length && !isWhitespaceCharacter(source[end] ?? "")) {
     end += 1;
   }
 
-  const prefix = source.slice(start, cursor);
+  const prefix = source.slice(start, normalizedCursor);
   const beforeTarget = source.slice(0, start).trim();
   const target: CompletionTarget =
     beforeTarget.length === 0
       ? { kind: "command", prefix, start, end }
       : { kind: "path", prefix, start, end };
 
-  return { shellId, sessionId, source, cursor, target };
+  return {
+    shellId,
+    sessionId,
+    source,
+    cursor: normalizedCursor,
+    target,
+  };
 }
 
 export function createCompletionEdit(
   request: CompletionRequest,
   candidate: CompletionCandidate,
 ): CompletionEdit {
+  const value =
+    request.source.slice(0, request.target.start) +
+    candidate.value +
+    request.source.slice(request.target.end);
+
   return {
-    value:
-      request.source.slice(0, request.target.start) +
-      candidate.value +
-      request.source.slice(request.target.end),
-    cursor: request.target.start + candidate.value.length,
+    value,
+    cursor: normalizeUnicodeCursorOffset(
+      value,
+      request.target.start + candidate.value.length,
+    ),
   };
 }

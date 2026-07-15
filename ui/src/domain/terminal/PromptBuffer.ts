@@ -1,8 +1,11 @@
-declare const promptCursorBrand: unique symbol;
+import {
+  nextUnicodeCursorOffset,
+  normalizeUnicodeCursorOffset,
+  previousUnicodeCursorOffset,
+  type UnicodeCursorOffset,
+} from "./UnicodeCursor.ts";
 
-export type PromptCursor = number & {
-  readonly [promptCursorBrand]: "PromptCursor";
-};
+export type PromptCursor = UnicodeCursorOffset;
 
 export type PromptMode =
   | Readonly<{ kind: "insert" }>
@@ -28,12 +31,12 @@ export type CreatePromptBufferOptions = Readonly<{
   mode: PromptMode;
 }>;
 
-function createPromptCursor(value: number, length: number): PromptCursor {
-  if (!Number.isSafeInteger(value) || value < 0 || value > length) {
+function createPromptCursor(value: number, source: string): PromptCursor {
+  if (!Number.isSafeInteger(value) || value < 0 || value > source.length) {
     throw new Error("Prompt cursors must reference a character boundary.");
   }
 
-  return value as PromptCursor;
+  return normalizeUnicodeCursorOffset(source, value);
 }
 
 export function createPromptBuffer({
@@ -43,7 +46,7 @@ export function createPromptBuffer({
 }: CreatePromptBufferOptions): PromptBuffer {
   return {
     value,
-    cursor: createPromptCursor(cursor, value.length),
+    cursor: createPromptCursor(cursor, value),
     mode,
   };
 }
@@ -83,7 +86,7 @@ export function replacePromptBuffer(
 export function movePromptCursorLeft(buffer: PromptBuffer): PromptBuffer {
   return createPromptBuffer({
     value: buffer.value,
-    cursor: Math.max(0, buffer.cursor - 1),
+    cursor: previousUnicodeCursorOffset(buffer.value, buffer.cursor),
     mode: buffer.mode,
   });
 }
@@ -91,7 +94,7 @@ export function movePromptCursorLeft(buffer: PromptBuffer): PromptBuffer {
 export function movePromptCursorRight(buffer: PromptBuffer): PromptBuffer {
   return createPromptBuffer({
     value: buffer.value,
-    cursor: Math.min(buffer.value.length, buffer.cursor + 1),
+    cursor: nextUnicodeCursorOffset(buffer.value, buffer.cursor),
     mode: buffer.mode,
   });
 }
@@ -101,11 +104,11 @@ export function backspacePromptBuffer(buffer: PromptBuffer): PromptBuffer {
     return buffer;
   }
 
+  const start = previousUnicodeCursorOffset(buffer.value, buffer.cursor);
+
   return createPromptBuffer({
-    value:
-      buffer.value.slice(0, buffer.cursor - 1) +
-      buffer.value.slice(buffer.cursor),
-    cursor: buffer.cursor - 1,
+    value: buffer.value.slice(0, start) + buffer.value.slice(buffer.cursor),
+    cursor: start,
     mode: buffer.mode,
   });
 }
@@ -117,10 +120,10 @@ export function deletePromptBufferAtCursor(
     return buffer;
   }
 
+  const end = nextUnicodeCursorOffset(buffer.value, buffer.cursor);
+
   return createPromptBuffer({
-    value:
-      buffer.value.slice(0, buffer.cursor) +
-      buffer.value.slice(buffer.cursor + 1),
+    value: buffer.value.slice(0, buffer.cursor) + buffer.value.slice(end),
     cursor: buffer.cursor,
     mode: buffer.mode,
   });

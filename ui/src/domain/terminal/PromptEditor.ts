@@ -8,6 +8,11 @@ import {
   type PromptBuffer,
   type PromptMode,
 } from "./PromptBuffer.ts";
+import {
+  nextUnicodeCursorOffset,
+  normalizeUnicodeCursorOffset,
+  previousUnicodeCursorOffset,
+} from "./UnicodeCursor.ts";
 
 export type NormalPromptMotion =
   | "left"
@@ -96,14 +101,19 @@ type TextRange = Readonly<{
 const wordCharacterPattern = /[\p{L}\p{N}_]/u;
 const normalDigits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
+function lastUnicodeCursorOffset(value: string): number {
+  return previousUnicodeCursorOffset(value, value.length);
+}
+
 function createNormalBuffer(
   value: string,
   cursor: number,
 ): PromptBuffer {
+  const lastCursor = lastUnicodeCursorOffset(value);
   const safeCursor =
     value.length === 0
       ? 0
-      : Math.max(0, Math.min(value.length - 1, cursor));
+      : Math.max(0, Math.min(lastCursor, cursor));
 
   return createPromptBuffer({
     value,
@@ -217,7 +227,10 @@ function appendNormalCount(
 }
 
 function characterAt(value: string, position: number): string {
-  return value[position] ?? "";
+  const cursor = normalizeUnicodeCursorOffset(value, position);
+  const end = nextUnicodeCursorOffset(value, cursor);
+
+  return value.slice(cursor, end);
 }
 
 function isWordCharacter(character: string): boolean {
@@ -225,19 +238,19 @@ function isWordCharacter(character: string): boolean {
 }
 
 function wordForward(value: string, cursor: number, count: number): number {
-  let position = cursor;
+  let position = normalizeUnicodeCursorOffset(value, cursor);
   const repetitions = capCount(count, value.length);
 
   for (let repetition = 0; repetition < repetitions; repetition += 1) {
     while (position < value.length && isWordCharacter(characterAt(value, position))) {
-      position += 1;
+      position = nextUnicodeCursorOffset(value, position);
     }
 
     while (
       position < value.length &&
       !isWordCharacter(characterAt(value, position))
     ) {
-      position += 1;
+      position = nextUnicodeCursorOffset(value, position);
     }
   }
 
@@ -245,7 +258,10 @@ function wordForward(value: string, cursor: number, count: number): number {
 }
 
 function wordBackward(value: string, cursor: number, count: number): number {
-  let position = Math.min(cursor, Math.max(0, value.length - 1));
+  let position = Math.min(
+    normalizeUnicodeCursorOffset(value, cursor),
+    lastUnicodeCursorOffset(value),
+  );
   const repetitions = capCount(count, value.length);
 
   for (let repetition = 0; repetition < repetitions; repetition += 1) {
@@ -253,14 +269,19 @@ function wordBackward(value: string, cursor: number, count: number): number {
       return 0;
     }
 
-    position -= 1;
+    position = previousUnicodeCursorOffset(value, position);
 
     while (position > 0 && !isWordCharacter(characterAt(value, position))) {
-      position -= 1;
+      position = previousUnicodeCursorOffset(value, position);
     }
 
-    while (position > 0 && isWordCharacter(characterAt(value, position - 1))) {
-      position -= 1;
+    while (
+      position > 0 &&
+      isWordCharacter(
+        characterAt(value, previousUnicodeCursorOffset(value, position)),
+      )
+    ) {
+      position = previousUnicodeCursorOffset(value, position);
     }
   }
 
@@ -272,27 +293,53 @@ function wordEnd(value: string, cursor: number, count: number): number {
     return 0;
   }
 
-  let position = Math.min(cursor, value.length - 1);
+  const lastCursor = lastUnicodeCursorOffset(value);
+  let position = Math.min(
+    normalizeUnicodeCursorOffset(value, cursor),
+    lastCursor,
+  );
   const repetitions = capCount(count, value.length);
 
   for (let repetition = 0; repetition < repetitions; repetition += 1) {
     while (
-      position < value.length - 1 &&
+      position < lastCursor &&
       !isWordCharacter(characterAt(value, position))
     ) {
-      position += 1;
+      position = nextUnicodeCursorOffset(value, position);
     }
 
     while (
-      position < value.length - 1 &&
-      isWordCharacter(characterAt(value, position + 1))
+      position < lastCursor &&
+      isWordCharacter(
+        characterAt(value, nextUnicodeCursorOffset(value, position)),
+      )
     ) {
-      position += 1;
+      position = nextUnicodeCursorOffset(value, position);
     }
 
-    if (repetition < repetitions - 1 && position < value.length - 1) {
-      position += 1;
+    if (repetition < repetitions - 1 && position < lastCursor) {
+      position = nextUnicodeCursorOffset(value, position);
     }
+  }
+
+  return position;
+}
+
+function moveCursorLeft(value: string, cursor: number, count: number): number {
+  let position = normalizeUnicodeCursorOffset(value, cursor);
+
+  for (let step = 0; step < count; step += 1) {
+    position = previousUnicodeCursorOffset(value, position);
+  }
+
+  return position;
+}
+
+function moveCursorRight(value: string, cursor: number, count: number): number {
+  let position = normalizeUnicodeCursorOffset(value, cursor);
+
+  for (let step = 0; step < count; step += 1) {
+    position = nextUnicodeCursorOffset(value, position);
   }
 
   return position;
@@ -309,9 +356,9 @@ function moveCursorForMotion(
 
   switch (motion) {
     case "left":
-      return createNormalBuffer(value, cursor - safeCount);
+      return createNormalBuffer(value, moveCursorLeft(value, cursor, safeCount));
     case "right":
-      return createNormalBuffer(value, cursor + safeCount);
+      return createNormalBuffer(value, moveCursorRight(value, cursor, safeCount));
     case "word-forward":
       return createNormalBuffer(value, wordForward(value, cursor, safeCount));
     case "word-backward":
@@ -321,7 +368,7 @@ function moveCursorForMotion(
     case "line-start":
       return createNormalBuffer(value, 0);
     case "line-end":
-      return createNormalBuffer(value, value.length - 1);
+      return createNormalBuffer(value, lastUnicodeCursorOffset(value));
   }
 }
 
@@ -336,9 +383,15 @@ function rangeForMotion(
 
   switch (motion) {
     case "left":
-      return { start: Math.max(0, cursor - safeCount), end: cursor };
+      return {
+        start: moveCursorLeft(value, cursor, safeCount),
+        end: cursor,
+      };
     case "right":
-      return { start: cursor, end: Math.min(value.length, cursor + safeCount) };
+      return {
+        start: cursor,
+        end: moveCursorRight(value, cursor, safeCount),
+      };
     case "word-forward":
       return { start: cursor, end: wordForward(value, cursor, safeCount) };
     case "word-backward":
@@ -349,7 +402,10 @@ function rangeForMotion(
     case "word-end":
       return {
         start: cursor,
-        end: Math.min(value.length, wordEnd(value, cursor, safeCount) + 1),
+        end: nextUnicodeCursorOffset(
+          value,
+          wordEnd(value, cursor, safeCount),
+        ),
       };
     case "line-start":
       return { start: 0, end: cursor };
@@ -363,8 +419,11 @@ function deleteRange(
   range: TextRange,
   enterInsertMode: boolean,
 ): PromptEditor {
-  const start = Math.max(0, Math.min(editor.buffer.value.length, range.start));
-  const end = Math.max(start, Math.min(editor.buffer.value.length, range.end));
+  const start = normalizeUnicodeCursorOffset(editor.buffer.value, range.start);
+  const end = Math.max(
+    start,
+    normalizeUnicodeCursorOffset(editor.buffer.value, range.end),
+  );
   const deleted = editor.buffer.value.slice(start, end);
   const value =
     editor.buffer.value.slice(0, start) + editor.buffer.value.slice(end);
@@ -458,7 +517,7 @@ function pasteRegister(
   }
 
   const insertionPoint = afterCursor
-    ? Math.min(editor.buffer.value.length, editor.buffer.cursor + 1)
+    ? nextUnicodeCursorOffset(editor.buffer.value, editor.buffer.cursor)
     : editor.buffer.cursor;
   const value =
     editor.buffer.value.slice(0, insertionPoint) +
@@ -466,7 +525,7 @@ function pasteRegister(
     editor.buffer.value.slice(insertionPoint);
   const buffer = createNormalBuffer(
     value,
-    insertionPoint + editor.register.length - 1,
+    previousUnicodeCursorOffset(value, insertionPoint + editor.register.length),
   );
 
   return commitEdit(editor, buffer, editor.register);
@@ -525,7 +584,11 @@ function deleteCharacters(editor: PromptEditor): PromptEditor {
     editor,
     {
       start: editor.buffer.cursor,
-      end: editor.buffer.cursor + pendingCount(editor.pending),
+      end: moveCursorRight(
+        editor.buffer.value,
+        editor.buffer.cursor,
+        pendingCount(editor.pending),
+      ),
     },
     false,
   );
@@ -568,7 +631,8 @@ export function createPromptEditorForHistory(
   mode: PromptMode,
   register: string,
 ): PromptEditor {
-  const cursor = mode.kind === "normal" ? value.length - 1 : value.length;
+  const cursor =
+    mode.kind === "normal" ? lastUnicodeCursorOffset(value) : value.length;
 
   return createPromptEditor({
     buffer:
@@ -655,7 +719,10 @@ export function applyNormalPromptKey(
     case "insert-before":
       return enterInsertMode(editor, editor.buffer.cursor);
     case "insert-after":
-      return enterInsertMode(editor, editor.buffer.cursor + 1);
+      return enterInsertMode(
+        editor,
+        nextUnicodeCursorOffset(editor.buffer.value, editor.buffer.cursor),
+      );
     case "insert-line-start":
       return enterInsertMode(editor, 0);
     case "insert-line-end":

@@ -137,6 +137,42 @@ test("switches between insert and normal prompt modes", () => {
   });
 });
 
+test("keeps vi prompt motions and edits on Unicode code-point boundaries", () => {
+  const start = applyNormalPromptKey(
+    createPromptEditorForHistory("a😀b", PromptMode.Normal, ""),
+    { kind: "digit", digit: 0 },
+  );
+  const onAstral = applyNormalPromptKey(start, {
+    kind: "motion",
+    motion: "right",
+  });
+  const afterAstral = applyNormalPromptKey(onAstral, {
+    kind: "motion",
+    motion: "right",
+  });
+  const deletedCharacter = applyNormalPromptKey(onAstral, {
+    kind: "delete-character",
+  });
+  const deleting = applyNormalPromptKey(onAstral, {
+    kind: "operator",
+    operator: "delete",
+  });
+  const deletedMotion = applyNormalPromptKey(deleting, {
+    kind: "motion",
+    motion: "right",
+  });
+  const deletedOnlyCharacter = applyNormalPromptKey(
+    createPromptEditorForHistory("😀", PromptMode.Normal, ""),
+    { kind: "delete-character" },
+  );
+
+  assert.equal(onAstral.buffer.cursor, 1);
+  assert.equal(afterAstral.buffer.cursor, 3);
+  assert.equal(deletedCharacter.buffer.value, "ab");
+  assert.equal(deletedMotion.buffer.value, "ab");
+  assert.equal(deletedOnlyCharacter.buffer.value, "");
+});
+
 test("translates only supported normal-mode keyboard input", () => {
   assert.deepEqual(normalPromptKeyFromKeyboard("w", false, false), {
     kind: "recognized",
