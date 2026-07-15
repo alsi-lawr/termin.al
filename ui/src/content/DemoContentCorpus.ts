@@ -66,7 +66,7 @@ const toolsText =
   "# Tools\n\n- TypeScript\n- React\n- F#\n- Markdown";
 const nowText = "# Now\n\nThis demonstration has no live activity.";
 const projectText =
-  "# Sample Project README\n\nA fictional workspace used to demonstrate local Markdown documents.";
+  "# Sample Project\n\nA fictional workspace used to demonstrate local Markdown documents.\n\nRepository: demo/sample-project\nRepository URL: https://example.com/demo/sample-project\nTags: #typescript #fsharp";
 const blogText =
   "# Stable Interfaces\n\nA synthetic post about typed outcomes and explicit dependencies.";
 const noteText =

@@ -1,13 +1,19 @@
 import {
   createDirectoryViewerContent,
   createDocumentViewerContent,
+  createProjectGalleryViewerContent,
+  createPublicationListViewerContent,
   type ViewerContent,
   type ViewerOpenDisposition,
+  type ViewerProjectCard,
+  type ViewerPublicationEntry,
 } from "../../content/ViewerContent.ts";
+import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   listVirtualDirectory,
   resolveVirtualPath,
   type VirtualDocumentSupplier,
+  type VirtualFileNode,
   type VirtualFilesystem,
   type VirtualPathFailure,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
@@ -50,6 +56,19 @@ type OpenTargetResult =
       kind: "failed";
       outcome: CommandOutcome;
     }>
+  | Readonly<{ kind: "cancelled" }>;
+
+type LoadedDirectoryDocument = Readonly<{
+  node: VirtualFileNode;
+  document: MarkdownDocument;
+}>;
+
+type LoadedDirectoryDocumentsResult =
+  | Readonly<{
+      kind: "available";
+      documents: ReadonlyArray<LoadedDirectoryDocument>;
+    }>
+  | Readonly<{ kind: "missing" }>
   | Readonly<{ kind: "cancelled" }>;
 
 const commandGroups = [
@@ -197,6 +216,134 @@ function noArguments(
   return invocation.arguments.length === 0 ? undefined : `Usage: ${usage}`;
 }
 
+function markdownTitle(document: MarkdownDocument, fallback: string): string {
+  const heading = document.text
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith("# "));
+  const title = heading?.slice(2).trim();
+
+  return title === undefined || title.length === 0 ? fallback : title;
+}
+
+function markdownSummary(document: MarkdownDocument): string {
+  const summary = document.text
+    .split(/\r?\n\s*\r?\n/u)
+    .map((paragraph) => paragraph.trim())
+    .find(
+      (paragraph) =>
+        paragraph.length > 0 &&
+        !paragraph.startsWith("#") &&
+        !paragraph.startsWith("Repository:") &&
+        !paragraph.startsWith("Repository URL:") &&
+        !paragraph.startsWith("Tags:"),
+    );
+
+  return summary ?? "No summary is available.";
+}
+
+function projectRepository(document: MarkdownDocument): Readonly<{
+  repository: string;
+  repositoryUrl?: string;
+}> {
+  const lines = document.text.split(/\r?\n/u);
+  const repository = lines
+    .find((line) => line.startsWith("Repository:"))
+    ?.slice("Repository:".length)
+    .trim();
+  const repositoryUrl = lines
+    .find((line) => line.startsWith("Repository URL:"))
+    ?.slice("Repository URL:".length)
+    .trim();
+
+  return {
+    repository:
+      repository === undefined || repository.length === 0
+        ? "Repository unavailable"
+        : repository,
+    ...(repositoryUrl === undefined || repositoryUrl.length === 0
+      ? {}
+      : { repositoryUrl }),
+  };
+}
+
+function projectTags(document: MarkdownDocument): ReadonlyArray<string> {
+  const tags = document.text
+    .split(/\r?\n/u)
+    .find((line) => line.startsWith("Tags:"))
+    ?.slice("Tags:".length)
+    .trim();
+
+  return tags === undefined || tags.length === 0
+    ? []
+    : tags
+        .split(/\s+/u)
+        .filter((tag) => tag.startsWith("#") && tag.length > 1)
+        .map((tag) => tag.slice(1));
+}
+
+function projectCard({
+  node,
+  document,
+}: LoadedDirectoryDocument): ViewerProjectCard {
+  const repository = projectRepository(document);
+
+  return {
+    id: node.id,
+    name: markdownTitle(document, node.name),
+    summary: markdownSummary(document),
+    repository: repository.repository,
+    ...(repository.repositoryUrl === undefined
+      ? {}
+      : { repositoryUrl: repository.repositoryUrl }),
+    tags: projectTags(document),
+    document,
+  };
+}
+
+function publicationEntry({
+  node,
+  document,
+}: LoadedDirectoryDocument): ViewerPublicationEntry {
+  return {
+    id: node.id,
+    title: markdownTitle(document, node.name),
+    summary: markdownSummary(document),
+    publishedAt: node.updatedAt,
+    document,
+  };
+}
+
+async function loadDirectoryDocuments(
+  entries: ReadonlyArray<VirtualFileNode>,
+  documents: VirtualDocumentSupplier,
+  signal: AbortSignal,
+): Promise<LoadedDirectoryDocumentsResult> {
+  const loaded = await Promise.all(
+    entries.map(async (node) => ({
+      node,
+      result: await documents.read(node.documentHandle, signal),
+    })),
+  );
+
+  if (signal.aborted || loaded.some(({ result }) => result.kind === "cancelled")) {
+    return { kind: "cancelled" };
+  }
+
+  if (loaded.some(({ result }) => result.kind === "missing")) {
+    return { kind: "missing" };
+  }
+
+  const available: LoadedDirectoryDocument[] = [];
+
+  for (const entry of loaded) {
+    if (entry.result.kind === "available") {
+      available.push({ node: entry.node, document: entry.result.document });
+    }
+  }
+
+  return { kind: "available", documents: available };
+}
+
 async function openTarget(
   commandName: string,
   filesystem: VirtualFilesystem,
@@ -227,6 +374,59 @@ async function openTarget(
 
     if (listing.kind !== "found") {
       return { kind: "failed", outcome: failureOutcome(commandName, listing) };
+    }
+
+    if (
+      resolution.node.path === "~/projects" ||
+      resolution.node.path === "~/blog" ||
+      resolution.node.path === "~/notes"
+    ) {
+      const files = listing.entries.filter(
+        (entry): entry is VirtualFileNode => entry.kind === "file",
+      );
+      const loaded = await loadDirectoryDocuments(
+        files,
+        documents,
+        context.signal,
+      );
+
+      if (loaded.kind === "cancelled") {
+        return { kind: "cancelled" };
+      }
+
+      if (loaded.kind === "missing") {
+        return {
+          kind: "failed",
+          outcome: unavailableContentOutcome(commandName),
+        };
+      }
+
+      if (resolution.node.path === "~/projects") {
+        return {
+          kind: "viewer",
+          viewer: createProjectGalleryViewerContent({
+            title: "Projects",
+            projects: loaded.documents.map(projectCard),
+          }),
+        };
+      }
+
+      const publicationKind =
+        resolution.node.path === "~/blog" ? "blog" : "notes";
+      const entries = loaded.documents
+        .map(publicationEntry)
+        .sort((left, right) =>
+          right.publishedAt.localeCompare(left.publishedAt),
+        );
+
+      return {
+        kind: "viewer",
+        viewer: createPublicationListViewerContent({
+          title: publicationKind === "blog" ? "Blog" : "Notes",
+          publicationKind,
+          entries,
+        }),
+      };
     }
 
     return {

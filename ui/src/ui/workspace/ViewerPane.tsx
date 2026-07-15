@@ -9,7 +9,10 @@ import {
 import {
   viewerTitle,
   type ViewerContent,
+  type ViewerProjectCard,
+  type ViewerPublicationEntry,
 } from "../../content/ViewerContent.ts";
+import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   MarkdownRenderer,
   markdownSearchMatches,
@@ -62,6 +65,179 @@ type MarkdownSearch =
 
 const idleMarkdownSearch: MarkdownSearch = { kind: "idle" };
 
+type OpenedViewerDocument = Readonly<{
+  title: string;
+  document: MarkdownDocument;
+}>;
+
+type ProjectIcon = Readonly<{
+  glyph: string;
+  label: string;
+}>;
+
+function generatedProjectGlyph(name: string): string {
+  const initials = name
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((part) => part.length > 0)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase() ?? "")
+    .join("");
+
+  return initials.length === 0 ? "◇" : initials;
+}
+
+function projectIcon(project: ViewerProjectCard): ProjectIcon {
+  const tags = new Set(project.tags.map((tag) => tag.toLocaleLowerCase()));
+
+  if (tags.has("fsharp")) {
+    return { glyph: "λ", label: "F#" };
+  }
+
+  if (tags.has("typescript")) {
+    return { glyph: "TS", label: "TypeScript" };
+  }
+
+  if (tags.has("react")) {
+    return { glyph: "⚛", label: "React" };
+  }
+
+  if (tags.has("nix")) {
+    return { glyph: "❄", label: "Nix" };
+  }
+
+  return {
+    glyph: generatedProjectGlyph(project.name),
+    label: `${project.name} generated`,
+  };
+}
+
+function ProjectGallery({
+  projects,
+  onOpen,
+}: Readonly<{
+  projects: ReadonlyArray<ViewerProjectCard>;
+  onOpen: (document: OpenedViewerDocument) => void;
+}>): ReactElement {
+  if (projects.length === 0) {
+    return (
+      <p className="mt-3 text-text-muted" role="status">
+        No public projects are available.
+      </p>
+    );
+  }
+
+  return (
+    <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {projects.map((project) => {
+        const icon = projectIcon(project);
+
+        return (
+          <article
+            key={project.id}
+            className="flex min-w-0 flex-col rounded-md border border-surface-border bg-surface-raised p-3"
+          >
+            <div className="flex items-start gap-3">
+              <span
+                className="flex size-10 shrink-0 items-center justify-center rounded border border-ui-subtle bg-surface-deepest font-semibold text-ui-accent"
+                aria-label={`${icon.label} project icon`}
+              >
+                {icon.glyph}
+              </span>
+              <div className="min-w-0">
+                <h3 className="font-semibold text-text-bright">{project.name}</h3>
+                <p className="wrap-break-words text-xs text-text-muted">
+                  {project.repository}
+                </p>
+              </div>
+            </div>
+            <p className="mt-3 flex-1 text-text-primary">{project.summary}</p>
+            {project.tags.length === 0 ? null : (
+              <ul className="mt-3 flex flex-wrap gap-1" aria-label="Project tags">
+                {project.tags.map((tag) => (
+                  <li
+                    key={tag}
+                    className="rounded border border-ui-subtle px-1.5 py-0.5 text-xs text-text-muted"
+                  >
+                    #{tag}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded border border-ui-accent px-2 py-1 text-text-bright hover:bg-surface-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
+                onClick={() => {
+                  onOpen({ title: `${project.name} README`, document: project.document });
+                }}
+              >
+                Open README
+              </button>
+              {project.repositoryUrl === undefined ? null : (
+                <a
+                  className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
+                  href={project.repositoryUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Repository ↗
+                </a>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function PublicationList({
+  publicationKind,
+  entries,
+  onOpen,
+}: Readonly<{
+  publicationKind: "blog" | "notes";
+  entries: ReadonlyArray<ViewerPublicationEntry>;
+  onOpen: (document: OpenedViewerDocument) => void;
+}>): ReactElement {
+  if (entries.length === 0) {
+    return (
+      <p className="mt-3 text-text-muted" role="status">
+        {publicationKind === "blog"
+          ? "No blog posts are published."
+          : "No public notes are published."}
+      </p>
+    );
+  }
+
+  return (
+    <ol className="mt-3 space-y-3">
+      {entries.map((entry) => (
+        <li key={entry.id}>
+          <article className="rounded-md border border-surface-border bg-surface-raised p-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="font-semibold text-text-bright">{entry.title}</h3>
+              <time className="text-xs text-text-muted" dateTime={entry.publishedAt}>
+                {entry.publishedAt.slice(0, 10)}
+              </time>
+            </div>
+            <p className="mt-2 text-text-primary">{entry.summary}</p>
+            <button
+              type="button"
+              className="mt-3 rounded border border-ui-accent px-2 py-1 text-text-bright hover:bg-surface-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
+              onClick={() => {
+                onOpen({ title: entry.title, document: entry.document });
+              }}
+            >
+              Open {publicationKind === "blog" ? "post" : "note"}
+            </button>
+          </article>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function markdownSearchStatus(
   query: string,
   matchCount: number,
@@ -87,14 +263,30 @@ export function ViewerPane({
   const viewerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const title = viewerTitle(viewer);
+  const [openedDocument, setOpenedDocument] =
+    useState<OpenedViewerDocument>();
+  const activeViewer: ViewerContent =
+    openedDocument === undefined
+      ? viewer
+      : {
+          kind: "document",
+          title: openedDocument.title,
+          presentation: "inline",
+          document: openedDocument.document,
+        };
+  const title = viewerTitle(activeViewer);
   const isRawPager =
-    viewer.kind === "document" && viewer.presentation === "raw-pager";
+    activeViewer.kind === "document" &&
+    activeViewer.presentation === "raw-pager";
   const markdownDocument =
-    viewer.kind === "document" && viewer.presentation === "inline"
-      ? viewer.document
+    activeViewer.kind === "document" && activeViewer.presentation === "inline"
+      ? activeViewer.document
       : undefined;
-  const rawText = isRawPager ? viewer.document.text : "";
+  const rawText =
+    activeViewer.kind === "document" &&
+    activeViewer.presentation === "raw-pager"
+      ? activeViewer.document.text
+      : "";
   const [rawPagerState, setRawPagerState] = useState(() =>
     createRawPagerState(rawText),
   );
@@ -115,6 +307,10 @@ export function ViewerPane({
       viewerRef.current?.focus({ preventScroll: true });
     }
   }, [focusVersion, isActive]);
+
+  useEffect(() => {
+    setOpenedDocument(undefined);
+  }, [viewer]);
 
   useEffect(() => {
     setRawPagerState(createRawPagerState(rawText));
@@ -138,9 +334,16 @@ export function ViewerPane({
     match?.scrollIntoView({ block: "center" });
   }, [activeBlockIndex]);
 
+  const closeActiveViewer =
+    openedDocument === undefined
+      ? onClose
+      : (): void => {
+          setOpenedDocument(undefined);
+        };
+
   const applyPagerOperation = (operation: RawPagerOperation): void => {
     if (operation.kind === "quit") {
-      onClose?.();
+      closeActiveViewer?.();
       return;
     }
 
@@ -251,7 +454,7 @@ export function ViewerPane({
             metaKey: input.metaKey,
           },
       onPaneKeyInput,
-      onClose,
+      onClose: closeActiveViewer,
       onPagerOperation: applyPagerOperation,
       preventDefault: () => {
         defaultPrevented = true;
@@ -328,7 +531,7 @@ export function ViewerPane({
     if (markdownDocument !== undefined) {
       switch (control) {
         case "escape":
-          onClose?.();
+          closeActiveViewer?.();
           return;
         case "up":
           applyMarkdownOperation({ kind: "line-up" });
@@ -344,12 +547,12 @@ export function ViewerPane({
     }
 
     if (control === "escape") {
-      onClose?.();
+      closeActiveViewer?.();
     }
   };
 
   const content = (() => {
-    switch (viewer.kind) {
+    switch (activeViewer.kind) {
       case "placeholder":
         return (
           <p className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright">
@@ -357,7 +560,7 @@ export function ViewerPane({
           </p>
         );
       case "document":
-        if (viewer.presentation === "raw-pager") {
+        if (activeViewer.presentation === "raw-pager") {
           const status = rawPagerStatus(rawPagerState);
           const statusText = status.kind === "empty"
             ? "No lines"
@@ -376,7 +579,7 @@ export function ViewerPane({
                 className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright"
                 aria-label="Current raw pager page"
               >
-                {rawPagerPageText(viewer.document.text, rawPagerState)}
+                {rawPagerPageText(activeViewer.document.text, rawPagerState)}
               </pre>
               <p className="mt-3 text-xs text-text-muted">
                 ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · Esc/q return
@@ -431,7 +634,7 @@ export function ViewerPane({
               </p>
             ) : null}
             <MarkdownRenderer
-              document={viewer.document}
+              document={activeViewer.document}
               activeBlockIndex={activeBlockIndex}
             />
             <p className="mt-3 text-xs text-text-muted">
@@ -442,9 +645,9 @@ export function ViewerPane({
       case "directory":
         return (
           <>
-            <p className="mt-2 text-text-muted">{viewer.path}</p>
+            <p className="mt-2 text-text-muted">{activeViewer.path}</p>
             <ul className="mt-2 space-y-1 text-text-bright">
-              {viewer.entries.map((entry) => (
+              {activeViewer.entries.map((entry) => (
                 <li key={entry.name}>
                   {entry.kind === "directory" ? `${entry.name}/` : entry.name}
                   {entry.kind === "locked-file" ? " [locked]" : ""}
@@ -452,6 +655,21 @@ export function ViewerPane({
               ))}
             </ul>
           </>
+        );
+      case "project-gallery":
+        return (
+          <ProjectGallery
+            projects={activeViewer.projects}
+            onOpen={setOpenedDocument}
+          />
+        );
+      case "publication-list":
+        return (
+          <PublicationList
+            publicationKind={activeViewer.publicationKind}
+            entries={activeViewer.entries}
+            onOpen={setOpenedDocument}
+          />
         );
     }
   })();
@@ -469,13 +687,13 @@ export function ViewerPane({
       <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-semibold text-ui-accent">{title}</h2>
-          {onClose === undefined ? null : (
+          {closeActiveViewer === undefined ? null : (
             <button
               type="button"
               className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent"
-              onClick={onClose}
+              onClick={closeActiveViewer}
             >
-              Return
+              {openedDocument === undefined ? "Return" : "Back"}
             </button>
           )}
         </div>

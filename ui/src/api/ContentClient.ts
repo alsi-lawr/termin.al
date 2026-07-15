@@ -139,7 +139,8 @@ function projectDocumentText(project: ContentProjects["projects"][number]): stri
     "",
     project.summary,
     "",
-    `Repository: ${project.url.value}`,
+    `Repository: ${project.repository.value}`,
+    `Repository URL: ${project.url.value}`,
     tags.length === 0 ? "" : `Tags: ${tags}`,
   ]
     .filter((line) => line.length > 0)

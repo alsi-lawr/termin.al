@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
+  createVirtualFilesystem,
   virtualHomeDirectory,
   type VirtualDocumentSupplier,
+  type VirtualFilesystem,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
@@ -52,16 +54,17 @@ function createThemeController(): ThemeController {
 function createRegistry(
   documents: VirtualDocumentSupplier = demoContentCorpus.documents,
   themes: ThemeController = createThemeController(),
+  filesystem: VirtualFilesystem = demoContentCorpus.filesystem,
 ): CommandRegistry {
   return createCommandRegistry({
     commands: [
       ...createReadOnlyCommandDefinitions({
-        filesystem: demoContentCorpus.filesystem,
+        filesystem,
         documents,
         recursiveEntryLimit: 100,
       }),
       ...createPortfolioCommandDefinitions({
-        filesystem: demoContentCorpus.filesystem,
+        filesystem,
         documents,
         themes,
       }),
@@ -158,12 +161,85 @@ test("opens fixture documents inline and directory targets in requested split ef
     kind: "split",
     orientation: "vertical",
   });
-  assert.equal(splitEffect.viewer.kind, "directory");
-  if (splitEffect.viewer.kind === "directory") {
-    assert.equal(splitEffect.viewer.path, "~/projects");
-    assert.deepEqual(splitEffect.viewer.entries, [
-      { name: "sample-project.md", kind: "file" },
+  assert.equal(splitEffect.viewer.kind, "project-gallery");
+  if (splitEffect.viewer.kind === "project-gallery") {
+    assert.equal(splitEffect.viewer.projects[0]?.name, "Sample Project");
+    assert.equal(
+      splitEffect.viewer.projects[0]?.repository,
+      "demo/sample-project",
+    );
+    assert.deepEqual(splitEffect.viewer.projects[0]?.tags, [
+      "typescript",
+      "fsharp",
     ]);
+  }
+});
+
+test("builds blog and note listings with document-open data", async () => {
+  const registry = createRegistry();
+  const blog = succeeded(await execute("blog", registry));
+  const notes = succeeded(await execute("notes", registry));
+  const blogEffect = blog.effects[0];
+  const notesEffect = notes.effects[0];
+
+  if (
+    blogEffect === undefined ||
+    blogEffect.kind !== "open-viewer" ||
+    notesEffect === undefined ||
+    notesEffect.kind !== "open-viewer"
+  ) {
+    assert.fail("Expected publication viewer effects.");
+  }
+
+  assert.equal(blogEffect.viewer.kind, "publication-list");
+  assert.equal(notesEffect.viewer.kind, "publication-list");
+
+  if (
+    blogEffect.viewer.kind === "publication-list" &&
+    notesEffect.viewer.kind === "publication-list"
+  ) {
+    assert.equal(blogEffect.viewer.publicationKind, "blog");
+    assert.equal(blogEffect.viewer.entries[0]?.title, "Stable Interfaces");
+    assert.match(blogEffect.viewer.entries[0]?.summary ?? "", /synthetic post/u);
+    assert.equal(notesEffect.viewer.publicationKind, "notes");
+    assert.equal(notesEffect.viewer.entries[0]?.document.source.path, "~/notes/sample-note.md");
+  }
+});
+
+test("represents an empty public collection as an empty listing", async () => {
+  const emptyFilesystem = createVirtualFilesystem({
+    entries: [
+      {
+        kind: "directory",
+        id: "home",
+        path: "~",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "directory",
+        id: "blog",
+        path: "~/blog",
+        updatedAt: "2026-01-02T00:00:00.000Z",
+        size: 0,
+      },
+    ],
+  });
+  const registry = createRegistry(
+    demoContentCorpus.documents,
+    createThemeController(),
+    emptyFilesystem,
+  );
+  const outcome = succeeded(await execute("blog", registry));
+  const effect = outcome.effects[0];
+
+  if (effect === undefined || effect.kind !== "open-viewer") {
+    assert.fail("Expected an empty publication viewer effect.");
+  }
+
+  assert.equal(effect.viewer.kind, "publication-list");
+  if (effect.viewer.kind === "publication-list") {
+    assert.deepEqual(effect.viewer.entries, []);
   }
 });
 
@@ -265,7 +341,7 @@ test("provides discoverable navigation commands and useful unavailable-feature d
   }
 
   assert.equal(aboutEffect.viewer.kind, "document");
-  assert.equal(projectsEffect.viewer.kind, "directory");
+  assert.equal(projectsEffect.viewer.kind, "project-gallery");
   assert.equal(cv.kind, "failed");
   assert.equal(invalidOpen.kind, "failed");
   assert.deepEqual(
