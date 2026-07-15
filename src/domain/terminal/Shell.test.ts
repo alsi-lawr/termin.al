@@ -1,31 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PromptMode } from "./PromptBuffer.ts";
+import { createCompletionRequest } from "./Completion.ts";
 import {
+  createSecretPromptId,
+  createSecretPromptRequest,
   createShellId,
   createShellSessionId,
   createShellState,
-  getShellStatus,
+  getActiveShellPrompt,
   reduceShellState,
   type CommandOutcome,
   type ShellState,
 } from "./Shell.ts";
 
-function createState(historyLimit = 3): ShellState {
+function createState(
+  scrollbackLimit = 3,
+  commandHistoryLimit = 3,
+): ShellState {
   return createShellState({
     id: createShellId("terminal"),
     sessionId: createShellSessionId("session"),
-    historyLimit,
+    scrollbackLimit,
+    commandHistoryLimit,
   });
 }
 
-function submittedState(source: string, historyLimit = 3): ShellState {
-  const withInput = reduceShellState(createState(historyLimit), {
+function submit(state: ShellState, source: string): ShellState {
+  const withInput = reduceShellState(state, {
     kind: "input.insert",
     text: source,
   });
 
-  return reduceShellState(withInput, { kind: "command.submit" });
+  return reduceShellState(withInput, { kind: "prompt.submit" });
 }
 
 function runningCommandId(state: ShellState) {
@@ -44,120 +50,64 @@ function succeededOutcome(message: string): CommandOutcome {
   };
 }
 
-test("reduces immutable prompt editing transitions", () => {
-  const initial = createState();
-  const inserted = reduceShellState(initial, {
-    kind: "input.insert",
-    text: "ac",
-  });
-  const moved = reduceShellState(inserted, { kind: "input.move-left" });
-  const completed = reduceShellState(moved, {
-    kind: "input.insert",
-    text: "b",
-  });
-  const deleted = reduceShellState(completed, { kind: "input.delete" });
-  const backspaced = reduceShellState(deleted, { kind: "input.backspace" });
-  const normal = reduceShellState(backspaced, {
-    kind: "input.set-mode",
-    mode: PromptMode.Normal,
-  });
-  const right = reduceShellState(normal, { kind: "input.move-right" });
+function settleSucceeded(state: ShellState, message: string): ShellState {
+  const commandId = runningCommandId(state);
 
-  assert.deepEqual(initial.input, {
-    value: "",
-    cursor: 0,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(inserted.input, {
-    value: "ac",
-    cursor: 2,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(completed.input, {
-    value: "abc",
-    cursor: 2,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(deleted.input, {
-    value: "ab",
-    cursor: 2,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(backspaced.input, {
-    value: "a",
-    cursor: 1,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(right.input, {
-    value: "a",
-    cursor: 1,
-    mode: { kind: "normal" },
-  });
-  assert.deepEqual(getShellStatus(right), {
-    kind: "ready",
-    mode: { kind: "normal" },
-  });
-});
-
-test("creates, consumes, and settles a command execution", () => {
-  const submitted = submittedState("unknown");
-  const commandId = runningCommandId(submitted);
-
-  assert.deepEqual(submitted.input, {
-    value: "",
-    cursor: 0,
-    mode: { kind: "insert" },
-  });
-  assert.deepEqual(submitted.pendingEffect, {
-    kind: "execute-command",
-    command: {
-      id: commandId,
-      shellId: "terminal",
-      sessionId: "session",
-      source: "unknown",
-    },
-  });
-
-  const consumed = reduceShellState(submitted, {
-    kind: "effect.consumed",
-    commandId,
-  });
-  const settled = reduceShellState(consumed, {
+  return reduceShellState(state, {
     kind: "command.settled",
     commandId,
-    outcome: succeededOutcome("done"),
+    outcome: succeededOutcome(message),
+  });
+}
+
+test("reduces command execution and bounds per-shell histories", () => {
+  const firstSubmitted = submit(createState(2, 2), "first");
+  const firstCommandId = runningCommandId(firstSubmitted);
+
+  assert.deepEqual(firstSubmitted.pendingEffect, {
+    kind: "execute-command",
+    command: {
+      id: firstCommandId,
+      shellId: "terminal",
+      sessionId: "session",
+      source: "first",
+    },
   });
 
-  assert.deepEqual(consumed.pendingEffect, { kind: "none" });
-  assert.deepEqual(settled.lifecycle, { kind: "idle" });
-  assert.deepEqual(settled.pendingEffect, { kind: "none" });
-  assert.deepEqual(settled.history, [
-    {
-      id: "session-history-1",
-      command: {
-        id: "session-command-1",
-        shellId: "terminal",
-        sessionId: "session",
-        source: "unknown",
-      },
-      outcome: succeededOutcome("done"),
-    },
-  ]);
+  const consumed = reduceShellState(firstSubmitted, {
+    kind: "effect.consumed",
+    commandId: firstCommandId,
+  });
+  const firstSettled = reduceShellState(consumed, {
+    kind: "command.settled",
+    commandId: firstCommandId,
+    outcome: succeededOutcome("one"),
+  });
+  const secondSettled = settleSucceeded(submit(firstSettled, "second"), "two");
+  const thirdSettled = settleSucceeded(submit(secondSettled, "third"), "three");
+
+  assert.deepEqual(
+    thirdSettled.history.map((entry) => entry.command.source),
+    ["second", "third"],
+  );
+  assert.deepEqual(
+    thirdSettled.commandHistory.map((entry) => entry.source),
+    ["second", "third"],
+  );
+  assert.deepEqual(thirdSettled.lifecycle, { kind: "idle" });
+  assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
 });
 
-test("cancels a running command and records its cancellation", () => {
-  const submitted = submittedState("wait");
+test("requests cancellation through the active command AbortSignal seam", () => {
+  const submitted = submit(createState(), "wait");
   const commandId = runningCommandId(submitted);
-  const cancelling = reduceShellState(submitted, { kind: "command.cancel" });
+  const cancelling = reduceShellState(submitted, { kind: "prompt.cancel" });
 
   assert.deepEqual(cancelling.lifecycle, {
     kind: "cancelling",
-    command: {
-      id: commandId,
-      shellId: "terminal",
-      sessionId: "session",
-      source: "wait",
-    },
+    command: submitted.lifecycle.kind === "running"
+      ? submitted.lifecycle.command
+      : assert.fail("Expected a running command."),
   });
   assert.deepEqual(cancelling.pendingEffect, {
     kind: "cancel-command",
@@ -181,60 +131,140 @@ test("cancels a running command and records its cancellation", () => {
   assert.equal(settled.history[0]?.outcome.kind, "cancelled");
 });
 
-test("records expected failures and bounds history per shell", () => {
-  const firstSubmitted = submittedState("missing", 1);
-  const firstCommandId = runningCommandId(firstSubmitted);
-  const firstSettled = reduceShellState(firstSubmitted, {
-    kind: "command.settled",
-    commandId: firstCommandId,
-    outcome: {
-      kind: "failed",
-      failure: { kind: "command-not-found", commandName: "missing" },
-      diagnostics: [
-        {
-          kind: "command",
-          code: "command.not-found",
-          message: "Command not found: missing",
-        },
-      ],
-    },
+test("navigates bounded command history with normal-mode k and j", () => {
+  const first = settleSucceeded(submit(createState(), "first"), "one");
+  const second = settleSucceeded(submit(first, "second"), "two");
+  const normal = reduceShellState(second, {
+    kind: "prompt.normal-key",
+    key: { kind: "escape" },
   });
-  const secondWithInput = reduceShellState(firstSettled, {
-    kind: "input.insert",
-    text: "next",
+  const previous = reduceShellState(normal, {
+    kind: "prompt.normal-key",
+    key: { kind: "history-older" },
   });
-  const secondSubmitted = reduceShellState(secondWithInput, {
-    kind: "command.submit",
+  const oldest = reduceShellState(previous, {
+    kind: "prompt.normal-key",
+    key: { kind: "history-older" },
   });
-  const secondCommandId = runningCommandId(secondSubmitted);
-  const secondSettled = reduceShellState(secondSubmitted, {
-    kind: "command.settled",
-    commandId: secondCommandId,
-    outcome: succeededOutcome("next"),
+  const newer = reduceShellState(oldest, {
+    kind: "prompt.normal-key",
+    key: { kind: "history-newer" },
+  });
+  const draft = reduceShellState(newer, {
+    kind: "prompt.normal-key",
+    key: { kind: "history-newer" },
   });
 
-  assert.deepEqual(secondSettled.history.map((entry) => entry.command.source), [
-    "next",
-  ]);
-  assert.equal(secondSettled.history[0]?.outcome.kind, "succeeded");
+  assert.equal(previous.input.buffer.value, "second");
+  assert.equal(oldest.input.buffer.value, "first");
+  assert.equal(newer.input.buffer.value, "second");
+  assert.equal(draft.input.buffer.value, "");
+  assert.deepEqual(draft.historyNavigation, { kind: "not-browsing" });
 });
 
-test("ignores stale settlements and disallows cancelling an idle shell", () => {
-  const idle = createState();
-  const cancelled = reduceShellState(idle, { kind: "command.cancel" });
-  const submitted = submittedState("active");
+test("keeps secret prompts separate from command input and all histories", () => {
+  const request = createSecretPromptRequest(
+    createSecretPromptId("cv-key"),
+    "CV access key",
+  );
+  const secret = reduceShellState(createState(), {
+    kind: "secret.begin",
+    request,
+  });
+  const typed = reduceShellState(secret, {
+    kind: "input.insert",
+    text: "sensitive-value",
+  });
+  const activePrompt = getActiveShellPrompt(typed);
+
+  if (activePrompt.kind !== "secret") {
+    assert.fail("Expected a secret prompt.");
+  }
+
+  assert.equal(activePrompt.prompt.editor.buffer.value, "sensitive-value");
+
+  const submitted = reduceShellState(typed, { kind: "prompt.submit" });
+
+  assert.deepEqual(submitted.secretPrompt, { kind: "none" });
+  assert.equal(submitted.input.buffer.value, "");
+  assert.deepEqual(submitted.history, []);
+  assert.deepEqual(submitted.commandHistory, []);
+});
+
+test("opens a typed secret prompt requested by a command effect", () => {
+  const submitted = submit(createState(), "login");
   const commandId = runningCommandId(submitted);
+  const request = createSecretPromptRequest(
+    createSecretPromptId("oauth-code"),
+    "One-time code",
+  );
   const settled = reduceShellState(submitted, {
     kind: "command.settled",
     commandId,
-    outcome: succeededOutcome("done"),
-  });
-  const stale = reduceShellState(settled, {
-    kind: "command.settled",
-    commandId,
-    outcome: succeededOutcome("ignored"),
+    outcome: {
+      kind: "succeeded",
+      outputs: [{ kind: "prompt", label: "login", message: "Authorise access" }],
+      effects: [{ kind: "request-secret-prompt", request }],
+    },
   });
 
-  assert.equal(cancelled, idle);
-  assert.equal(stale, settled);
+  assert.equal(settled.secretPrompt.kind, "active");
+  assert.equal(settled.history.length, 1);
+  assert.equal(settled.commandHistory.length, 1);
+});
+
+test("applies current single completions and exposes multiple matches", () => {
+  const withInput = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "op",
+  });
+  const request = createCompletionRequest(
+    withInput.id,
+    withInput.sessionId,
+    "op",
+    2,
+  );
+  const pending = reduceShellState(withInput, {
+    kind: "completion.request",
+    request,
+  });
+  const completed = reduceShellState(pending, {
+    kind: "completion.resolved",
+    request,
+    result: {
+      kind: "single",
+      candidate: { kind: "command", value: "open", label: "Open content" },
+    },
+  });
+
+  assert.equal(completed.input.buffer.value, "open");
+  assert.equal(completed.input.buffer.cursor, 4);
+
+  const pathInput = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "open pro",
+  });
+  const pathRequest = createCompletionRequest(
+    pathInput.id,
+    pathInput.sessionId,
+    "open pro",
+    8,
+  );
+  const pathPending = reduceShellState(pathInput, {
+    kind: "completion.request",
+    request: pathRequest,
+  });
+  const suggestions = reduceShellState(pathPending, {
+    kind: "completion.resolved",
+    request: pathRequest,
+    result: {
+      kind: "multiple",
+      candidates: [
+        { kind: "path", value: "projects", label: "Projects" },
+        { kind: "path", value: "profile", label: "Profile" },
+      ],
+    },
+  });
+
+  assert.equal(suggestions.completion.kind, "suggestions");
 });

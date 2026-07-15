@@ -1,5 +1,9 @@
 import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
-import type { ShellHistoryEntry } from "../../domain/terminal/Shell.ts";
+import type {
+  ShellCompletion,
+  ShellHistoryEntry,
+  ShellStatus,
+} from "../../domain/terminal/Shell.ts";
 import { InputRow } from "./InputRow";
 import { TerminalHistoryRow } from "./TerminalHistoryRow";
 
@@ -8,13 +12,38 @@ type TerminalViewportProps = Readonly<{
   prompt: string;
   currentInput: string;
   cursorColumn: number;
+  status: ShellStatus;
+  completion: ShellCompletion;
 }>;
+
+function statusMessage(status: ShellStatus, completion: ShellCompletion): string {
+  if (completion.kind === "pending") {
+    return "COMPLETING";
+  }
+
+  if (completion.kind === "suggestions") {
+    return `${completion.candidates.length} COMPLETIONS`;
+  }
+
+  switch (status.kind) {
+    case "ready":
+      return status.mode.kind === "insert" ? "INSERT" : "NORMAL";
+    case "secret":
+      return status.mode.kind === "insert" ? "SECRET INSERT" : "SECRET NORMAL";
+    case "running":
+      return "RUNNING";
+    case "cancelling":
+      return "CANCELLING";
+  }
+}
 
 export function TerminalViewport({
   rows,
   prompt,
   currentInput,
   cursorColumn,
+  status,
+  completion,
 }: TerminalViewportProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const inputMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -30,6 +59,7 @@ export function TerminalViewport({
     Math.min(cursorColumn, currentInput.length),
   );
   const cursorIndex = `${prompt} `.length + safeCursorColumn;
+  const promptStatus = statusMessage(status, completion);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
@@ -106,6 +136,18 @@ export function TerminalViewport({
         ))}
 
         <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
+        <div className="mt-2 text-neutral-500" aria-live="polite">
+          <span>{promptStatus}</span>
+          {completion.kind === "suggestions" ? (
+            <span className="ml-2">
+              {completion.candidates.map((candidate) => (
+                <span key={`${candidate.kind}-${candidate.value}`} className="mr-2">
+                  {candidate.value}
+                </span>
+              ))}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="pointer-events-none absolute inset-0 invisible -z-10 p-4">
@@ -130,6 +172,7 @@ export function TerminalViewport({
               activeLine={activeLine || `${prompt} `}
               cursorIndex={cursorIndex}
             />
+            <div className="mt-2 text-neutral-500">{promptStatus}</div>
           </div>
         </div>
       </div>

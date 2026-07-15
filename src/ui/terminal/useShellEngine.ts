@@ -1,38 +1,46 @@
 import { useEffect, useReducer, useRef } from "react";
 import {
+  createCompletionRequest,
+} from "../../domain/terminal/Completion.ts";
+import {
+  getActiveShellPrompt,
   reduceShellState,
   type CommandId,
+  type CommandOutcome,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
+import type { NormalPromptKey } from "../../domain/terminal/PromptEditor.ts";
 import {
   executeCommandLine,
 } from "../../application/commands/CommandExecution.ts";
 import type { CommandRegistry } from "../../application/commands/CommandRegistry.ts";
+import type { CompletionService } from "../../application/commands/Completion.ts";
 
 export type UseShellEngineOptions = Readonly<{
   initialState: ShellState;
   registry: CommandRegistry;
+  completionService: CompletionService;
 }>;
 
 export type ShellEngine = Readonly<{
   state: ShellState;
   insertText: (text: string) => void;
-  moveCursorLeft: () => void;
-  moveCursorRight: () => void;
-  backspace: () => void;
-  deleteAtCursor: () => void;
+  replaceInputValue: (value: string, cursor: number) => void;
+  moveCursor: (cursor: number) => void;
+  normalKey: (key: NormalPromptKey) => void;
   submit: () => void;
   cancel: () => void;
+  complete: () => void;
 }>;
 
-function discardedCommandOutcome(commandName: string) {
+function discardedCommandOutcome(commandName: string): CommandOutcome {
   return {
-    kind: "failed" as const,
-    failure: { kind: "execution-error" as const, commandName },
+    kind: "failed",
+    failure: { kind: "execution-error", commandName },
     diagnostics: [
       {
-        kind: "runtime" as const,
-        code: "runtime.execution-failed" as const,
+        kind: "runtime",
+        code: "runtime.execution-failed",
         message: "The command could not complete.",
       },
     ],
@@ -42,13 +50,16 @@ function discardedCommandOutcome(commandName: string) {
 export function useShellEngine({
   initialState,
   registry,
+  completionService,
 }: UseShellEngineOptions): ShellEngine {
   const [state, dispatch] = useReducer(reduceShellState, initialState);
   const controllers = useRef<Map<CommandId, AbortController>>(new Map());
+  const completionControllers = useRef<Set<AbortController>>(new Set());
   const mounted = useRef(false);
 
   useEffect(() => {
     const activeControllers = controllers.current;
+    const activeCompletionControllers = completionControllers.current;
     mounted.current = true;
 
     return () => {
@@ -58,7 +69,12 @@ export function useShellEngine({
         controller.abort();
       }
 
+      for (const controller of activeCompletionControllers) {
+        controller.abort();
+      }
+
       activeControllers.clear();
+      activeCompletionControllers.clear();
     };
   }, []);
 
@@ -116,14 +132,58 @@ export function useShellEngine({
     void runCommand();
   }, [registry, state.pendingEffect]);
 
+  const complete = (): void => {
+    const prompt = getActiveShellPrompt(state);
+
+    if (prompt.kind !== "command" || prompt.editor.buffer.mode.kind !== "insert") {
+      return;
+    }
+
+    for (const controller of completionControllers.current) {
+      controller.abort();
+    }
+
+    completionControllers.current.clear();
+
+    const request = createCompletionRequest(
+      state.id,
+      state.sessionId,
+      prompt.editor.buffer.value,
+      prompt.editor.buffer.cursor,
+    );
+    const controller = new AbortController();
+    completionControllers.current.add(controller);
+    dispatch({ kind: "completion.request", request });
+
+    const resolveCompletion = async (): Promise<void> => {
+      try {
+        const result = await completionService.complete(request, controller.signal);
+        completionControllers.current.delete(controller);
+
+        if (mounted.current) {
+          dispatch({ kind: "completion.resolved", request, result });
+        }
+      } catch {
+        completionControllers.current.delete(controller);
+
+        if (mounted.current) {
+          dispatch({ kind: "completion.failed", request });
+        }
+      }
+    };
+
+    void resolveCompletion();
+  };
+
   return {
     state,
     insertText: (text) => dispatch({ kind: "input.insert", text }),
-    moveCursorLeft: () => dispatch({ kind: "input.move-left" }),
-    moveCursorRight: () => dispatch({ kind: "input.move-right" }),
-    backspace: () => dispatch({ kind: "input.backspace" }),
-    deleteAtCursor: () => dispatch({ kind: "input.delete" }),
-    submit: () => dispatch({ kind: "command.submit" }),
-    cancel: () => dispatch({ kind: "command.cancel" }),
+    replaceInputValue: (value, cursor) =>
+      dispatch({ kind: "input.replace", value, cursor }),
+    moveCursor: (cursor) => dispatch({ kind: "input.move-cursor", cursor }),
+    normalKey: (key) => dispatch({ kind: "prompt.normal-key", key }),
+    submit: () => dispatch({ kind: "prompt.submit" }),
+    cancel: () => dispatch({ kind: "prompt.cancel" }),
+    complete,
   };
 }

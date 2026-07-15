@@ -72,6 +72,14 @@ export function insertPromptText(
   });
 }
 
+export function replacePromptBuffer(
+  buffer: PromptBuffer,
+  value: string,
+  cursor: number,
+): PromptBuffer {
+  return createPromptBuffer({ value, cursor, mode: buffer.mode });
+}
+
 export function movePromptCursorLeft(buffer: PromptBuffer): PromptBuffer {
   return createPromptBuffer({
     value: buffer.value,

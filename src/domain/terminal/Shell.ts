@@ -1,21 +1,30 @@
 import {
-  backspacePromptBuffer,
-  createEmptyPromptBuffer,
-  createPromptBuffer,
-  deletePromptBufferAtCursor,
-  insertPromptText,
-  movePromptCursorLeft,
-  movePromptCursorRight,
-  setPromptMode,
-  type PromptBuffer,
-  type PromptMode,
-} from "./PromptBuffer.ts";
+  backspacePromptEditor,
+  createEmptyPromptEditor,
+  createPromptEditorForHistory,
+  deletePromptEditorAtCursor,
+  insertPromptEditorText,
+  movePromptEditorCursor,
+  replacePromptEditorValue,
+  applyNormalPromptKey,
+  type NormalPromptKey,
+  type PromptEditor,
+} from "./PromptEditor.ts";
+import { PromptMode, type PromptMode as PromptModeValue } from "./PromptBuffer.ts";
+import {
+  createCompletionEdit,
+  type CompletionCandidate,
+  type CompletionRequest,
+  type CompletionResult,
+} from "./Completion.ts";
 import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
 
 declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
 declare const commandIdBrand: unique symbol;
 declare const shellHistoryEntryIdBrand: unique symbol;
+declare const commandHistoryEntryIdBrand: unique symbol;
+declare const secretPromptIdBrand: unique symbol;
 
 export type ShellId = string & {
   readonly [shellIdBrand]: "ShellId";
@@ -31,6 +40,14 @@ export type CommandId = string & {
 
 export type ShellHistoryEntryId = string & {
   readonly [shellHistoryEntryIdBrand]: "ShellHistoryEntryId";
+};
+
+export type CommandHistoryEntryId = string & {
+  readonly [commandHistoryEntryIdBrand]: "CommandHistoryEntryId";
+};
+
+export type SecretPromptId = string & {
+  readonly [secretPromptIdBrand]: "SecretPromptId";
 };
 
 export type ShellDiagnostic =
@@ -79,11 +96,16 @@ export type ShellOutput =
       lines: ReadonlyArray<string>;
     }>;
 
+export type SecretPromptRequest = Readonly<{
+  id: SecretPromptId;
+  label: string;
+}>;
+
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
   | Readonly<{
-      kind: "request-public-prompt";
-      label: string;
+      kind: "request-secret-prompt";
+      request: SecretPromptRequest;
     }>;
 
 export type CommandFailure =
@@ -148,6 +170,52 @@ export type ShellHistoryEntry = Readonly<{
   outcome: CommandOutcome;
 }>;
 
+export type CommandHistoryEntry = Readonly<{
+  id: CommandHistoryEntryId;
+  source: string;
+}>;
+
+export type SecretPromptState = Readonly<{
+  request: SecretPromptRequest;
+  editor: PromptEditor;
+}>;
+
+export type ActiveShellPrompt =
+  | Readonly<{
+      kind: "command";
+      editor: PromptEditor;
+    }>
+  | Readonly<{
+      kind: "secret";
+      prompt: SecretPromptState;
+    }>;
+
+export type SecretPrompt =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "active";
+      prompt: SecretPromptState;
+    }>;
+
+export type HistoryNavigation =
+  | Readonly<{ kind: "not-browsing" }>
+  | Readonly<{
+      kind: "browsing";
+      index: number;
+      draft: PromptEditor;
+    }>;
+
+export type ShellCompletion =
+  | Readonly<{ kind: "idle" }>
+  | Readonly<{
+      kind: "pending";
+      request: CompletionRequest;
+    }>
+  | Readonly<{
+      kind: "suggestions";
+      candidates: ReadonlyArray<CompletionCandidate>;
+    }>;
+
 export type ShellEffect =
   | Readonly<{ kind: "none" }>
   | Readonly<{
@@ -162,19 +230,29 @@ export type ShellEffect =
 export type ShellState = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
-  input: PromptBuffer;
+  input: PromptEditor;
+  secretPrompt: SecretPrompt;
   lifecycle: CommandLifecycle;
   history: ReadonlyArray<ShellHistoryEntry>;
-  historyLimit: number;
+  scrollbackLimit: number;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
+  commandHistoryLimit: number;
+  historyNavigation: HistoryNavigation;
+  completion: ShellCompletion;
   nextCommandSequence: number;
   nextHistorySequence: number;
+  nextCommandHistorySequence: number;
   pendingEffect: ShellEffect;
 }>;
 
 export type ShellStatus =
   | Readonly<{
       kind: "ready";
-      mode: PromptMode;
+      mode: PromptModeValue;
+    }>
+  | Readonly<{
+      kind: "secret";
+      mode: PromptModeValue;
     }>
   | Readonly<{
       kind: "running";
@@ -188,7 +266,8 @@ export type ShellStatus =
 export type CreateShellStateOptions = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
-  historyLimit: number;
+  scrollbackLimit: number;
+  commandHistoryLimit: number;
 }>;
 
 export type ShellAction =
@@ -196,15 +275,40 @@ export type ShellAction =
       kind: "input.insert";
       text: string;
     }>
-  | Readonly<{ kind: "input.move-left" }>
-  | Readonly<{ kind: "input.move-right" }>
+  | Readonly<{
+      kind: "input.replace";
+      value: string;
+      cursor: number;
+    }>
+  | Readonly<{
+      kind: "input.move-cursor";
+      cursor: number;
+    }>
   | Readonly<{ kind: "input.backspace" }>
   | Readonly<{ kind: "input.delete" }>
   | Readonly<{
-      kind: "input.set-mode";
-      mode: PromptMode;
+      kind: "prompt.normal-key";
+      key: NormalPromptKey;
     }>
-  | Readonly<{ kind: "command.submit" }>
+  | Readonly<{ kind: "prompt.submit" }>
+  | Readonly<{ kind: "prompt.cancel" }>
+  | Readonly<{
+      kind: "secret.begin";
+      request: SecretPromptRequest;
+    }>
+  | Readonly<{
+      kind: "completion.request";
+      request: CompletionRequest;
+    }>
+  | Readonly<{
+      kind: "completion.resolved";
+      request: CompletionRequest;
+      result: CompletionResult;
+    }>
+  | Readonly<{
+      kind: "completion.failed";
+      request: CompletionRequest;
+    }>
   | Readonly<{ kind: "command.cancel" }>
   | Readonly<{
       kind: "command.settled";
@@ -224,6 +328,12 @@ function assertStableIdentifier(value: string, label: string): void {
   }
 }
 
+function assertPositiveLimit(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+}
+
 function createCommandId(
   sessionId: ShellSessionId,
   sequence: number,
@@ -238,26 +348,178 @@ function createHistoryEntryId(
   return `${sessionId}-history-${sequence}` as ShellHistoryEntryId;
 }
 
-function createEmptyInput(mode: PromptMode): PromptBuffer {
-  return createPromptBuffer({ value: "", cursor: 0, mode });
+function createCommandHistoryEntryId(
+  sessionId: ShellSessionId,
+  sequence: number,
+): CommandHistoryEntryId {
+  return `${sessionId}-command-history-${sequence}` as CommandHistoryEntryId;
 }
 
-function appendHistory(
-  history: ReadonlyArray<ShellHistoryEntry>,
-  historyLimit: number,
-  entry: ShellHistoryEntry,
-): ReadonlyArray<ShellHistoryEntry> {
-  const nextHistory = [...history, entry];
+function appendBounded<Value>(
+  values: ReadonlyArray<Value>,
+  limit: number,
+  value: Value,
+): ReadonlyArray<Value> {
+  const nextValues = [...values, value];
 
-  if (nextHistory.length <= historyLimit) {
-    return nextHistory;
+  if (nextValues.length <= limit) {
+    return nextValues;
   }
 
-  return nextHistory.slice(nextHistory.length - historyLimit);
+  return nextValues.slice(nextValues.length - limit);
 }
 
 function canEditPrompt(state: ShellState): boolean {
   return state.lifecycle.kind === "idle";
+}
+
+function activePrompt(state: ShellState): ActiveShellPrompt {
+  if (state.secretPrompt.kind === "active") {
+    return { kind: "secret", prompt: state.secretPrompt.prompt };
+  }
+
+  return { kind: "command", editor: state.input };
+}
+
+function updateActiveEditor(
+  state: ShellState,
+  editor: PromptEditor,
+): ShellState {
+  if (state.secretPrompt.kind === "active") {
+    return {
+      ...state,
+      secretPrompt: {
+        kind: "active",
+        prompt: { ...state.secretPrompt.prompt, editor },
+      },
+      completion: { kind: "idle" },
+    };
+  }
+
+  return {
+    ...state,
+    input: editor,
+    historyNavigation: { kind: "not-browsing" },
+    completion: { kind: "idle" },
+  };
+}
+
+function createSecretPromptState(
+  request: SecretPromptRequest,
+): SecretPromptState {
+  return {
+    request,
+    editor: createEmptyPromptEditor(),
+  };
+}
+
+function isMatchingCompletionRequest(
+  state: ShellState,
+  request: CompletionRequest,
+): boolean {
+  const prompt = activePrompt(state);
+
+  return (
+    prompt.kind === "command" &&
+    prompt.editor.buffer.mode.kind === "insert" &&
+    prompt.editor.buffer.value === request.source &&
+    prompt.editor.buffer.cursor === request.cursor
+  );
+}
+
+function browseOlderHistory(state: ShellState): ShellState {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.commandHistory.length === 0 ||
+    state.input.buffer.mode.kind !== "normal"
+  ) {
+    return state;
+  }
+
+  const navigation = state.historyNavigation;
+  const index =
+    navigation.kind === "not-browsing"
+      ? state.commandHistory.length - 1
+      : Math.max(0, navigation.index - 1);
+  const entry = state.commandHistory[index];
+
+  if (!entry) {
+    return state;
+  }
+
+  return {
+    ...state,
+    input: createPromptEditorForHistory(
+      entry.source,
+      PromptMode.Normal,
+      state.input.register,
+    ),
+    historyNavigation: {
+      kind: "browsing",
+      index,
+      draft: navigation.kind === "not-browsing" ? state.input : navigation.draft,
+    },
+    completion: { kind: "idle" },
+  };
+}
+
+function browseNewerHistory(state: ShellState): ShellState {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.historyNavigation.kind === "not-browsing" ||
+    state.input.buffer.mode.kind !== "normal"
+  ) {
+    return state;
+  }
+
+  if (state.historyNavigation.index >= state.commandHistory.length - 1) {
+    return {
+      ...state,
+      input: state.historyNavigation.draft,
+      historyNavigation: { kind: "not-browsing" },
+      completion: { kind: "idle" },
+    };
+  }
+
+  const index = state.historyNavigation.index + 1;
+  const entry = state.commandHistory[index];
+
+  if (!entry) {
+    return state;
+  }
+
+  return {
+    ...state,
+    input: createPromptEditorForHistory(
+      entry.source,
+      PromptMode.Normal,
+      state.input.register,
+    ),
+    historyNavigation: { ...state.historyNavigation, index },
+    completion: { kind: "idle" },
+  };
+}
+
+function commandEffects(outcome: CommandOutcome): ReadonlyArray<CommandEffect> {
+  return outcome.kind === "succeeded" ? outcome.effects : [];
+}
+
+function requestedSecretPrompt(
+  effects: ReadonlyArray<CommandEffect>,
+): SecretPromptState | undefined {
+  const effect = effects.find(
+    (candidate) => candidate.kind === "request-secret-prompt",
+  );
+
+  if (!effect || effect.kind !== "request-secret-prompt") {
+    return undefined;
+  }
+
+  return createSecretPromptState(effect.request);
+}
+
+function clearsScrollback(effects: ReadonlyArray<CommandEffect>): boolean {
+  return effects.some((effect) => effect.kind === "clear-scrollback");
 }
 
 export function createShellId(value: string): ShellId {
@@ -270,32 +532,65 @@ export function createShellSessionId(value: string): ShellSessionId {
   return value as ShellSessionId;
 }
 
+export function createSecretPromptId(value: string): SecretPromptId {
+  assertStableIdentifier(value, "Secret prompt IDs");
+  return value as SecretPromptId;
+}
+
+export function createSecretPromptRequest(
+  id: SecretPromptId,
+  label: string,
+): SecretPromptRequest {
+  if (label.length === 0 || label.trim() !== label) {
+    throw new Error("Secret prompt labels must be non-empty trimmed strings.");
+  }
+
+  return { id, label };
+}
+
 export function createShellState({
   id,
   sessionId,
-  historyLimit,
+  scrollbackLimit,
+  commandHistoryLimit,
 }: CreateShellStateOptions): ShellState {
-  if (!Number.isSafeInteger(historyLimit) || historyLimit < 1) {
-    throw new Error("Shell history limits must be positive integers.");
-  }
+  assertPositiveLimit(scrollbackLimit, "Shell scrollback limits");
+  assertPositiveLimit(commandHistoryLimit, "Shell command history limits");
 
   return {
     id,
     sessionId,
-    input: createEmptyPromptBuffer(),
+    input: createEmptyPromptEditor(),
+    secretPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
     history: [],
-    historyLimit,
+    scrollbackLimit,
+    commandHistory: [],
+    commandHistoryLimit,
+    historyNavigation: { kind: "not-browsing" },
+    completion: { kind: "idle" },
     nextCommandSequence: 1,
     nextHistorySequence: 1,
+    nextCommandHistorySequence: 1,
     pendingEffect: { kind: "none" },
   };
 }
 
+export function getActiveShellPrompt(state: ShellState): ActiveShellPrompt {
+  return activePrompt(state);
+}
+
 export function getShellStatus(state: ShellState): ShellStatus {
+  if (state.secretPrompt.kind === "active") {
+    return {
+      kind: "secret",
+      mode: state.secretPrompt.prompt.editor.buffer.mode,
+    };
+  }
+
   switch (state.lifecycle.kind) {
     case "idle":
-      return { kind: "ready", mode: state.input.mode };
+      return { kind: "ready", mode: state.input.buffer.mode };
     case "running":
       return {
         kind: "running",
@@ -319,45 +614,107 @@ export function reduceShellState(
         return state;
       }
 
-      return { ...state, input: insertPromptText(state.input, action.text) };
-    case "input.move-left":
+      {
+        const prompt = activePrompt(state);
+        const editor =
+          prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+        return updateActiveEditor(state, insertPromptEditorText(editor, action.text));
+      }
+    case "input.replace": {
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      return { ...state, input: movePromptCursorLeft(state.input) };
-    case "input.move-right":
+      const prompt = activePrompt(state);
+      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+      if (editor.buffer.mode.kind !== "insert") {
+        return state;
+      }
+
+      return updateActiveEditor(
+        state,
+        replacePromptEditorValue(editor, action.value, action.cursor),
+      );
+    }
+    case "input.move-cursor": {
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      return { ...state, input: movePromptCursorRight(state.input) };
-    case "input.backspace":
+      const prompt = activePrompt(state);
+      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+      if (editor.buffer.mode.kind !== "insert") {
+        return state;
+      }
+
+      return updateActiveEditor(state, movePromptEditorCursor(editor, action.cursor));
+    }
+    case "input.backspace": {
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      return { ...state, input: backspacePromptBuffer(state.input) };
-    case "input.delete":
+      const prompt = activePrompt(state);
+      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+      if (editor.buffer.mode.kind !== "insert") {
+        return state;
+      }
+
+      return updateActiveEditor(state, backspacePromptEditor(editor));
+    }
+    case "input.delete": {
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      return {
-        ...state,
-        input: deletePromptBufferAtCursor(state.input),
-      };
-    case "input.set-mode":
+      const prompt = activePrompt(state);
+      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+      if (editor.buffer.mode.kind !== "insert") {
+        return state;
+      }
+
+      return updateActiveEditor(state, deletePromptEditorAtCursor(editor));
+    }
+    case "prompt.normal-key": {
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      return {
-        ...state,
-        input: setPromptMode(state.input, action.mode),
-      };
-    case "command.submit": {
-      if (!canEditPrompt(state) || state.input.value.trim().length === 0) {
+      if (action.key.kind === "history-older") {
+        return browseOlderHistory(state);
+      }
+
+      if (action.key.kind === "history-newer") {
+        return browseNewerHistory(state);
+      }
+
+      const prompt = activePrompt(state);
+      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+
+      if (
+        editor.buffer.mode.kind !== "normal" &&
+        action.key.kind !== "escape"
+      ) {
+        return state;
+      }
+
+      return updateActiveEditor(state, applyNormalPromptKey(editor, action.key));
+    }
+    case "prompt.submit": {
+      if (state.secretPrompt.kind === "active") {
+        return {
+          ...state,
+          secretPrompt: { kind: "none" },
+          completion: { kind: "idle" },
+        };
+      }
+
+      if (!canEditPrompt(state) || state.input.buffer.value.trim().length === 0) {
         return state;
       }
 
@@ -365,31 +722,125 @@ export function reduceShellState(
         id: createCommandId(state.sessionId, state.nextCommandSequence),
         shellId: state.id,
         sessionId: state.sessionId,
-        source: state.input.value,
+        source: state.input.buffer.value,
+      };
+      const commandHistoryEntry: CommandHistoryEntry = {
+        id: createCommandHistoryEntryId(
+          state.sessionId,
+          state.nextCommandHistorySequence,
+        ),
+        source: command.source,
       };
 
       return {
         ...state,
-        input: createEmptyInput(state.input.mode),
+        input: createEmptyPromptEditor(),
         lifecycle: { kind: "running", command },
+        commandHistory: appendBounded(
+          state.commandHistory,
+          state.commandHistoryLimit,
+          commandHistoryEntry,
+        ),
+        historyNavigation: { kind: "not-browsing" },
+        completion: { kind: "idle" },
         nextCommandSequence: state.nextCommandSequence + 1,
+        nextCommandHistorySequence: state.nextCommandHistorySequence + 1,
         pendingEffect: { kind: "execute-command", command },
       };
     }
-    case "command.cancel":
-      if (state.lifecycle.kind !== "running") {
+    case "prompt.cancel":
+      if (state.secretPrompt.kind === "active") {
+        return {
+          ...state,
+          secretPrompt: { kind: "none" },
+          completion: { kind: "idle" },
+        };
+      }
+
+      if (state.lifecycle.kind === "running") {
+        return {
+          ...state,
+          lifecycle: { kind: "cancelling", command: state.lifecycle.command },
+          pendingEffect: {
+            kind: "cancel-command",
+            commandId: state.lifecycle.command.id,
+          },
+        };
+      }
+
+      if (state.lifecycle.kind === "cancelling") {
         return state;
       }
 
       return {
         ...state,
-        lifecycle: { kind: "cancelling", command: state.lifecycle.command },
-        pendingEffect: {
-          kind: "cancel-command",
-          commandId: state.lifecycle.command.id,
-        },
+        input: createEmptyPromptEditor(),
+        historyNavigation: { kind: "not-browsing" },
+        completion: { kind: "idle" },
       };
-    case "command.settled":
+    case "secret.begin":
+      if (!canEditPrompt(state) || state.secretPrompt.kind === "active") {
+        return state;
+      }
+
+      return {
+        ...state,
+        secretPrompt: {
+          kind: "active",
+          prompt: createSecretPromptState(action.request),
+        },
+        completion: { kind: "idle" },
+      };
+    case "completion.request":
+      if (!canEditPrompt(state) || !isMatchingCompletionRequest(state, action.request)) {
+        return state;
+      }
+
+      return {
+        ...state,
+        completion: { kind: "pending", request: action.request },
+      };
+    case "completion.resolved":
+      if (
+        state.completion.kind !== "pending" ||
+        state.completion.request !== action.request ||
+        !isMatchingCompletionRequest(state, action.request)
+      ) {
+        return state;
+      }
+
+      if (action.result.kind === "single") {
+        const edit = createCompletionEdit(action.request, action.result.candidate);
+
+        return updateActiveEditor(
+          state,
+          replacePromptEditorValue(state.input, edit.value, edit.cursor),
+        );
+      }
+
+      if (action.result.kind === "multiple") {
+        return {
+          ...state,
+          completion: {
+            kind: "suggestions",
+            candidates: action.result.candidates,
+          },
+        };
+      }
+
+      return { ...state, completion: { kind: "idle" } };
+    case "completion.failed":
+      if (
+        state.completion.kind !== "pending" ||
+        state.completion.request !== action.request
+      ) {
+        return state;
+      }
+
+      return { ...state, completion: { kind: "idle" } };
+    case "command.cancel":
+      return reduceShellState(state, { kind: "prompt.cancel" });
+    case "command.settled": {
       if (
         state.lifecycle.kind === "idle" ||
         state.lifecycle.command.id !== action.commandId
@@ -397,10 +848,14 @@ export function reduceShellState(
         return state;
       }
 
+      const effects = commandEffects(action.outcome);
+      const existingHistory = clearsScrollback(effects) ? [] : state.history;
+      const secretPrompt = requestedSecretPrompt(effects);
+
       return {
         ...state,
         lifecycle: { kind: "idle" },
-        history: appendHistory(state.history, state.historyLimit, {
+        history: appendBounded(existingHistory, state.scrollbackLimit, {
           id: createHistoryEntryId(
             state.sessionId,
             state.nextHistorySequence,
@@ -408,9 +863,14 @@ export function reduceShellState(
           command: state.lifecycle.command,
           outcome: action.outcome,
         }),
+        secretPrompt:
+          secretPrompt === undefined
+            ? state.secretPrompt
+            : { kind: "active", prompt: secretPrompt },
         nextHistorySequence: state.nextHistorySequence + 1,
         pendingEffect: { kind: "none" },
       };
+    }
     case "effect.consumed":
       switch (state.pendingEffect.kind) {
         case "none":

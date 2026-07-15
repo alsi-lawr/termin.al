@@ -3,8 +3,15 @@ import {
   createShellId,
   createShellSessionId,
   createShellState,
+  getActiveShellPrompt,
+  getShellStatus,
 } from "../../domain/terminal/Shell.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
+import {
+  createCompletionService,
+  createEmptyPathCompletionProvider,
+  createRegistryCommandCompletionProvider,
+} from "../../application/commands/Completion.ts";
 import { InputCapture, type InputCaptureHandle } from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
 import { useShellEngine } from "./useShellEngine";
@@ -19,11 +26,33 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
     createShellState({
       id: createShellId("main-terminal"),
       sessionId: createShellSessionId("browser-session"),
-      historyLimit: 200,
+      scrollbackLimit: 200,
+      commandHistoryLimit: 100,
     }),
   );
   const [registry] = useState(() => createCommandRegistry({ commands: [] }));
-  const shell = useShellEngine({ initialState, registry });
+  const [completionService] = useState(() =>
+    createCompletionService({
+      commands: createRegistryCommandCompletionProvider(registry),
+      paths: createEmptyPathCompletionProvider(),
+    }),
+  );
+  const shell = useShellEngine({
+    initialState,
+    registry,
+    completionService,
+  });
+  const activePrompt = getActiveShellPrompt(shell.state);
+  const editor =
+    activePrompt.kind === "secret"
+      ? activePrompt.prompt.editor
+      : activePrompt.editor;
+  const displayPrompt =
+    activePrompt.kind === "secret" ? activePrompt.prompt.request.label : prompt;
+  const displayInput =
+    activePrompt.kind === "secret"
+      ? "•".repeat(editor.buffer.value.length)
+      : editor.buffer.value;
 
   return (
     <div
@@ -32,21 +61,26 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
     >
       <TerminalViewport
         rows={shell.state.history}
-        prompt={prompt}
-        currentInput={shell.state.input.value}
-        cursorColumn={shell.state.input.cursor}
+        prompt={displayPrompt}
+        currentInput={displayInput}
+        cursorColumn={editor.buffer.cursor}
+        status={getShellStatus(shell.state)}
+        completion={shell.state.completion}
       />
 
       <InputCapture
         ref={inputRef}
-        value={shell.state.input.value}
+        value={editor.buffer.value}
+        cursor={editor.buffer.cursor}
+        mode={editor.buffer.mode}
+        isSecret={activePrompt.kind === "secret"}
         onInsertText={shell.insertText}
-        onMoveCursorLeft={shell.moveCursorLeft}
-        onMoveCursorRight={shell.moveCursorRight}
-        onDeleteAtCursor={shell.deleteAtCursor}
-        onBackspaceCursor={shell.backspace}
+        onNativeValueChange={shell.replaceInputValue}
+        onMoveCursor={shell.moveCursor}
+        onNormalKey={shell.normalKey}
         onSubmit={shell.submit}
         onCancel={shell.cancel}
+        onComplete={shell.complete}
       />
     </div>
   );
