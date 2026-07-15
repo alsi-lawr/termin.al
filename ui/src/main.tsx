@@ -36,7 +36,9 @@ if (!rootElement) {
 
 const normalizedPathname = normalizePathname(window.location.pathname);
 const applicationMode: ApplicationMode =
-  normalizedPathname === "/demo" ? "demo" : "live";
+  normalizedPathname === "/demo" || import.meta.env.MODE === "demo"
+    ? "demo"
+    : "live";
 const applicationClientComposition = await createApplicationClientComposition(
   applicationMode,
 );
