@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { viewerTitle } from "../../content/ViewerContent.ts";
 import type { Pane, PaneId } from "../../domain/workspace/PaneTree.ts";
 
 type MobilePaneSwitcherProps = Readonly<{
@@ -12,7 +13,7 @@ function paneLabel(pane: Pane, number: number): string {
     case "shell":
       return "Pane " + number + ": shell";
     case "viewer":
-      return "Pane " + number + ": " + pane.content.title + " viewer";
+      return "Pane " + number + ": " + viewerTitle(pane.content.viewer) + " viewer";
     case "editor":
       return "Pane " + number + ": " + pane.content.title + " editor";
   }

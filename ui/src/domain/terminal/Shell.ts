@@ -19,7 +19,10 @@ import {
 } from "./Completion.ts";
 import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
 import type { VirtualDirectoryPath } from "../filesystem/VirtualFilesystem.ts";
-import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
+import type {
+  ViewerContent,
+  ViewerOpenDisposition,
+} from "../../content/ViewerContent.ts";
 
 declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
@@ -175,9 +178,9 @@ export type CommandEffect =
       directory: VirtualDirectoryPath;
     }>
   | Readonly<{
-      kind: "open-raw-pager";
-      title: string;
-      document: MarkdownDocument;
+      kind: "open-viewer";
+      viewer: ViewerContent;
+      disposition: ViewerOpenDisposition;
     }>
   | Readonly<{
       kind: "request-secret-prompt";

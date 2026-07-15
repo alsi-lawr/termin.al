@@ -3,6 +3,7 @@ import {
   createShellId,
   createShellSessionId,
 } from "../../domain/terminal/Shell.ts";
+import type { ViewerContent } from "../../content/ViewerContent.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
 import type {
   PaneId,
@@ -12,6 +13,7 @@ import type {
   PaneTree,
   PaneZoom,
 } from "../../domain/workspace/PaneTree.ts";
+import { createViewerPaneContent } from "../../domain/workspace/PaneTree.ts";
 import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
@@ -93,6 +95,16 @@ function PaneLeaf({
     onOperation({ kind: "focus-pane", paneId: pane.id });
   };
   const commandHandler: PaneCommandHandler = onOperation;
+  const openSplitViewer = (
+    viewer: ViewerContent,
+    orientation: "horizontal" | "vertical",
+  ): void => {
+    onOperation({
+      kind: "split",
+      orientation,
+      content: createViewerPaneContent(viewer),
+    });
+  };
   const paneClass = isActive
     ? "h-full min-h-0 min-w-0 flex-1 rounded-md ring-1 ring-green-500"
     : "h-full min-h-0 min-w-0 flex-1 rounded-md";
@@ -109,6 +121,7 @@ function PaneLeaf({
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
             paneCommandHandler={commandHandler}
+            onOpenSplitViewer={openSplitViewer}
           />
         </div>
       );
@@ -116,7 +129,7 @@ function PaneLeaf({
       return (
         <div className={paneClass}>
           <ViewerPane
-            title={pane.content.title}
+            viewer={pane.content.viewer}
             isActive={isActive}
             focusVersion={focusVersion}
             onActivate={activate}

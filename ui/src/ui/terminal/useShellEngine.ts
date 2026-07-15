@@ -7,6 +7,7 @@ import {
   createShellDiagnosticId,
   reduceShellState,
   type CommandId,
+  type CommandEffect,
   type CommandOutcome,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
@@ -27,11 +28,16 @@ import type { SecretPromptOutcomeHandler } from "../../application/commands/Secr
 
 export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
 
+export type ShellCommandEffectsHandler = (
+  effects: ReadonlyArray<CommandEffect>,
+) => void;
+
 export type UseShellEngineOptions = Readonly<{
   initialState: ShellState;
   registry: CommandRegistry;
   completionService: CompletionService;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
+  onCommandEffects?: ShellCommandEffectsHandler;
 }>;
 
 export type ShellEngine = Readonly<{
@@ -66,6 +72,7 @@ export function useShellEngine({
   registry,
   completionService,
   secretPromptOutcomeHandler,
+  onCommandEffects,
 }: UseShellEngineOptions): ShellEngine {
   const [state, dispatch] = useReducer(reduceShellState, initialState);
   const [transientDiagnostic, setTransientDiagnostic] = useState<
@@ -163,6 +170,10 @@ export function useShellEngine({
         controllers.current.delete(effect.command.id);
 
         if (mounted.current) {
+          if (outcome.kind === "succeeded") {
+            onCommandEffects?.(outcome.effects);
+          }
+
           dispatch({
             kind: "command.settled",
             commandId: effect.command.id,
@@ -183,7 +194,12 @@ export function useShellEngine({
     };
 
     void runCommand();
-  }, [registry, secretPromptOutcomeHandler, state.pendingEffect]);
+  }, [
+    onCommandEffects,
+    registry,
+    secretPromptOutcomeHandler,
+    state.pendingEffect,
+  ]);
 
   const complete = (): void => {
     const prompt = getActiveShellPrompt(state);

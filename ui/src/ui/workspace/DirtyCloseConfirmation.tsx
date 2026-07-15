@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactElement } from "react";
+import { viewerTitle } from "../../content/ViewerContent.ts";
 import type { Pane } from "../../domain/workspace/PaneTree.ts";
 
 type DirtyCloseConfirmationProps = Readonly<{
@@ -12,7 +13,7 @@ function paneLabel(pane: Pane): string {
     case "shell":
       return "shell";
     case "viewer":
-      return pane.content.title;
+      return viewerTitle(pane.content.viewer);
     case "editor":
       return pane.content.title;
   }

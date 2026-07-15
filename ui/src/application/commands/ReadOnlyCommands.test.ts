@@ -178,12 +178,16 @@ test("implements line readers, utility commands, history, manual metadata, and p
   assert.equal(manualOutput.fields[0]?.value, "grep [-i] [-n] <pattern> [path]");
 
   const pagerEffect = pager.effects.find(
-    (effect) => effect.kind === "open-raw-pager",
+    (effect) => effect.kind === "open-viewer",
   );
-  if (pagerEffect === undefined || pagerEffect.kind !== "open-raw-pager") {
+  if (pagerEffect === undefined || pagerEffect.kind !== "open-viewer") {
     assert.fail("Expected raw pager effect.");
   }
-  assert.equal(pagerEffect.document.source.path, "~/notes/sample-note.md");
+  if (pagerEffect.viewer.kind !== "document") {
+    assert.fail("Expected raw document viewer content.");
+  }
+  assert.equal(pagerEffect.viewer.document.source.path, "~/notes/sample-note.md");
+  assert.equal(pagerEffect.viewer.presentation, "raw-pager");
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
 });
 

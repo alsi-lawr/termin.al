@@ -73,7 +73,10 @@ test("executes parsed pane operations through the existing command registry cont
   assert.deepEqual(received, {
     kind: "split",
     orientation: "horizontal",
-    content: { kind: "viewer", title: "Viewer" },
+    content: {
+      kind: "viewer",
+      viewer: { kind: "placeholder", title: "Viewer" },
+    },
   });
   assert.equal(outcome.kind, "succeeded");
 });

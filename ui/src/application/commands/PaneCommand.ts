@@ -1,7 +1,7 @@
 import {
   createEditorPaneContent,
+  createPlaceholderViewerPaneContent,
   createShellPaneContent,
-  createViewerPaneContent,
   type PaneContent,
   type PaneDirection,
   type PaneLayout,
@@ -73,7 +73,10 @@ function content(value: string | undefined): ContentParseResult {
     case "shell":
       return { kind: "parsed", content: createShellPaneContent() };
     case "viewer":
-      return { kind: "parsed", content: createViewerPaneContent("Viewer") };
+      return {
+        kind: "parsed",
+        content: createPlaceholderViewerPaneContent("Viewer"),
+      };
     case "editor":
       return { kind: "parsed", content: createEditorPaneContent("Untitled") };
     default:

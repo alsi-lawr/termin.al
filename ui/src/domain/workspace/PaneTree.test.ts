@@ -5,8 +5,8 @@ import {
   applyPaneOperation,
   createEditorPaneContent,
   createPaneWorkspace,
+  createPlaceholderViewerPaneContent,
   createShellPaneContent,
-  createViewerPaneContent,
   paneGeometries,
   paneLeaves,
   visiblePaneGeometries,
@@ -44,7 +44,7 @@ test("models stable pane IDs, binary split geometry, and directional focus", () 
   const workspace = split(
     horizontal,
     "vertical",
-    createViewerPaneContent("Viewer"),
+    createPlaceholderViewerPaneContent("Viewer"),
   );
   const geometries = paneGeometries(workspace);
   const left = applied(
@@ -121,8 +121,16 @@ test("swaps, rotates, zooms, and reconstructs named layouts without viewport sta
   const first = createPaneWorkspace({
     initialContent: createShellPaneContent(),
   });
-  const second = split(first, "horizontal", createViewerPaneContent("Viewer"));
-  const third = split(second, "vertical", createViewerPaneContent("Second"));
+  const second = split(
+    first,
+    "horizontal",
+    createPlaceholderViewerPaneContent("Viewer"),
+  );
+  const third = split(
+    second,
+    "vertical",
+    createPlaceholderViewerPaneContent("Second"),
+  );
   const swapped = applied(
     applyPaneOperation(third, {
       kind: "swap",

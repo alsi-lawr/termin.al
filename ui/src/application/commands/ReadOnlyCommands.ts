@@ -11,6 +11,7 @@ import {
   type VirtualPathFailure,
   type VirtualTraversalResult,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
+import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
 import {
   createShellDiagnosticId,
   createShellOutputId,
@@ -1203,9 +1204,16 @@ function createLessCommand(
 
       return succeededOutcome([], [
         {
-          kind: "open-raw-pager",
-          title: document.file.name,
-          document: { text: document.text, source: { path: document.sourcePath } },
+          kind: "open-viewer",
+          viewer: createDocumentViewerContent({
+            title: document.file.name,
+            presentation: "raw-pager",
+            document: {
+              text: document.text,
+              source: { path: document.sourcePath },
+            },
+          }),
+          disposition: { kind: "inline" },
         },
       ]);
     },

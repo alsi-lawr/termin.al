@@ -3,6 +3,10 @@ import {
   isVimBufferDirty,
   type VimBuffer,
 } from "../vim/VimBuffer.ts";
+import {
+  createPlaceholderViewerContent,
+  type ViewerContent,
+} from "../../content/ViewerContent.ts";
 
 declare const paneIdBrand: unique symbol;
 
@@ -26,7 +30,7 @@ export type PaneContent =
   | Readonly<{ kind: "shell" }>
   | Readonly<{
       kind: "viewer";
-      title: string;
+      viewer: ViewerContent;
     }>
   | Readonly<{
       kind: "editor";
@@ -769,9 +773,12 @@ export function createShellPaneContent(): PaneContent {
   return { kind: "shell" };
 }
 
-export function createViewerPaneContent(title: string): PaneContent {
-  assertPaneTitle(title);
-  return { kind: "viewer", title };
+export function createViewerPaneContent(viewer: ViewerContent): PaneContent {
+  return { kind: "viewer", viewer };
+}
+
+export function createPlaceholderViewerPaneContent(title: string): PaneContent {
+  return createViewerPaneContent(createPlaceholderViewerContent(title));
 }
 
 export function createEditorPaneContent(title: string): PaneContent {
