@@ -929,11 +929,13 @@ module GitHubContentClient =
                                 | Error problem -> return Error problem
                                 | Ok owned ->
                                     let curatedRepositories =
-                                        curated
-                                        |> List.map (
-                                            ContentDomain.Project.repository >> ContentDomain.RepositoryName.value
+                                        HashSet<string>(
+                                            (curated
+                                             |> List.map (
+                                                 ContentDomain.Project.repository >> ContentDomain.RepositoryName.value
+                                             )),
+                                            StringComparer.OrdinalIgnoreCase
                                         )
-                                        |> Set.ofList
 
                                     let remainingCapacity = max 0 (ContentDomain.PageItemLimit - List.length curated)
 

@@ -353,6 +353,52 @@ module GitHubContentClientTests =
         then
             failwith "Repository pagination must follow the GitHub Link next relation."
 
+    let private testProjectsDeduplicateCaseInsensitiveRepositoryIdentity () =
+        let caseOnlyCandidate =
+            repositoryJson "Example-Owner/Curated-Project" "\"Repository summary\""
+
+        let handler =
+            new FakeHandler(fun request ->
+                match request.PathAndQuery with
+                | "/repos/example-owner/content" ->
+                    response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
+                | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
+                    response HttpStatusCode.OK projectsManifest None
+                | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
+                    response HttpStatusCode.OK $"[{caseOnlyCandidate}]" None
+                | _ -> response HttpStatusCode.NotFound "" None)
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+
+        let projects =
+            match contentClient.GetProjects(CancellationToken.None).GetAwaiter().GetResult() with
+            | Ok value -> value
+            | Error problem ->
+                failwithf
+                    "Case-only curated and generated repository identities must not fail projects: %s."
+                    (ContentDomain.Problem.detail problem)
+
+        match ContentDomain.Projects.entries projects with
+        | [ project ] when
+            ContentDomain.Project.repository project |> ContentDomain.RepositoryName.value = "example-owner/curated-project"
+            ->
+            ()
+        | _ -> failwith "Case-only repository identities must retain only the curated project."
+
+        let requestedPaths =
+            handler.Requests |> List.map (fun request -> request.PathAndQuery)
+
+        let expectedPaths =
+            [ "/repos/example-owner/content"
+              "/repos/example-owner/content/contents/content/projects.json?ref=main"
+              "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ]
+
+        if requestedPaths <> expectedPaths then
+            failwithf "Case-only curated candidates must be excluded before README requests: %A." requestedPaths
+
     let private testMissingProfileAndReleaseTagChangelog () =
         let v1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         let v2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -742,6 +788,7 @@ module GitHubContentClientTests =
         testRateMalformedAndTimeoutFailures ()
         testFractionalCatalogSize ()
         testProjectsPaginationAndReadmes ()
+        testProjectsDeduplicateCaseInsensitiveRepositoryIdentity ()
         testMissingProfileAndReleaseTagChangelog ()
         testChangelogReleasePaginationBound ()
         testChangelogRejectsMissingTag ()
