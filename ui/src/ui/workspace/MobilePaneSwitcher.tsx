@@ -26,7 +26,7 @@ export function MobilePaneSwitcher({
 }: MobilePaneSwitcherProps): ReactElement {
   return (
     <nav
-      className="border-t border-surface-border bg-surface-deepest p-2 md:hidden"
+      className="shrink-0 border-t border-surface-border bg-surface-deepest p-2 md:hidden"
       aria-label="Pane switcher"
     >
       <div className="flex gap-2 overflow-x-auto">

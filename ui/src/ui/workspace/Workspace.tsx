@@ -7,6 +7,7 @@ import { DirtyCloseConfirmation } from "./DirtyCloseConfirmation";
 import { MobilePaneSwitcher } from "./MobilePaneSwitcher";
 import { PaneTreeView } from "./PaneTreeView";
 import { usePaneWorkspace } from "./usePaneWorkspace";
+import { WorkspaceStatusLine } from "./WorkspaceStatusLine";
 
 type WorkspaceProps = Readonly<{
   applicationMode: ApplicationMode;
@@ -25,20 +26,12 @@ export function Workspace({
 
   return (
     <main
-      className="flex min-h-dvh w-full flex-col bg-surface-deepest"
+      className="flex h-dvh min-w-0 flex-col overflow-hidden bg-surface-deepest"
       data-theme={theme.status.theme}
     >
-      {applicationMode === "demo" ? (
-        <span
-          className="ml-2 rounded-sm border border-ui-accent bg-surface-raised px-1 text-text-bright"
-          role="status"
-          aria-label="Demo mode"
-        >
-          DEMO
-        </span>
-      ) : null}
+      <WorkspaceStatusLine applicationMode={applicationMode} />
       <div className="flex min-h-0 flex-1 flex-col" inert={closeConfirmationOpen}>
-        <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <PaneTreeView
             tree={controller.workspace.tree}
             activePaneId={controller.workspace.activePaneId}

@@ -240,7 +240,7 @@ export function Terminal({
 
   return (
     <div
-      className="flex h-full min-h-0 min-w-0 w-full flex-col rounded-md border border-surface-border bg-surface-deepest text-text-primary"
+      className="flex h-full min-h-0 min-w-0 w-full flex-col bg-surface-deepest text-text-primary"
       onClick={focusInputFromTerminal}
       onFocusCapture={onActivate}
     >

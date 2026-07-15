@@ -379,7 +379,7 @@ export function VimEditorPane({
 
   return (
     <section
-      className="flex h-full min-h-0 flex-col rounded-md bg-surface-deepest font-mono text-sm text-text-primary"
+      className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary"
       aria-label={title + " editor"}
       onFocus={onActivate}
     >

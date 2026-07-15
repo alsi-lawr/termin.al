@@ -12,7 +12,7 @@ export function InputRow({
   cursorIndex,
 }: InputRowProps): ReactElement {
   const segments = segmentVisibleInputRow(activeLine, cursorIndex);
-  const cursor = segments.cursor === "" ? " " : segments.cursor;
+  const cursor = segments.cursor === "" ? "\u00a0" : segments.cursor;
 
   return (
     <>

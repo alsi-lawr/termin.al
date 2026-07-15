@@ -35,7 +35,7 @@ export function MobilePaneControls({
 
   return (
     <div
-      className="flex flex-wrap gap-1 border-t border-surface-border bg-surface-deepest p-2 md:hidden"
+      className="flex shrink-0 flex-wrap gap-1 border-t border-surface-border bg-surface-deepest p-2 md:hidden"
       role="toolbar"
       aria-label="Mobile terminal controls"
     >

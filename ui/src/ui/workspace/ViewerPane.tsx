@@ -677,7 +677,7 @@ export function ViewerPane({
   return (
     <section
       ref={viewerRef}
-      className="flex h-full min-h-0 flex-col rounded-md bg-surface-deepest font-mono text-sm text-text-primary outline-none"
+      className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary outline-none"
       tabIndex={0}
       aria-label={title + " viewer"}
       onFocus={onActivate}
