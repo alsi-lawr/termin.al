@@ -98,10 +98,13 @@ function missingCommandOutcome(commandName: string): CommandOutcome {
   };
 }
 
-function executionFailureOutcome(commandName: string): CommandOutcome {
+function executionFailureOutcome(
+  commandName: string,
+  cause: Error,
+): CommandOutcome {
   return {
     kind: "failed",
-    failure: { kind: "execution-error", commandName },
+    failure: { kind: "execution-error", commandName, cause },
     diagnostics: [
       {
         kind: "runtime",
@@ -163,11 +166,15 @@ export async function executeCommandLine({
     }
 
     return outcome;
-  } catch {
+  } catch (thrown: unknown) {
     if (signal.aborted) {
       return cancelledOutcome();
     }
 
-    return executionFailureOutcome(resolution.command.metadata.name);
+    const cause = thrown instanceof Error
+      ? thrown
+      : new Error("Command execution failed.", { cause: thrown });
+
+    return executionFailureOutcome(resolution.command.metadata.name, cause);
   }
 }

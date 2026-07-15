@@ -238,11 +238,12 @@ test("reports empty, missing, unsupported-option, and cancelled command outcomes
 });
 
 test("routes unexpected supplier failures through the execution boundary", async () => {
+  const cause = new Error("Unexpected supplier failure.");
   const outcome = await execute(
     "cat about.md",
     createRegistry(100, {
       read: async () => {
-        throw new Error("Unexpected supplier failure.");
+        throw cause;
       },
     }),
   );
@@ -253,5 +254,41 @@ test("routes unexpected supplier failures through the execution boundary", async
   }
 
   assert.equal(outcome.failure.kind, "execution-error");
+  if (outcome.failure.kind !== "execution-error") {
+    return;
+  }
+
+  assert.strictEqual(outcome.failure.cause, cause);
+  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
+  assert.equal(outcome.diagnostics[0]?.message, "The command could not complete.");
+  assert.equal(
+    outcome.diagnostics.some((diagnostic) => diagnostic.message.includes(cause.message)),
+    false,
+  );
+});
+
+test("normalizes non-Error supplier failures at the execution boundary", async () => {
+  const thrown = { kind: "unexpected-supplier-failure" };
+  const outcome = await execute(
+    "cat about.md",
+    createRegistry(100, {
+      read: async () => {
+        throw thrown;
+      },
+    }),
+  );
+
+  assert.equal(outcome.kind, "failed");
+  if (outcome.kind !== "failed") {
+    return;
+  }
+
+  assert.equal(outcome.failure.kind, "execution-error");
+  if (outcome.failure.kind !== "execution-error") {
+    return;
+  }
+
+  assert.equal(outcome.failure.cause.message, "Command execution failed.");
+  assert.strictEqual(outcome.failure.cause.cause, thrown);
   assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
 });

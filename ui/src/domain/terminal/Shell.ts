@@ -207,6 +207,7 @@ export type CommandFailure =
   | Readonly<{
       kind: "execution-error";
       commandName: string;
+      cause: Error;
     }>;
 
 export type CommandOutcome =

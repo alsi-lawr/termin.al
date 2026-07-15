@@ -52,7 +52,11 @@ export type ShellEngine = Readonly<{
 function discardedCommandOutcome(commandName: string): CommandOutcome {
   return {
     kind: "failed",
-    failure: { kind: "execution-error", commandName },
+    failure: {
+      kind: "execution-error",
+      commandName,
+      cause: new Error("Command execution failed."),
+    },
     diagnostics: [
       {
         kind: "runtime",
