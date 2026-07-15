@@ -9,8 +9,14 @@ import {
   createShellSessionId,
 } from "../../domain/terminal/Shell.ts";
 import {
+  createVirtualFilesystem,
+  resolveVirtualDirectory,
+  virtualHomeDirectory,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
+import {
   createCompletionService,
   createRegistryCommandCompletionProvider,
+  createVirtualFilesystemPathCompletionProvider,
 } from "./Completion.ts";
 import { createCommandRegistry } from "./CommandRegistry.ts";
 
@@ -96,4 +102,140 @@ test("normalizes completion cursors at Unicode code-point boundaries", () => {
     end: 2,
   });
   assert.deepEqual(edit, { value: "😀", cursor: 2 });
+});
+
+test("completes direct virtual paths from the active directory without hidden entries", async () => {
+  const filesystem = createVirtualFilesystem({
+    entries: [
+      {
+        kind: "directory",
+        id: "home",
+        path: "~",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "directory",
+        id: "projects",
+        path: "~/projects",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "file",
+        id: "readme",
+        path: "~/projects/readme.md",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 1,
+        documentHandle: "readme",
+      },
+      {
+        kind: "file",
+        id: "hidden",
+        path: "~/.hidden.md",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 1,
+        documentHandle: "hidden",
+      },
+    ],
+  });
+  const provider = createVirtualFilesystemPathCompletionProvider({
+    filesystem,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const pathRequest = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "open pr",
+    7,
+  );
+  const hiddenRequest = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "open .",
+    6,
+  );
+  const controller = new AbortController();
+
+  const paths = await provider.complete(pathRequest, controller.signal);
+  const hidden = await provider.complete(hiddenRequest, controller.signal);
+
+  assert.deepEqual(paths, [
+    { kind: "path", value: "projects/", label: "Directory" },
+  ]);
+  assert.deepEqual(hidden, [
+    { kind: "path", value: ".hidden.md", label: "File" },
+  ]);
+
+  const projects = resolveVirtualDirectory(
+    filesystem,
+    virtualHomeDirectory(),
+    "projects",
+  );
+
+  if (projects.kind !== "found") {
+    assert.fail("Expected the virtual projects directory.");
+  }
+
+  const nestedProvider = createVirtualFilesystemPathCompletionProvider({
+    filesystem,
+    currentDirectory: projects.directory.path,
+  });
+  const nestedRequest = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "open re",
+    7,
+  );
+
+  assert.deepEqual(
+    await nestedProvider.complete(nestedRequest, controller.signal),
+    [{ kind: "path", value: "readme.md", label: "File" }],
+  );
+});
+
+test("keeps quoted paths and option boundaries intact during completion", async () => {
+  const quoted = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    'open "pro',
+    9,
+  );
+  const option = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "ls -a",
+    5,
+  );
+  const afterOptionTerminator = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "ls -- pro",
+    9,
+  );
+  const service = createCompletionService({
+    commands: { complete: async () => [] },
+    paths: { complete: async () => [] },
+  });
+
+  assert.deepEqual(quoted.target, {
+    kind: "path",
+    prefix: "pro",
+    start: 6,
+    end: 9,
+  });
+  assert.deepEqual(
+    createCompletionEdit(quoted, {
+      kind: "path",
+      value: "projects/",
+      label: "Directory",
+    }),
+    { value: 'open "projects/', cursor: 15 },
+  );
+  assert.equal(option.target.kind, "none");
+  assert.equal(afterOptionTerminator.target.kind, "path");
+  assert.deepEqual(
+    await service.complete(option, new AbortController().signal),
+    { kind: "none" },
+  );
 });

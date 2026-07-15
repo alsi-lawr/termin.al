@@ -20,9 +20,9 @@ function statusMessage(status: ShellStatus, completion: ShellCompletion): string
 
   switch (status.kind) {
     case "ready":
-      return status.mode.kind === "insert" ? "INSERT" : "NORMAL";
+      return "READY";
     case "secret":
-      return status.mode.kind === "insert" ? "SECRET INSERT" : "SECRET NORMAL";
+      return "SECRET INPUT";
     case "running":
       return "RUNNING";
     case "cancelling":
@@ -30,21 +30,47 @@ function statusMessage(status: ShellStatus, completion: ShellCompletion): string
   }
 }
 
+function isSelectedCandidate(
+  completion: Extract<ShellCompletion, { kind: "suggestions" }>,
+  index: number,
+): boolean {
+  return (
+    completion.selection.kind === "selected" &&
+    completion.selection.index === index
+  );
+}
+
 export function TerminalStatus({
   status,
   completion,
 }: TerminalStatusProps): ReactElement {
   return (
-    <div className="mt-2 text-text-muted" role="status" aria-live="polite">
-      <span>{statusMessage(status, completion)}</span>
+    <div className="mt-2 text-text-muted">
+      <div role="status" aria-live="polite">
+        {statusMessage(status, completion)}
+      </div>
       {completion.kind === "suggestions" ? (
-        <span className="ml-2">
-          {completion.candidates.map((candidate) => (
-            <span key={`${candidate.kind}-${candidate.value}`} className="mr-2">
-              {candidate.value}
-            </span>
-          ))}
-        </span>
+        <ul
+          className="mt-1 space-y-1"
+          role="listbox"
+          aria-label="Terminal completion candidates"
+        >
+          {completion.candidates.map((candidate, index) => {
+            const selected = isSelectedCandidate(completion, index);
+
+            return (
+              <li
+                key={`${candidate.kind}-${candidate.value}`}
+                role="option"
+                aria-selected={selected}
+                className={selected ? "text-ui-accent" : "text-text-primary"}
+              >
+                <span>{candidate.value}</span>
+                <span className="ml-2 text-text-muted">{candidate.label}</span>
+              </li>
+            );
+          })}
+        </ul>
       ) : null}
     </div>
   );

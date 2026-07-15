@@ -15,10 +15,10 @@ export function InputRow({
   const cursor = segments.cursor === "" ? " " : segments.cursor;
 
   return (
-    <div>
+    <>
       {segments.beforeCursor}
       <Cursor value={cursor} />
       {segments.afterCursor}
-    </div>
+    </>
   );
 }

@@ -8,21 +8,12 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CompositionEvent,
-  type FormEvent,
   type KeyboardEvent,
   type ReactElement,
   type SyntheticEvent,
 } from "react";
-import {
-  normalVimPromptKeyFromKeyboard,
-  type VimPromptKey,
-  type VimPromptMode,
-} from "../../domain/terminal/VimPrompt.ts";
-import {
-  moveNativeInputSelectionLeft,
-  moveNativeInputSelectionRight,
-  normalizeNativeInputSelection,
-} from "./UnicodeUiBoundary.ts";
+import type { CompletionCycleDirection } from "../../domain/terminal/Shell.ts";
+import { normalizeNativeInputSelection } from "./UnicodeUiBoundary.ts";
 import {
   selectInputCaptureControl,
   type InputCapturePromptKind,
@@ -46,17 +37,27 @@ export type InputCapturePaneKeyResult =
 type InputCaptureProps = Readonly<{
   value: string;
   cursor: number;
-  mode: VimPromptMode;
   promptKind: InputCapturePromptKind;
   isActive: boolean;
   focusVersion: number;
   onNativeValueChange: (value: string, cursor: number) => void;
   onMoveCursor: (cursor: number) => void;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  onMoveStart: () => void;
+  onMoveEnd: () => void;
+  onMovePreviousWord: () => void;
+  onMoveNextWord: () => void;
+  onBackspace: () => void;
+  onDelete: () => void;
+  onDeletePreviousWord: () => void;
+  onBrowseOlderHistory: () => void;
+  onBrowseNewerHistory: () => void;
   onInsertText: (text: string) => void;
-  onNormalKey: (key: VimPromptKey) => void;
   onSubmit: () => void;
   onCancel: () => void;
-  onComplete: () => void;
+  onDismissCompletion: () => void;
+  onComplete: (direction: CompletionCycleDirection) => void;
   onFocus: () => void;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -73,6 +74,10 @@ function selectionCursor(element: NativeInputControlElement): number {
     element.value,
     element.selectionEnd ?? element.value.length,
   );
+}
+
+function isControlKey(input: InputCapturePaneKeyInput, key: string): boolean {
+  return input.ctrlKey && input.key.toLowerCase() === key;
 }
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
@@ -118,10 +123,6 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     const synchroniseNativeValue = (
       event: SyntheticEvent<NativeInputControlElement>,
     ): void => {
-      if (props.mode.kind !== "insert") {
-        return;
-      }
-
       const input = event.currentTarget;
       props.onNativeValueChange(input.value, selectionCursor(input));
     };
@@ -135,7 +136,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     const handleSelectionChange = (
       event: SyntheticEvent<NativeInputControlElement>,
     ): void => {
-      if (props.mode.kind !== "insert" || composing.current) {
+      if (composing.current) {
         return;
       }
 
@@ -153,36 +154,11 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       synchroniseNativeValue(event);
     };
 
-    const handleBeforeInput = (
-      event: FormEvent<NativeInputControlElement>,
-    ): void => {
-      if (props.mode.kind === "normal" && !composing.current) {
-        event.preventDefault();
-      }
-    };
-
     const handlePaste = (
       event: ClipboardEvent<NativeInputControlElement>,
     ): void => {
-      if (props.mode.kind !== "insert") {
-        event.preventDefault();
-        return;
-      }
-
       event.preventDefault();
       props.onInsertText(event.clipboardData.getData("text"));
-    };
-
-    const handleNormalKey = (input: InputCapturePaneKeyInput): void => {
-      const match = normalVimPromptKeyFromKeyboard(
-        input.key,
-        input.ctrlKey,
-        input.metaKey,
-      );
-
-      if (match.kind === "recognized") {
-        props.onNormalKey(match.key);
-      }
     };
 
     const handleKeyDown = (
@@ -205,7 +181,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      if (input.ctrlKey && input.key.toLowerCase() === "c") {
+      if (isControlKey(input, "c")) {
         event.preventDefault();
         props.onCancel();
         return;
@@ -217,49 +193,87 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      if (props.mode.kind === "normal") {
-        event.preventDefault();
-        handleNormalKey(input);
-        return;
-      }
-
       if (event.key === "Escape") {
         event.preventDefault();
-        handleNormalKey(input);
+        props.onDismissCompletion();
         return;
       }
 
       if (event.key === "Tab") {
         event.preventDefault();
-        props.onComplete();
+        props.onComplete(event.shiftKey ? "previous" : "next");
+        return;
+      }
+
+      if (isControlKey(input, "a") || event.key === "Home") {
+        event.preventDefault();
+        props.onMoveStart();
+        return;
+      }
+
+      if (isControlKey(input, "e") || event.key === "End") {
+        event.preventDefault();
+        props.onMoveEnd();
+        return;
+      }
+
+      if (isControlKey(input, "h")) {
+        event.preventDefault();
+        props.onBackspace();
+        return;
+      }
+
+      if (isControlKey(input, "w")) {
+        event.preventDefault();
+        props.onDeletePreviousWord();
         return;
       }
 
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        props.onMoveCursor(
-          moveNativeInputSelectionLeft(props.value, props.cursor),
-        );
+
+        if (input.ctrlKey) {
+          props.onMovePreviousWord();
+          return;
+        }
+
+        props.onMoveLeft();
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        props.onMoveCursor(
-          moveNativeInputSelectionRight(props.value, props.cursor),
-        );
+
+        if (input.ctrlKey) {
+          props.onMoveNextWord();
+          return;
+        }
+
+        props.onMoveRight();
         return;
       }
 
-      if (event.key === "Home") {
+      if (event.key === "ArrowUp" && !input.ctrlKey) {
         event.preventDefault();
-        props.onMoveCursor(0);
+        props.onBrowseOlderHistory();
         return;
       }
 
-      if (event.key === "End") {
+      if (event.key === "ArrowDown" && !input.ctrlKey) {
         event.preventDefault();
-        props.onMoveCursor(props.value.length);
+        props.onBrowseNewerHistory();
+        return;
+      }
+
+      if (event.key === "Backspace") {
+        event.preventDefault();
+        props.onBackspace();
+        return;
+      }
+
+      if (event.key === "Delete") {
+        event.preventDefault();
+        props.onDelete();
         return;
       }
 
@@ -272,7 +286,6 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       ref: setInputRef,
       value: props.value,
       onKeyDown: handleKeyDown,
-      onBeforeInput: handleBeforeInput,
       onChange: handleChange,
       onSelect: handleSelectionChange,
       onCompositionStart: handleCompositionStart,

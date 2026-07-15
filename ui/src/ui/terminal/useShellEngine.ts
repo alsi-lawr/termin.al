@@ -6,17 +6,10 @@ import {
   getActiveShellPrompt,
   createShellDiagnosticId,
   type CommandOutcome,
+  type CompletionCycleDirection,
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
-import {
-  vimBufferCursorOffset,
-  vimBufferText,
-} from "../../domain/vim/VimBuffer.ts";
-import {
-  vimPromptMode,
-  type VimPromptKey,
-} from "../../domain/terminal/VimPrompt.ts";
 import {
   executeCommandLine,
 } from "../../application/commands/CommandExecution.ts";
@@ -50,10 +43,21 @@ export type ShellEngine = Readonly<{
   insertText: (text: string) => void;
   replaceInputValue: (value: string, cursor: number) => void;
   moveCursor: (cursor: number) => void;
-  normalKey: (key: VimPromptKey) => void;
+  moveLeft: () => void;
+  moveRight: () => void;
+  moveStart: () => void;
+  moveEnd: () => void;
+  movePreviousWord: () => void;
+  moveNextWord: () => void;
+  backspace: () => void;
+  delete: () => void;
+  deletePreviousWord: () => void;
+  browseOlderHistory: () => void;
+  browseNewerHistory: () => void;
+  dismissCompletion: () => void;
   submit: () => void;
   cancel: () => void;
-  complete: () => void;
+  complete: (direction: CompletionCycleDirection) => void;
 }>;
 
 function discardedCommandOutcome(commandName: string): CommandOutcome {
@@ -204,18 +208,23 @@ export function useShellEngine({
     state.pendingEffect,
   ]);
 
-  const complete = (): void => {
+  const complete = (direction: CompletionCycleDirection): void => {
+    if (state.completion.kind === "suggestions") {
+      onAction({ kind: "completion.cycle", direction });
+      return;
+    }
+
     const prompt = getActiveShellPrompt(state);
 
-    if (prompt.kind !== "command" || vimPromptMode(prompt.buffer).kind !== "insert") {
+    if (prompt.kind !== "command") {
       return;
     }
 
     const request = createCompletionRequest(
       state.id,
       state.sessionId,
-      vimBufferText(prompt.buffer),
-      vimBufferCursorOffset(prompt.buffer),
+      prompt.line.text,
+      prompt.line.cursor,
     );
     const controller = runtimeControl.startCompletion();
 
@@ -249,7 +258,19 @@ export function useShellEngine({
     replaceInputValue: (value, cursor) =>
       onAction({ kind: "input.replace", value, cursor }),
     moveCursor: (cursor) => onAction({ kind: "input.move-cursor", cursor }),
-    normalKey: (key) => onAction({ kind: "prompt.normal-key", key }),
+    moveLeft: () => onAction({ kind: "input.move-left" }),
+    moveRight: () => onAction({ kind: "input.move-right" }),
+    moveStart: () => onAction({ kind: "input.move-start" }),
+    moveEnd: () => onAction({ kind: "input.move-end" }),
+    movePreviousWord: () => onAction({ kind: "input.move-previous-word" }),
+    moveNextWord: () => onAction({ kind: "input.move-next-word" }),
+    backspace: () => onAction({ kind: "input.backspace" }),
+    delete: () => onAction({ kind: "input.delete" }),
+    deletePreviousWord: () =>
+      onAction({ kind: "input.delete-previous-word" }),
+    browseOlderHistory: () => onAction({ kind: "history.older" }),
+    browseNewerHistory: () => onAction({ kind: "history.newer" }),
+    dismissCompletion: () => onAction({ kind: "completion.dismiss" }),
     submit: () => onAction({ kind: "prompt.submit" }),
     cancel: () => onAction({ kind: "prompt.cancel" }),
     complete,

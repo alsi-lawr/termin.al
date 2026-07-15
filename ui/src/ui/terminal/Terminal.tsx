@@ -1,6 +1,7 @@
 import {
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -8,6 +9,7 @@ import {
 } from "react";
 import {
   getActiveShellPrompt,
+  getShellAutosuggestion,
   getShellStatus,
   type ShellAction,
   type ShellState,
@@ -29,8 +31,8 @@ import {
 } from "../../application/commands/PaneCommand.ts";
 import {
   createCompletionService,
-  createEmptyPathCompletionProvider,
   createRegistryCommandCompletionProvider,
+  createVirtualFilesystemPathCompletionProvider,
 } from "../../application/commands/Completion.ts";
 import { createReadOnlyCommandDefinitions } from "../../application/commands/ReadOnlyCommands.ts";
 import { createPortfolioCommandDefinitions } from "../../application/commands/PortfolioCommands.ts";
@@ -43,15 +45,6 @@ import {
 } from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
 import { useShellEngine } from "./useShellEngine";
-import {
-  nextUnicodeCursorOffset,
-  previousUnicodeCursorOffset,
-} from "../../domain/terminal/UnicodeCursor.ts";
-import {
-  vimBufferCursorOffset,
-  vimBufferText,
-} from "../../domain/vim/VimBuffer.ts";
-import { vimPromptMode } from "../../domain/terminal/VimPrompt.ts";
 import {
   MobilePaneControls,
   type MobilePaneControl,
@@ -83,7 +76,6 @@ type TerminalProps = Readonly<{
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
-  prompt?: string;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
 
@@ -107,7 +99,6 @@ export function Terminal({
   themeController,
   filesystem,
   documents,
-  prompt = "$",
   secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
@@ -138,11 +129,15 @@ export function Terminal({
       ],
     }),
   );
-  const [completionService] = useState(() =>
+  const completionService = useMemo(() =>
     createCompletionService({
       commands: createRegistryCommandCompletionProvider(registry),
-      paths: createEmptyPathCompletionProvider(),
+      paths: createVirtualFilesystemPathCompletionProvider({
+        filesystem,
+        currentDirectory: state.currentDirectory,
+      }),
     }),
+    [filesystem, registry, state.currentDirectory],
   );
   const shell = useShellEngine({
     state,
@@ -154,16 +149,16 @@ export function Terminal({
     secretPromptSubmissionHandler,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
-  const promptBuffer =
+  const promptLine =
     activePrompt.kind === "secret"
-      ? activePrompt.prompt.buffer
-      : activePrompt.buffer;
-  const displayPrompt =
-    activePrompt.kind === "secret" ? activePrompt.prompt.request.label : prompt;
+      ? activePrompt.prompt.line
+      : activePrompt.line;
+  const promptLabel =
+    activePrompt.kind === "secret" ? activePrompt.prompt.request.label : undefined;
   const displayInput =
     activePrompt.kind === "secret"
-      ? "•".repeat(vimBufferText(promptBuffer).length)
-      : vimBufferText(promptBuffer);
+      ? "•".repeat(Array.from(promptLine.text).length)
+      : promptLine.text;
 
   useLayoutEffect(() => {
     if (isActive && presentation.kind === "shell") {
@@ -196,46 +191,22 @@ export function Terminal({
 
     switch (control) {
       case "escape":
-        shell.normalKey({ kind: "escape" });
+        shell.dismissCompletion();
         return;
       case "tab":
-        shell.complete();
+        shell.complete("next");
         return;
       case "left":
-        if (vimPromptMode(promptBuffer).kind === "normal") {
-          shell.normalKey({ kind: "motion", motion: "left" });
-          return;
-        }
-
-        shell.moveCursor(
-          previousUnicodeCursorOffset(
-            vimBufferText(promptBuffer),
-            vimBufferCursorOffset(promptBuffer),
-          ),
-        );
+        shell.moveLeft();
         return;
       case "right":
-        if (vimPromptMode(promptBuffer).kind === "normal") {
-          shell.normalKey({ kind: "motion", motion: "right" });
-          return;
-        }
-
-        shell.moveCursor(
-          nextUnicodeCursorOffset(
-            vimBufferText(promptBuffer),
-            vimBufferCursorOffset(promptBuffer),
-          ),
-        );
+        shell.moveRight();
         return;
       case "up":
-        if (vimPromptMode(promptBuffer).kind === "normal") {
-          shell.normalKey({ kind: "history-older" });
-        }
+        shell.browseOlderHistory();
         return;
       case "down":
-        if (vimPromptMode(promptBuffer).kind === "normal") {
-          shell.normalKey({ kind: "history-newer" });
-        }
+        shell.browseNewerHistory();
         return;
     }
   };
@@ -276,11 +247,13 @@ export function Terminal({
       <div className="min-h-0 flex-1">
         <TerminalViewport
           rows={shell.state.history}
-          prompt={displayPrompt}
+          currentDirectory={shell.state.currentDirectory}
+          promptLabel={promptLabel}
           currentInput={displayInput}
-          cursorColumn={vimBufferCursorOffset(promptBuffer)}
+          cursorColumn={promptLine.cursor}
           status={getShellStatus(shell.state)}
           completion={shell.state.completion}
+          autosuggestion={getShellAutosuggestion(shell.state)}
           transientDiagnostic={shell.transientDiagnostic?.message}
         />
       </div>
@@ -295,18 +268,28 @@ export function Terminal({
 
       <InputCapture
         ref={inputRef}
-        value={vimBufferText(promptBuffer)}
-        cursor={vimBufferCursorOffset(promptBuffer)}
-        mode={vimPromptMode(promptBuffer)}
+        value={promptLine.text}
+        cursor={promptLine.cursor}
         promptKind={activePrompt.kind}
         isActive={isActive}
         focusVersion={focusVersion}
         onInsertText={shell.insertText}
         onNativeValueChange={shell.replaceInputValue}
         onMoveCursor={shell.moveCursor}
-        onNormalKey={shell.normalKey}
+        onMoveLeft={shell.moveLeft}
+        onMoveRight={shell.moveRight}
+        onMoveStart={shell.moveStart}
+        onMoveEnd={shell.moveEnd}
+        onMovePreviousWord={shell.movePreviousWord}
+        onMoveNextWord={shell.moveNextWord}
+        onBackspace={shell.backspace}
+        onDelete={shell.delete}
+        onDeletePreviousWord={shell.deletePreviousWord}
+        onBrowseOlderHistory={shell.browseOlderHistory}
+        onBrowseNewerHistory={shell.browseNewerHistory}
         onSubmit={shell.submit}
         onCancel={shell.cancel}
+        onDismissCompletion={shell.dismissCompletion}
         onComplete={shell.complete}
         onFocus={onActivate}
         onPaneKeyInput={onPaneKeyInput}

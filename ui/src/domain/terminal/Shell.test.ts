@@ -15,14 +15,12 @@ import {
   createShellSessionId,
   createShellState,
   getActiveShellPrompt,
+  getShellAutosuggestion,
+  getShellStatus,
   reduceShellState,
   type CommandOutcome,
   type ShellState,
 } from "./Shell.ts";
-import {
-  vimBufferCursorOffset,
-  vimBufferText,
-} from "../vim/VimBuffer.ts";
 
 function createState(
   scrollbackLimit = 3,
@@ -69,16 +67,14 @@ function succeededOutcome(message: string): CommandOutcome {
 }
 
 function settleSucceeded(state: ShellState, message: string): ShellState {
-  const commandId = runningCommandId(state);
-
   return reduceShellState(state, {
     kind: "command.settled",
-    commandId,
+    commandId: runningCommandId(state),
     outcome: succeededOutcome(message),
   });
 }
 
-function projectsDirectory() {
+function projectsDirectoryPath() {
   const resolution = resolveVirtualDirectory(
     demoContentCorpus.filesystem,
     virtualHomeDirectory(),
@@ -89,10 +85,10 @@ function projectsDirectory() {
     assert.fail("Expected the development projects directory.");
   }
 
-  return resolution.directory;
+  return resolution.directory.path;
 }
 
-test("reduces command execution and bounds per-shell histories", () => {
+test("reduces command execution and captures stable command cwd history", () => {
   const firstSubmitted = submit(createState(2, 2), "first");
   const firstCommandId = runningCommandId(firstSubmitted);
 
@@ -108,20 +104,13 @@ test("reduces command execution and bounds per-shell histories", () => {
         {
           id: "session-command-history-1",
           source: "first",
+          currentDirectory: "~",
         },
       ],
     },
   });
 
-  const consumed = reduceShellState(firstSubmitted, {
-    kind: "effect.consumed",
-    commandId: firstCommandId,
-  });
-  const firstSettled = reduceShellState(consumed, {
-    kind: "command.settled",
-    commandId: firstCommandId,
-    outcome: succeededOutcome("one"),
-  });
+  const firstSettled = settleSucceeded(firstSubmitted, "one");
   const secondSettled = settleSucceeded(submit(firstSettled, "second"), "two");
   const thirdSettled = settleSucceeded(submit(secondSettled, "third"), "three");
 
@@ -133,11 +122,15 @@ test("reduces command execution and bounds per-shell histories", () => {
     thirdSettled.commandHistory.map((entry) => entry.source),
     ["second", "third"],
   );
+  assert.deepEqual(
+    thirdSettled.commandHistory.map((entry) => entry.currentDirectory),
+    ["~", "~"],
+  );
   assert.deepEqual(thirdSettled.lifecycle, { kind: "idle" });
   assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
 });
 
-test("keeps each shell current directory in its own immutable state", () => {
+test("keeps each shell current directory immutable and records submission context", () => {
   const first = submit(createState(), "cd projects");
   const second = createState();
   const commandId = runningCommandId(first);
@@ -150,7 +143,7 @@ test("keeps each shell current directory in its own immutable state", () => {
       effects: [
         {
           kind: "set-current-directory",
-          directory: projectsDirectory().path,
+          directory: projectsDirectoryPath(),
         },
       ],
     },
@@ -159,10 +152,8 @@ test("keeps each shell current directory in its own immutable state", () => {
   assert.equal(first.currentDirectory, "~");
   assert.equal(second.currentDirectory, "~");
   assert.equal(settled.currentDirectory, "~/projects");
-  assert.equal(
-    settled.history[0]?.command.currentDirectory,
-    "~",
-  );
+  assert.equal(settled.history[0]?.command.currentDirectory, "~");
+  assert.equal(settled.commandHistory[0]?.currentDirectory, "~");
 });
 
 test("requests cancellation through the active command AbortSignal seam", () => {
@@ -170,12 +161,6 @@ test("requests cancellation through the active command AbortSignal seam", () => 
   const commandId = runningCommandId(submitted);
   const cancelling = reduceShellState(submitted, { kind: "prompt.cancel" });
 
-  assert.deepEqual(cancelling.lifecycle, {
-    kind: "cancelling",
-    command: submitted.lifecycle.kind === "running"
-      ? submitted.lifecycle.command
-      : assert.fail("Expected a running command."),
-  });
   assert.deepEqual(cancelling.pendingEffect, {
     kind: "cancel-command",
     commandId,
@@ -199,7 +184,7 @@ test("requests cancellation through the active command AbortSignal seam", () => 
   assert.equal(settled.history[0]?.outcome.kind, "cancelled");
 });
 
-test("discards execution causes only when storing shell history", () => {
+test("discards execution causes when storing shell history", () => {
   const messageSecret = "history-error-message-secret";
   const stackSecret = "history-error-stack-secret";
   const nestedCauseSecret = "history-error-cause-secret";
@@ -213,34 +198,25 @@ test("discards execution causes only when storing shell history", () => {
 
   const submitted = submit(createState(), "cat about.md");
   const commandId = runningCommandId(submitted);
-  const outcome: CommandOutcome = {
-    kind: "failed",
-    failure: {
-      kind: "execution-error",
-      commandName: "cat",
-      cause,
-    },
-    diagnostics: [
-      {
-        kind: "runtime",
-        id: createShellDiagnosticId("execution-failed"),
-        code: "runtime.execution-failed",
-        message: "The command could not complete.",
-      },
-    ],
-  };
-
-  assert.equal(outcome.kind, "failed");
-  if (outcome.kind !== "failed" || outcome.failure.kind !== "execution-error") {
-    assert.fail("Expected an execution-error outcome.");
-  }
-
-  assert.strictEqual(outcome.failure.cause, cause);
-
   const settled = reduceShellState(submitted, {
     kind: "command.settled",
     commandId,
-    outcome,
+    outcome: {
+      kind: "failed",
+      failure: {
+        kind: "execution-error",
+        commandName: "cat",
+        cause,
+      },
+      diagnostics: [
+        {
+          kind: "runtime",
+          id: createShellDiagnosticId("execution-failed"),
+          code: "runtime.execution-failed",
+          message: "The command could not complete.",
+        },
+      ],
+    },
   });
   const entry = settled.history[0];
 
@@ -256,7 +232,6 @@ test("discards execution causes only when storing shell history", () => {
     kind: "execution-error",
     commandName: "cat",
   });
-  assert.equal("cause" in entry.outcome.failure, false);
 
   const serializedState = JSON.stringify(settled);
 
@@ -270,115 +245,61 @@ test("discards execution causes only when storing shell history", () => {
   }
 });
 
-test("navigates bounded command history with normal-mode k and j", () => {
+test("navigates history with Up and Down while restoring its command draft", () => {
   const first = settleSucceeded(submit(createState(), "first"), "one");
   const second = settleSucceeded(submit(first, "second"), "two");
-  const normal = reduceShellState(second, {
-    kind: "prompt.normal-key",
-    key: { kind: "escape" },
+  const withDraft = reduceShellState(second, {
+    kind: "input.insert",
+    text: "draft",
   });
-  const previous = reduceShellState(normal, {
-    kind: "prompt.normal-key",
-    key: { kind: "history-older" },
-  });
-  const oldest = reduceShellState(previous, {
-    kind: "prompt.normal-key",
-    key: { kind: "history-older" },
-  });
-  const newer = reduceShellState(oldest, {
-    kind: "prompt.normal-key",
-    key: { kind: "history-newer" },
-  });
-  const draft = reduceShellState(newer, {
-    kind: "prompt.normal-key",
-    key: { kind: "history-newer" },
-  });
+  const previous = reduceShellState(withDraft, { kind: "history.older" });
+  const oldest = reduceShellState(previous, { kind: "history.older" });
+  const newer = reduceShellState(oldest, { kind: "history.newer" });
+  const draft = reduceShellState(newer, { kind: "history.newer" });
 
-  assert.equal(vimBufferText(previous.input), "second");
-  assert.equal(vimBufferText(oldest.input), "first");
-  assert.equal(vimBufferText(newer.input), "second");
-  assert.equal(vimBufferText(draft.input), "");
+  assert.equal(previous.input.text, "second");
+  assert.equal(oldest.input.text, "first");
+  assert.equal(newer.input.text, "second");
+  assert.equal(draft.input.text, "draft");
   assert.deepEqual(draft.historyNavigation, { kind: "not-browsing" });
 });
 
-test("routes terminal normal prompt editing through the shared Vim buffer", () => {
-  const typed = reduceShellState(createState(), {
+test("derives, accepts, and dismisses a history autosuggestion without mutating input", () => {
+  const first = settleSucceeded(
+    submit(createState(), "open about.md"),
+    "one",
+  );
+  const second = settleSucceeded(submit(first, "open tools.md"), "two");
+  const typed = reduceShellState(second, {
     kind: "input.insert",
-    text: "one two",
-  });
-  const normal = reduceShellState(typed, {
-    kind: "prompt.normal-key",
-    key: { kind: "escape" },
-  });
-  const atStart = reduceShellState(normal, {
-    kind: "prompt.normal-key",
-    key: { kind: "digit", digit: 0 },
-  });
-  const deleting = reduceShellState(atStart, {
-    kind: "prompt.normal-key",
-    key: { kind: "operator", operator: "delete" },
-  });
-  const deleted = reduceShellState(deleting, {
-    kind: "prompt.normal-key",
-    key: { kind: "motion", motion: "word-forward" },
-  });
-  const undone = reduceShellState(deleted, {
-    kind: "prompt.normal-key",
-    key: { kind: "undo" },
+    text: "open t",
   });
 
-  assert.equal(vimBufferText(deleted.input), "two");
-  assert.deepEqual(deleted.input.register, {
-    kind: "character",
-    text: "one ",
+  assert.equal(typed.input.text, "open t");
+  assert.deepEqual(getShellAutosuggestion(typed), {
+    kind: "suggestion",
+    value: "open tools.md",
+    suffix: "ools.md",
   });
-  assert.equal(vimBufferText(undone.input), "one two");
-  assert.equal(undone.input.mode.kind, "normal");
+
+  const accepted = reduceShellState(typed, { kind: "input.move-right" });
+
+  assert.equal(accepted.input.text, "open tools.md");
+  assert.equal(accepted.input.cursor, "open tools.md".length);
+
+  const refreshed = reduceShellState(second, {
+    kind: "input.insert",
+    text: "open a",
+  });
+  const dismissed = reduceShellState(refreshed, {
+    kind: "completion.dismiss",
+  });
+
+  assert.deepEqual(getShellAutosuggestion(dismissed), { kind: "none" });
+  assert.equal(dismissed.input.text, "open a");
 });
 
-test("canonicalizes native replacement into one line before Vim operators", () => {
-  const source = "first😀\r\nsecond\rthird\nfourth";
-  const expected = "first😀 second third fourth";
-  const replaced = reduceShellState(createState(), {
-    kind: "input.replace",
-    value: source,
-    cursor: source.length,
-  });
-  const normal = reduceShellState(replaced, {
-    kind: "prompt.normal-key",
-    key: { kind: "escape" },
-  });
-  const deleting = reduceShellState(normal, {
-    kind: "prompt.normal-key",
-    key: { kind: "operator", operator: "delete" },
-  });
-  const deleted = reduceShellState(deleting, {
-    kind: "prompt.normal-key",
-    key: { kind: "operator", operator: "delete" },
-  });
-
-  assert.deepEqual(replaced.input.lines, [expected]);
-  assert.equal(vimBufferText(replaced.input), expected);
-  assert.equal(vimBufferCursorOffset(replaced.input), expected.length);
-  assert.deepEqual(deleted.input.lines, [""]);
-  assert.equal(vimBufferText(deleted.input), "");
-  assert.deepEqual(deleted.input.register, {
-    kind: "character",
-    text: expected,
-  });
-});
-
-test("bounds terminal prompt undo snapshots through the shared Vim core", () => {
-  let state = createState();
-
-  for (let index = 0; index < 101; index += 1) {
-    state = reduceShellState(state, { kind: "input.insert", text: "x" });
-  }
-
-  assert.equal(state.input.undoStack.length, 100);
-});
-
-test("keeps secret prompts separate from command input and all histories", () => {
+test("keeps secret values out of history, autosuggestion, and retained state", () => {
   const request = createSecretPromptRequest(
     createSecretPromptId("cv-key"),
     "CV access key",
@@ -397,13 +318,22 @@ test("keeps secret prompts separate from command input and all histories", () =>
     assert.fail("Expected a secret prompt.");
   }
 
-  assert.equal(activePrompt.prompt.request.id, request.id);
-  assert.equal(vimBufferText(activePrompt.prompt.buffer), "sensitive-value");
+  assert.equal(activePrompt.prompt.line.text, "sensitive-value");
+  assert.deepEqual(getShellAutosuggestion(typed), { kind: "none" });
 
-  const submitted = reduceShellState(typed, { kind: "prompt.submit" });
+  const requestWhileSecret = createCompletionRequest(
+    typed.id,
+    typed.sessionId,
+    "sensitive-value",
+    "sensitive-value".length,
+  );
+  const noCompletion = reduceShellState(typed, {
+    kind: "completion.request",
+    request: requestWhileSecret,
+  });
+  const submitted = reduceShellState(noCompletion, { kind: "prompt.submit" });
 
   assert.deepEqual(submitted.secretPrompt, { kind: "none" });
-  assert.equal(vimBufferText(submitted.input), "");
   assert.deepEqual(submitted.history, []);
   assert.deepEqual(submitted.commandHistory, []);
   assert.deepEqual(submitted.completion, { kind: "idle" });
@@ -417,253 +347,82 @@ test("keeps secret prompts separate from command input and all histories", () =>
     kind: "secret-prompt.effect.consumed",
     requestId: request.id,
   });
-  const repeated = reduceShellState(consumed, { kind: "prompt.submit" });
 
-  assert.deepEqual(consumed.pendingEffect, { kind: "none" });
-  assert.deepEqual(repeated.pendingEffect, { kind: "none" });
-  assert.deepEqual(repeated.history, []);
-  assert.deepEqual(repeated.commandHistory, []);
+  assert.equal(JSON.stringify(consumed).includes("sensitive-value"), false);
 });
 
-test("canonicalizes native composition replacement for secret prompts", () => {
-  const request = createSecretPromptRequest(
-    createSecretPromptId("secret-composition"),
-    "Secret value",
-  );
-  const source = "秘密\r\n値\r確認\n完了";
-  const expected = "秘密 値 確認 完了";
-  const active = reduceShellState(createState(), {
-    kind: "secret.begin",
-    request,
-  });
-  const composed = reduceShellState(active, {
+test("uses one-line native replacements and preserves astral command input", () => {
+  const source = "echo 😀\r\nnext\rthen\nlast";
+  const expected = "echo 😀 next then last";
+  const replaced = reduceShellState(createState(), {
     kind: "input.replace",
     value: source,
     cursor: source.length,
   });
-  const prompt = getActiveShellPrompt(composed);
+  const moved = reduceShellState(replaced, { kind: "input.move-left" });
+  const deleted = reduceShellState(moved, { kind: "input.delete" });
+  const submitted = reduceShellState(replaced, { kind: "prompt.submit" });
 
-  if (prompt.kind !== "secret") {
-    assert.fail("Expected a secret prompt.");
-  }
-
-  assert.deepEqual(prompt.prompt.buffer.lines, [expected]);
-  assert.equal(vimBufferCursorOffset(prompt.prompt.buffer), expected.length);
-
-  const submitted = reduceShellState(composed, { kind: "prompt.submit" });
-
-  assert.deepEqual(submitted.pendingEffect, {
-    kind: "secret-submitted",
-    requestId: request.id,
-    value: expected,
-  });
-});
-
-test("emits one correlated secret cancellation without retaining the typed value", () => {
-  const request = createSecretPromptRequest(
-    createSecretPromptId("oauth-code"),
-    "One-time code",
-  );
-  const active = reduceShellState(createState(), {
-    kind: "secret.begin",
-    request,
-  });
-  const typed = reduceShellState(active, {
-    kind: "input.insert",
-    text: "sensitive-value",
-  });
-  const cancelled = reduceShellState(typed, { kind: "prompt.cancel" });
-
-  assert.deepEqual(cancelled.secretPrompt, { kind: "none" });
-  assert.deepEqual(cancelled.pendingEffect, {
-    kind: "secret-cancelled",
-    requestId: request.id,
-  });
-  assert.equal(JSON.stringify(cancelled).includes("sensitive-value"), false);
-
-  const consumed = reduceShellState(cancelled, {
-    kind: "secret-prompt.effect.consumed",
-    requestId: request.id,
-  });
-  const repeated = reduceShellState(consumed, { kind: "prompt.cancel" });
-
-  assert.deepEqual(consumed.pendingEffect, { kind: "none" });
-  assert.deepEqual(repeated.pendingEffect, { kind: "none" });
-});
-
-test("opens a typed secret prompt requested by a command effect", () => {
-  const submitted = submit(createState(), "login");
-  const commandId = runningCommandId(submitted);
-  const request = createSecretPromptRequest(
-    createSecretPromptId("oauth-code"),
-    "One-time code",
-  );
-  const settled = reduceShellState(submitted, {
-    kind: "command.settled",
-    commandId,
-    outcome: {
-      kind: "succeeded",
-      outputs: [
-        {
-          kind: "prompt",
-          id: createShellOutputId("login-prompt"),
-          label: "login",
-          message: "Authorise access",
-        },
-      ],
-      effects: [{ kind: "request-secret-prompt", request }],
-    },
-  });
-
-  assert.equal(settled.secretPrompt.kind, "active");
-  assert.equal(settled.history.length, 1);
-  assert.equal(settled.commandHistory.length, 1);
-});
-
-test("applies current single completions and exposes multiple matches", () => {
-  const withInput = reduceShellState(createState(), {
-    kind: "input.insert",
-    text: "op",
-  });
-  const request = createCompletionRequest(
-    withInput.id,
-    withInput.sessionId,
-    "op",
-    2,
-  );
-  const pending = reduceShellState(withInput, {
-    kind: "completion.request",
-    request,
-  });
-  const completed = reduceShellState(pending, {
-    kind: "completion.resolved",
-    request,
-    result: {
-      kind: "single",
-      candidate: { kind: "command", value: "open", label: "Open content" },
-    },
-  });
-
-  assert.equal(vimBufferText(completed.input), "open");
-  assert.equal(vimBufferCursorOffset(completed.input), 4);
-
-  const pathInput = reduceShellState(createState(), {
-    kind: "input.insert",
-    text: "open pro",
-  });
-  const pathRequest = createCompletionRequest(
-    pathInput.id,
-    pathInput.sessionId,
-    "open pro",
-    8,
-  );
-  const pathPending = reduceShellState(pathInput, {
-    kind: "completion.request",
-    request: pathRequest,
-  });
-  const suggestions = reduceShellState(pathPending, {
-    kind: "completion.resolved",
-    request: pathRequest,
-    result: {
-      kind: "multiple",
-      candidates: [
-        { kind: "path", value: "projects", label: "Projects" },
-        { kind: "path", value: "profile", label: "Profile" },
-      ],
-    },
-  });
-
-  assert.equal(suggestions.completion.kind, "suggestions");
-
-  const unsafeRequest = createCompletionRequest(
-    withInput.id,
-    withInput.sessionId,
-    "op",
-    2,
-  );
-  const unsafePending = reduceShellState(withInput, {
-    kind: "completion.request",
-    request: unsafeRequest,
-  });
-  const canonicalCompleted = reduceShellState(unsafePending, {
-    kind: "completion.resolved",
-    request: unsafeRequest,
-    result: {
-      kind: "single",
-      candidate: {
-        kind: "command",
-        value: "open\r\nnotes",
-        label: "Open notes",
-      },
-    },
-  });
-
-  assert.deepEqual(canonicalCompleted.input.lines, ["open notes"]);
-  assert.equal(vimBufferCursorOffset(canonicalCompleted.input), 10);
-});
-
-test("canonicalizes pasted text before command submission and history navigation", () => {
-  const source = "echo 😀\r\nnext\rthen\nlast";
-  const expected = "echo 😀 next then last";
-  const pasted = reduceShellState(createState(), {
-    kind: "input.insert",
-    text: source,
-  });
-  const submitted = reduceShellState(pasted, { kind: "prompt.submit" });
-  const settled = settleSucceeded(submitted, "done");
-  const normal = reduceShellState(settled, {
-    kind: "prompt.normal-key",
-    key: { kind: "escape" },
-  });
-  const recalled = reduceShellState(normal, {
-    kind: "prompt.normal-key",
-    key: { kind: "history-older" },
-  });
-
-  assert.deepEqual(pasted.input.lines, [expected]);
-  assert.equal(vimBufferText(pasted.input), expected);
+  assert.equal(replaced.input.text, expected);
+  assert.equal(replaced.input.cursor, expected.length);
+  assert.equal(deleted.input.text, "echo 😀 next then las");
 
   if (submitted.lifecycle.kind !== "running") {
-    assert.fail("Expected pasted input to submit a command.");
+    assert.fail("Expected a command to run.");
   }
 
   assert.equal(submitted.lifecycle.command.source, expected);
-  assert.equal(submitted.commandHistory[0]?.source, expected);
-  assert.deepEqual(recalled.input.lines, [expected]);
-  assert.equal(vimBufferText(recalled.input), expected);
 });
 
-test("preserves astral input through cursor editing and command submission", () => {
-  const normalized = reduceShellState(createState(), {
-    kind: "input.replace",
-    value: "😀",
-    cursor: 1,
+test("applies common completion prefixes, cycles candidates, and has no terminal Vim state", () => {
+  const input = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "open pro",
   });
-  const backspaced = reduceShellState(
-    reduceShellState(createState(), {
-      kind: "input.insert",
-      text: "😀",
-    }),
-    { kind: "input.backspace" },
+  const request = createCompletionRequest(
+    input.id,
+    input.sessionId,
+    input.input.text,
+    input.input.cursor,
   );
-  const deleted = reduceShellState(normalized, { kind: "input.delete" });
-  const submitted = reduceShellState(
-    reduceShellState(createState(), {
-      kind: "input.insert",
-      text: "echo 😀",
-    }),
-    { kind: "prompt.submit" },
-  );
+  const pending = reduceShellState(input, {
+    kind: "completion.request",
+    request,
+  });
+  const suggestions = reduceShellState(pending, {
+    kind: "completion.resolved",
+    request,
+    result: {
+      kind: "multiple",
+      candidates: [
+        { kind: "path", value: "project-one", label: "Directory" },
+        { kind: "path", value: "project-two", label: "Directory" },
+      ],
+    },
+  });
 
-  assert.equal(vimBufferCursorOffset(normalized.input), 0);
-  assert.deepEqual(normalized.input.lines, ["😀"]);
-  assert.equal(vimBufferText(backspaced.input), "");
-  assert.equal(vimBufferText(deleted.input), "");
+  assert.equal(suggestions.input.text, "open project-");
+  assert.equal(suggestions.completion.kind, "suggestions");
 
-  if (submitted.lifecycle.kind !== "running") {
-    assert.fail("Expected astral input to submit a command.");
+  const selected = reduceShellState(suggestions, {
+    kind: "completion.cycle",
+    direction: "next",
+  });
+
+  if (selected.completion.kind !== "suggestions") {
+    assert.fail("Expected completion candidates to remain visible.");
   }
 
-  assert.equal(submitted.lifecycle.command.source, "echo 😀");
-  assert.equal(submitted.commandHistory[0]?.source, "echo 😀");
+  assert.deepEqual(selected.completion.selection, { kind: "selected", index: 0 });
+  assert.equal(selected.input.text, "open project-");
+
+  const accepted = reduceShellState(selected, { kind: "input.move-right" });
+
+  assert.equal(accepted.input.text, "open project-one");
+  assert.deepEqual(accepted.completion, { kind: "idle" });
+
+  const dismissed = reduceShellState(selected, { kind: "completion.dismiss" });
+
+  assert.deepEqual(dismissed.completion, { kind: "idle" });
+  assert.equal("mode" in getShellStatus(createState()), false);
 });

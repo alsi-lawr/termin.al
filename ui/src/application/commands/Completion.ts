@@ -3,6 +3,12 @@ import type {
   CompletionRequest,
   CompletionResult,
 } from "../../domain/terminal/Completion.ts";
+import {
+  listVirtualDirectory,
+  type VirtualDirectoryPath,
+  type VirtualFilesystem,
+  type VirtualNode,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { CommandRegistry } from "./CommandRegistry.ts";
 
 export type CommandCompletionProvider = Readonly<{
@@ -31,6 +37,17 @@ export type CreateCompletionServiceOptions = Readonly<{
   paths: PathCompletionProvider;
 }>;
 
+export type CreateVirtualFilesystemPathCompletionProviderOptions = Readonly<{
+  filesystem: VirtualFilesystem;
+  currentDirectory: VirtualDirectoryPath;
+}>;
+
+type PathCompletionLocation = Readonly<{
+  directoryInput: string;
+  outputPrefix: string;
+  namePrefix: string;
+}>;
+
 function uniqueMatchingCandidates(
   candidates: ReadonlyArray<CompletionCandidate>,
   prefix: string,
@@ -56,6 +73,10 @@ export function createCompletionService({
 }: CreateCompletionServiceOptions): CompletionService {
   return {
     complete: async (request, signal) => {
+      if (request.target.kind === "none") {
+        return { kind: "none" };
+      }
+
       const candidates =
         request.target.kind === "command"
           ? await commands.complete(request, signal)
@@ -105,8 +126,93 @@ export function createRegistryCommandCompletionProvider(
   };
 }
 
-export function createEmptyPathCompletionProvider(): PathCompletionProvider {
+function pathCompletionLocation(prefix: string): PathCompletionLocation {
+  const separator = prefix.lastIndexOf("/");
+
+  if (separator === -1) {
+    return {
+      directoryInput: ".",
+      outputPrefix: "",
+      namePrefix: prefix,
+    };
+  }
+
+  const outputPrefix = prefix.slice(0, separator + 1);
+  const directoryInput = prefix.slice(0, separator);
+
+  if (directoryInput.length > 0) {
+    return {
+      directoryInput,
+      outputPrefix,
+      namePrefix: prefix.slice(separator + 1),
+    };
+  }
+
+  if (prefix.startsWith("/")) {
+    return {
+      directoryInput: "/",
+      outputPrefix,
+      namePrefix: prefix.slice(separator + 1),
+    };
+  }
+
   return {
-    complete: async () => [],
+    directoryInput: ".",
+    outputPrefix,
+    namePrefix: prefix.slice(separator + 1),
+  };
+}
+
+function pathCandidateLabel(node: VirtualNode): string {
+  switch (node.kind) {
+    case "directory":
+      return "Directory";
+    case "file":
+      return "File";
+    case "locked-file":
+      return "Locked file";
+  }
+}
+
+function pathCandidateValue(
+  outputPrefix: string,
+  node: VirtualNode,
+): string {
+  return `${outputPrefix}${node.name}${node.kind === "directory" ? "/" : ""}`;
+}
+
+export function createVirtualFilesystemPathCompletionProvider({
+  filesystem,
+  currentDirectory,
+}: CreateVirtualFilesystemPathCompletionProviderOptions): PathCompletionProvider {
+  return {
+    complete: async (request, signal) => {
+      if (signal.aborted || request.target.kind !== "path") {
+        return [];
+      }
+
+      const location = pathCompletionLocation(request.target.prefix);
+      const listing = listVirtualDirectory(
+        filesystem,
+        currentDirectory,
+        location.directoryInput,
+      );
+
+      if (listing.kind !== "found") {
+        return [];
+      }
+
+      return listing.entries
+        .filter(
+          (entry) =>
+            (location.namePrefix.startsWith(".") || !entry.name.startsWith(".")) &&
+            entry.name.startsWith(location.namePrefix),
+        )
+        .map((entry) => ({
+          kind: "path",
+          value: pathCandidateValue(location.outputPrefix, entry),
+          label: pathCandidateLabel(entry),
+        }));
+    },
   };
 }

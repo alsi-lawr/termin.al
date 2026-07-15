@@ -1,29 +1,29 @@
-import {
-  VimMode,
-  backspaceVimInsertText,
-  deleteVimInsertText,
-  moveVimInsertCursorToTextOffset,
-  vimBufferCursorOffset,
-  vimBufferText,
-  type VimBuffer,
-} from "../vim/VimBuffer.ts";
-import {
-  applyVimPromptKey,
-  createEmptyVimPrompt,
-  createVimPrompt,
-  insertVimPromptText,
-  replaceVimPromptText,
-  vimPromptMode,
-  type VimPromptKey,
-  type VimPromptMode,
-} from "./VimPrompt.ts";
+import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
 import {
   createCompletionEdit,
+  createCompletionPrefixEdit,
+  longestCommonCompletionPrefix,
   type CompletionCandidate,
   type CompletionRequest,
   type CompletionResult,
 } from "./Completion.ts";
-import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
+import {
+  backspaceShellLine,
+  createEmptyShellLine,
+  createShellLine,
+  deleteShellLine,
+  deleteShellLinePreviousWord,
+  insertShellLineText,
+  moveShellLineCursor,
+  moveShellLineCursorEnd,
+  moveShellLineCursorLeft,
+  moveShellLineCursorNextWord,
+  moveShellLineCursorPreviousWord,
+  moveShellLineCursorRight,
+  moveShellLineCursorStart,
+  replaceShellLine,
+  type ShellLine,
+} from "./ShellLine.ts";
 import type { VirtualDirectoryPath } from "../filesystem/VirtualFilesystem.ts";
 import type {
   ViewerContent,
@@ -276,17 +276,18 @@ export type ShellHistoryEntry = Readonly<{
 export type CommandHistoryEntry = Readonly<{
   id: CommandHistoryEntryId;
   source: string;
+  currentDirectory: VirtualDirectoryPath;
 }>;
 
 export type SecretPromptState = Readonly<{
   request: SecretPromptRequest;
-  buffer: VimBuffer;
+  line: ShellLine;
 }>;
 
 export type ActiveShellPrompt =
   | Readonly<{
       kind: "command";
-      buffer: VimBuffer;
+      line: ShellLine;
     }>
   | Readonly<{
       kind: "secret";
@@ -305,7 +306,14 @@ export type HistoryNavigation =
   | Readonly<{
       kind: "browsing";
       index: number;
-      draft: VimBuffer;
+      draft: ShellLine;
+    }>;
+
+export type ShellCompletionSelection =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "selected";
+      index: number;
     }>;
 
 export type ShellCompletion =
@@ -316,8 +324,24 @@ export type ShellCompletion =
     }>
   | Readonly<{
       kind: "suggestions";
+      request: CompletionRequest;
       candidates: ReadonlyArray<CompletionCandidate>;
+      selection: ShellCompletionSelection;
     }>;
+
+export type ShellAutosuggestion =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "suggestion";
+      value: string;
+      suffix: string;
+    }>;
+
+export type ShellAutosuggestionState =
+  | Readonly<{ kind: "available" }>
+  | Readonly<{ kind: "dismissed" }>;
+
+export type CompletionCycleDirection = "next" | "previous";
 
 export type ShellEffect =
   | Readonly<{ kind: "none" }>
@@ -335,7 +359,7 @@ export type ShellState = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
   currentDirectory: VirtualDirectoryPath;
-  input: VimBuffer;
+  input: ShellLine;
   secretPrompt: SecretPrompt;
   lifecycle: CommandLifecycle;
   history: ReadonlyArray<ShellHistoryEntry>;
@@ -344,6 +368,7 @@ export type ShellState = Readonly<{
   commandHistoryLimit: number;
   historyNavigation: HistoryNavigation;
   completion: ShellCompletion;
+  autosuggestion: ShellAutosuggestionState;
   nextCommandSequence: number;
   nextHistorySequence: number;
   nextCommandHistorySequence: number;
@@ -351,14 +376,8 @@ export type ShellState = Readonly<{
 }>;
 
 export type ShellStatus =
-  | Readonly<{
-      kind: "ready";
-      mode: VimPromptMode;
-    }>
-  | Readonly<{
-      kind: "secret";
-      mode: VimPromptMode;
-    }>
+  | Readonly<{ kind: "ready" }>
+  | Readonly<{ kind: "secret" }>
   | Readonly<{
       kind: "running";
       commandId: CommandId;
@@ -390,11 +409,21 @@ export type ShellAction =
       kind: "input.move-cursor";
       cursor: number;
     }>
+  | Readonly<{ kind: "input.move-left" }>
+  | Readonly<{ kind: "input.move-right" }>
+  | Readonly<{ kind: "input.move-start" }>
+  | Readonly<{ kind: "input.move-end" }>
+  | Readonly<{ kind: "input.move-previous-word" }>
+  | Readonly<{ kind: "input.move-next-word" }>
   | Readonly<{ kind: "input.backspace" }>
   | Readonly<{ kind: "input.delete" }>
+  | Readonly<{ kind: "input.delete-previous-word" }>
+  | Readonly<{ kind: "history.older" }>
+  | Readonly<{ kind: "history.newer" }>
+  | Readonly<{ kind: "completion.dismiss" }>
   | Readonly<{
-      kind: "prompt.normal-key";
-      key: VimPromptKey;
+      kind: "completion.cycle";
+      direction: CompletionCycleDirection;
     }>
   | Readonly<{ kind: "prompt.submit" }>
   | Readonly<{ kind: "prompt.cancel" }>
@@ -499,19 +528,20 @@ function activePrompt(state: ShellState): ActiveShellPrompt {
     return { kind: "secret", prompt: state.secretPrompt.prompt };
   }
 
-  return { kind: "command", buffer: state.input };
+  return { kind: "command", line: state.input };
 }
 
-function updateActivePromptBuffer(
-  state: ShellState,
-  buffer: VimBuffer,
-): ShellState {
+function promptLine(prompt: ActiveShellPrompt): ShellLine {
+  return prompt.kind === "secret" ? prompt.prompt.line : prompt.line;
+}
+
+function updateActivePromptLine(state: ShellState, line: ShellLine): ShellState {
   if (state.secretPrompt.kind === "active") {
     return {
       ...state,
       secretPrompt: {
         kind: "active",
-        prompt: { ...state.secretPrompt.prompt, buffer },
+        prompt: { ...state.secretPrompt.prompt, line },
       },
       completion: { kind: "idle" },
     };
@@ -519,9 +549,10 @@ function updateActivePromptBuffer(
 
   return {
     ...state,
-    input: buffer,
+    input: line,
     historyNavigation: { kind: "not-browsing" },
     completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
   };
 }
 
@@ -530,7 +561,7 @@ function createSecretPromptState(
 ): SecretPromptState {
   return {
     request,
-    buffer: createEmptyVimPrompt(),
+    line: createEmptyShellLine(),
   };
 }
 
@@ -542,18 +573,13 @@ function isMatchingCompletionRequest(
 
   return (
     prompt.kind === "command" &&
-    vimPromptMode(prompt.buffer).kind === "insert" &&
-    vimBufferText(prompt.buffer) === request.source &&
-    vimBufferCursorOffset(prompt.buffer) === request.cursor
+    prompt.line.text === request.source &&
+    prompt.line.cursor === request.cursor
   );
 }
 
 function browseOlderHistory(state: ShellState): ShellState {
-  if (
-    state.secretPrompt.kind === "active" ||
-    state.commandHistory.length === 0 ||
-    vimPromptMode(state.input).kind !== "normal"
-  ) {
+  if (state.secretPrompt.kind === "active" || state.commandHistory.length === 0) {
     return state;
   }
 
@@ -564,31 +590,27 @@ function browseOlderHistory(state: ShellState): ShellState {
       : Math.max(0, navigation.index - 1);
   const entry = state.commandHistory[index];
 
-  if (!entry) {
+  if (entry === undefined) {
     return state;
   }
 
   return {
     ...state,
-    input: createVimPrompt({
-      text: entry.source,
-      mode: VimMode.Normal,
-      register: state.input.register,
-    }),
+    input: createShellLine(entry.source),
     historyNavigation: {
       kind: "browsing",
       index,
       draft: navigation.kind === "not-browsing" ? state.input : navigation.draft,
     },
     completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
   };
 }
 
 function browseNewerHistory(state: ShellState): ShellState {
   if (
     state.secretPrompt.kind === "active" ||
-    state.historyNavigation.kind === "not-browsing" ||
-    vimPromptMode(state.input).kind !== "normal"
+    state.historyNavigation.kind === "not-browsing"
   ) {
     return state;
   }
@@ -599,25 +621,23 @@ function browseNewerHistory(state: ShellState): ShellState {
       input: state.historyNavigation.draft,
       historyNavigation: { kind: "not-browsing" },
       completion: { kind: "idle" },
+      autosuggestion: { kind: "available" },
     };
   }
 
   const index = state.historyNavigation.index + 1;
   const entry = state.commandHistory[index];
 
-  if (!entry) {
+  if (entry === undefined) {
     return state;
   }
 
   return {
     ...state,
-    input: createVimPrompt({
-      text: entry.source,
-      mode: VimMode.Normal,
-      register: state.input.register,
-    }),
+    input: createShellLine(entry.source),
     historyNavigation: { ...state.historyNavigation, index },
     completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
   };
 }
 
@@ -670,6 +690,103 @@ function changedCurrentDirectory(
   );
 
   return effect?.kind === "set-current-directory" ? effect.directory : undefined;
+}
+
+function selectedCompletionCandidate(
+  completion: ShellCompletion,
+): CompletionCandidate | undefined {
+  if (
+    completion.kind !== "suggestions" ||
+    completion.selection.kind !== "selected"
+  ) {
+    return undefined;
+  }
+
+  return completion.candidates[completion.selection.index];
+}
+
+function acceptSelectedCompletion(state: ShellState): ShellState | undefined {
+  if (state.secretPrompt.kind === "active" || state.completion.kind !== "suggestions") {
+    return undefined;
+  }
+
+  const candidate = selectedCompletionCandidate(state.completion);
+
+  if (candidate === undefined) {
+    return undefined;
+  }
+
+  const edit = createCompletionEdit(state.completion.request, candidate);
+
+  return {
+    ...state,
+    input: replaceShellLine(edit.value, edit.cursor),
+    historyNavigation: { kind: "not-browsing" },
+    completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
+  };
+}
+
+function acceptPromptSuggestionAtLineEnd(state: ShellState): ShellState | undefined {
+  if (state.secretPrompt.kind === "active" || state.input.cursor !== state.input.text.length) {
+    return undefined;
+  }
+
+  const selectedCompletion = acceptSelectedCompletion(state);
+
+  if (selectedCompletion !== undefined) {
+    return selectedCompletion;
+  }
+
+  const suggestion = getShellAutosuggestion(state);
+
+  if (suggestion.kind === "none") {
+    return undefined;
+  }
+
+  return {
+    ...state,
+    input: createShellLine(suggestion.value),
+    historyNavigation: { kind: "not-browsing" },
+    completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
+  };
+}
+
+function cycleCompletion(
+  state: ShellState,
+  direction: CompletionCycleDirection,
+): ShellState {
+  if (state.completion.kind !== "suggestions") {
+    return state;
+  }
+
+  const length = state.completion.candidates.length;
+
+  if (length === 0) {
+    return { ...state, completion: { kind: "idle" } };
+  }
+
+  const currentIndex = state.completion.selection.kind === "selected"
+    ? state.completion.selection.index
+    : undefined;
+  let index: number;
+
+  if (currentIndex === undefined) {
+    index = direction === "next" ? 0 : length - 1;
+  } else if (direction === "next") {
+    index = (currentIndex + 1) % length;
+  } else {
+    index = (currentIndex - 1 + length) % length;
+  }
+
+  return {
+    ...state,
+    completion: {
+      ...state.completion,
+      selection: { kind: "selected", index },
+    },
+  };
 }
 
 export function createShellId(value: string): ShellId {
@@ -727,7 +844,7 @@ export function createShellState({
     id,
     sessionId,
     currentDirectory,
-    input: createEmptyVimPrompt(),
+    input: createEmptyShellLine(),
     secretPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
     history: [],
@@ -736,6 +853,7 @@ export function createShellState({
     commandHistoryLimit,
     historyNavigation: { kind: "not-browsing" },
     completion: { kind: "idle" },
+    autosuggestion: { kind: "available" },
     nextCommandSequence: 1,
     nextHistorySequence: 1,
     nextCommandHistorySequence: 1,
@@ -747,17 +865,45 @@ export function getActiveShellPrompt(state: ShellState): ActiveShellPrompt {
   return activePrompt(state);
 }
 
+export function getShellAutosuggestion(state: ShellState): ShellAutosuggestion {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.lifecycle.kind !== "idle" ||
+    state.completion.kind !== "idle" ||
+    state.autosuggestion.kind === "dismissed" ||
+    state.input.cursor !== state.input.text.length ||
+    state.input.text.length === 0
+  ) {
+    return { kind: "none" };
+  }
+
+  for (let index = state.commandHistory.length - 1; index >= 0; index -= 1) {
+    const entry = state.commandHistory[index];
+
+    if (
+      entry !== undefined &&
+      entry.source !== state.input.text &&
+      entry.source.startsWith(state.input.text)
+    ) {
+      return {
+        kind: "suggestion",
+        value: entry.source,
+        suffix: entry.source.slice(state.input.text.length),
+      };
+    }
+  }
+
+  return { kind: "none" };
+}
+
 export function getShellStatus(state: ShellState): ShellStatus {
   if (state.secretPrompt.kind === "active") {
-    return {
-      kind: "secret",
-      mode: vimPromptMode(state.secretPrompt.prompt.buffer),
-    };
+    return { kind: "secret" };
   }
 
   switch (state.lifecycle.kind) {
     case "idle":
-      return { kind: "ready", mode: vimPromptMode(state.input) };
+      return { kind: "ready" };
     case "running":
       return {
         kind: "running",
@@ -781,105 +927,151 @@ export function reduceShellState(
         return state;
       }
 
-      {
-        const prompt = activePrompt(state);
-        const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
-        return updateActivePromptBuffer(
-          state,
-          insertVimPromptText(buffer, action.text),
-        );
-      }
-    case "input.replace": {
+      return updateActivePromptLine(
+        state,
+        insertShellLineText(promptLine(activePrompt(state)), action.text),
+      );
+    case "input.replace":
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      const prompt = activePrompt(state);
-      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
-      if (vimPromptMode(buffer).kind !== "insert") {
+      return updateActivePromptLine(
+        state,
+        replaceShellLine(action.value, action.cursor),
+      );
+    case "input.move-cursor":
+      if (!canEditPrompt(state)) {
         return state;
       }
 
-      return updateActivePromptBuffer(
+      return updateActivePromptLine(
         state,
-        replaceVimPromptText(buffer, action.value, action.cursor),
+        moveShellLineCursor(promptLine(activePrompt(state)), action.cursor),
+      );
+    case "input.move-left":
+      if (!canEditPrompt(state)) {
+        return state;
+      }
+
+      return updateActivePromptLine(
+        state,
+        moveShellLineCursorLeft(promptLine(activePrompt(state))),
+      );
+    case "input.move-right": {
+      if (!canEditPrompt(state)) {
+        return state;
+      }
+
+      const accepted = acceptPromptSuggestionAtLineEnd(state);
+
+      if (accepted !== undefined) {
+        return accepted;
+      }
+
+      return updateActivePromptLine(
+        state,
+        moveShellLineCursorRight(promptLine(activePrompt(state))),
       );
     }
-    case "input.move-cursor": {
+    case "input.move-start":
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      const prompt = activePrompt(state);
-      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
-      if (vimPromptMode(buffer).kind !== "insert") {
+      return updateActivePromptLine(
+        state,
+        moveShellLineCursorStart(promptLine(activePrompt(state))),
+      );
+    case "input.move-end": {
+      if (!canEditPrompt(state)) {
         return state;
       }
 
-      return updateActivePromptBuffer(
+      const accepted = acceptPromptSuggestionAtLineEnd(state);
+
+      if (accepted !== undefined) {
+        return accepted;
+      }
+
+      return updateActivePromptLine(
         state,
-        moveVimInsertCursorToTextOffset(buffer, action.cursor),
+        moveShellLineCursorEnd(promptLine(activePrompt(state))),
       );
     }
-    case "input.backspace": {
+    case "input.move-previous-word":
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      const prompt = activePrompt(state);
-      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
-      if (vimPromptMode(buffer).kind !== "insert") {
-        return state;
-      }
-
-      return updateActivePromptBuffer(state, backspaceVimInsertText(buffer));
-    }
-    case "input.delete": {
+      return updateActivePromptLine(
+        state,
+        moveShellLineCursorPreviousWord(promptLine(activePrompt(state))),
+      );
+    case "input.move-next-word":
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      const prompt = activePrompt(state);
-      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
-      if (vimPromptMode(buffer).kind !== "insert") {
-        return state;
-      }
-
-      return updateActivePromptBuffer(state, deleteVimInsertText(buffer));
-    }
-    case "prompt.normal-key": {
+      return updateActivePromptLine(
+        state,
+        moveShellLineCursorNextWord(promptLine(activePrompt(state))),
+      );
+    case "input.backspace":
       if (!canEditPrompt(state)) {
         return state;
       }
 
-      if (action.key.kind === "history-older") {
-        return browseOlderHistory(state);
+      return updateActivePromptLine(
+        state,
+        backspaceShellLine(promptLine(activePrompt(state))),
+      );
+    case "input.delete":
+      if (!canEditPrompt(state)) {
+        return state;
       }
 
-      if (action.key.kind === "history-newer") {
-        return browseNewerHistory(state);
+      return updateActivePromptLine(
+        state,
+        deleteShellLine(promptLine(activePrompt(state))),
+      );
+    case "input.delete-previous-word":
+      if (!canEditPrompt(state)) {
+        return state;
       }
 
-      const prompt = activePrompt(state);
-      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
-
+      return updateActivePromptLine(
+        state,
+        deleteShellLinePreviousWord(promptLine(activePrompt(state))),
+      );
+    case "history.older":
+      return canEditPrompt(state) ? browseOlderHistory(state) : state;
+    case "history.newer":
+      return canEditPrompt(state) ? browseNewerHistory(state) : state;
+    case "completion.dismiss":
       if (
-        vimPromptMode(buffer).kind !== "normal" &&
-        action.key.kind !== "escape"
+        state.completion.kind === "idle" &&
+        state.autosuggestion.kind === "dismissed"
       ) {
         return state;
       }
 
-      return updateActivePromptBuffer(state, applyVimPromptKey(buffer, action.key));
-    }
+      return {
+        ...state,
+        completion: { kind: "idle" },
+        autosuggestion: { kind: "dismissed" },
+      };
+    case "completion.cycle":
+      return canEditPrompt(state) ? cycleCompletion(state, action.direction) : state;
     case "prompt.submit": {
+      const acceptedCompletion = acceptSelectedCompletion(state);
+
+      if (acceptedCompletion !== undefined) {
+        return acceptedCompletion;
+      }
+
       if (state.secretPrompt.kind === "active") {
-        const { request, buffer } = state.secretPrompt.prompt;
+        const { request, line } = state.secretPrompt.prompt;
 
         return {
           ...state,
@@ -888,12 +1080,12 @@ export function reduceShellState(
           pendingEffect: {
             kind: "secret-submitted",
             requestId: request.id,
-            value: createSecretPromptValue(vimBufferText(buffer)),
+            value: createSecretPromptValue(line.text),
           },
         };
       }
 
-      if (!canEditPrompt(state) || vimBufferText(state.input).trim().length === 0) {
+      if (!canEditPrompt(state) || state.input.text.trim().length === 0) {
         return state;
       }
 
@@ -902,7 +1094,8 @@ export function reduceShellState(
           state.sessionId,
           state.nextCommandHistorySequence,
         ),
-        source: vimBufferText(state.input),
+        source: state.input.text,
+        currentDirectory: state.currentDirectory,
       };
       const commandHistory = appendBounded(
         state.commandHistory,
@@ -920,11 +1113,12 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyVimPrompt(),
+        input: createEmptyShellLine(),
         lifecycle: { kind: "running", command },
         commandHistory,
         historyNavigation: { kind: "not-browsing" },
         completion: { kind: "idle" },
+        autosuggestion: { kind: "available" },
         nextCommandSequence: state.nextCommandSequence + 1,
         nextCommandHistorySequence: state.nextCommandHistorySequence + 1,
         pendingEffect: { kind: "execute-command", command },
@@ -966,9 +1160,10 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyVimPrompt(),
+        input: createEmptyShellLine(),
         historyNavigation: { kind: "not-browsing" },
         completion: { kind: "idle" },
+        autosuggestion: { kind: "available" },
       };
     case "secret.begin":
       if (!canEditPrompt(state) || state.secretPrompt.kind === "active") {
@@ -982,6 +1177,7 @@ export function reduceShellState(
           prompt: createSecretPromptState(action.request),
         },
         completion: { kind: "idle" },
+        autosuggestion: { kind: "available" },
       };
     case "completion.request":
       if (!canEditPrompt(state) || !isMatchingCompletionRequest(state, action.request)) {
@@ -1004,18 +1200,28 @@ export function reduceShellState(
       if (action.result.kind === "single") {
         const edit = createCompletionEdit(action.request, action.result.candidate);
 
-        return updateActivePromptBuffer(
+        return updateActivePromptLine(
           state,
-          replaceVimPromptText(state.input, edit.value, edit.cursor),
+          replaceShellLine(edit.value, edit.cursor),
         );
       }
 
       if (action.result.kind === "multiple") {
+        const commonPrefix = longestCommonCompletionPrefix(
+          action.result.candidates,
+        );
+        const edit = createCompletionPrefixEdit(action.request, commonPrefix);
+
         return {
           ...state,
+          input: replaceShellLine(edit.value, edit.cursor),
+          historyNavigation: { kind: "not-browsing" },
+          autosuggestion: { kind: "available" },
           completion: {
             kind: "suggestions",
+            request: action.request,
             candidates: action.result.candidates,
+            selection: { kind: "none" },
           },
         };
       }

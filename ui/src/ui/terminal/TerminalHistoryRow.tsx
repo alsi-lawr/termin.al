@@ -7,6 +7,7 @@ import {
   TerminalDiagnosticBlock,
   TerminalOutputBlock,
 } from "./TerminalOutputBlock";
+import { ShellContextLine } from "./ShellContextLine";
 
 type TerminalHistoryRowProps = Readonly<{
   entry: ShellHistoryEntry;
@@ -66,13 +67,19 @@ export function TerminalHistoryRow({
       className="space-y-1 pb-4"
       aria-labelledby={commandLabelId}
     >
-      <div id={commandLabelId} className="whitespace-pre-wrap wrap-break-words">
-        <span className="mr-1 text-text-muted" aria-hidden="true">
-          &gt;
-        </span>
-        <span className={outcomeClassMap[entry.outcome.kind]}>
-          {entry.command.source}
-        </span>
+      <div id={commandLabelId}>
+        <ShellContextLine
+          currentDirectory={entry.command.currentDirectory}
+          promptLabel={undefined}
+        />
+        <div className="whitespace-pre-wrap wrap-break-words">
+          <span className="mr-1 text-ui-accent" aria-hidden="true">
+            ❯
+          </span>
+          <span className={outcomeClassMap[entry.outcome.kind]}>
+            {entry.command.source}
+          </span>
+        </div>
       </div>
       <TerminalHistoryOutcome
         historyEntryId={entry.id}

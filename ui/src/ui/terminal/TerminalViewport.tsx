@@ -7,20 +7,24 @@ import {
   type UIEvent,
 } from "react";
 import type {
+  ShellAutosuggestion,
   ShellCompletion,
   ShellHistoryEntry,
   ShellStatus,
 } from "../../domain/terminal/Shell.ts";
+import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { TerminalHistoryRow } from "./TerminalHistoryRow";
 import { TerminalPrompt } from "./TerminalPrompt";
 
 type TerminalViewportProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
-  prompt: string;
+  currentDirectory: VirtualDirectoryPath;
+  promptLabel: string | undefined;
   currentInput: string;
   cursorColumn: number;
   status: ShellStatus;
   completion: ShellCompletion;
+  autosuggestion: ShellAutosuggestion;
   transientDiagnostic: string | undefined;
 }>;
 
@@ -43,11 +47,13 @@ function scrollToLatestOutput(element: HTMLDivElement): void {
 
 export function TerminalViewport({
   rows,
-  prompt,
+  currentDirectory,
+  promptLabel,
   currentInput,
   cursorColumn,
   status,
   completion,
+  autosuggestion,
   transientDiagnostic,
 }: TerminalViewportProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -68,7 +74,8 @@ export function TerminalViewport({
     completion,
     currentInput,
     cursorColumn,
-    prompt,
+    currentDirectory,
+    promptLabel,
     rows,
     scrollMode,
     status,
@@ -146,11 +153,13 @@ export function TerminalViewport({
         )}
 
         <TerminalPrompt
-          prompt={prompt}
+          currentDirectory={currentDirectory}
+          promptLabel={promptLabel}
           currentInput={currentInput}
           cursorColumn={cursorColumn}
           status={status}
           completion={completion}
+          autosuggestion={autosuggestion}
         />
       </div>
 
