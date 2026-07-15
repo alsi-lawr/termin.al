@@ -120,7 +120,6 @@ export function TerminalViewport({
         className="h-full min-h-0 overflow-y-auto overscroll-contain p-4"
         role="region"
         aria-label="Terminal scrollback"
-        tabIndex={0}
         onScroll={handleScroll}
       >
         <div

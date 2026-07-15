@@ -6,8 +6,10 @@ import {
   applyNormalVimKey,
   createVimBuffer,
   insertVimText,
+  moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
   submitVimCommand,
+  vimBufferCursorOffset,
   vimBufferText,
 } from "./VimBuffer.ts";
 
@@ -171,4 +173,18 @@ test("maps only practical normal-mode keys", () => {
   assert.deepEqual(normalVimKeyFromKeyboard("q", false, false), {
     kind: "unrecognized",
   });
+});
+
+test("maps multiline native editor offsets through Unicode-safe Vim cursors", () => {
+  const buffer = createVimBuffer({
+    text: "a😀\nsecond",
+    mode: VimMode.Insert,
+  });
+  const normalized = moveVimInsertCursorToTextOffset(buffer, 2);
+  const secondLine = moveVimInsertCursorToTextOffset(buffer, 4);
+
+  assert.deepEqual(normalized.cursor, { line: 0, column: 1 });
+  assert.equal(vimBufferCursorOffset(normalized), 1);
+  assert.deepEqual(secondLine.cursor, { line: 1, column: 0 });
+  assert.equal(vimBufferCursorOffset(secondLine), 4);
 });

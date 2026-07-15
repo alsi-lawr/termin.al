@@ -11,37 +11,76 @@ import {
   createShellState,
   getActiveShellPrompt,
   getShellStatus,
+  type ShellId,
+  type ShellSessionId,
 } from "../../domain/terminal/Shell.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
+import {
+  createPaneCommandDefinition,
+  type PaneCommandHandler,
+} from "../../application/commands/PaneCommand.ts";
 import {
   createCompletionService,
   createEmptyPathCompletionProvider,
   createRegistryCommandCompletionProvider,
 } from "../../application/commands/Completion.ts";
 import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
-import { InputCapture, type InputCaptureHandle } from "./InputCapture";
+import {
+  InputCapture,
+  type InputCaptureHandle,
+  type InputCapturePaneKeyInput,
+  type InputCapturePaneKeyResult,
+} from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
 import { useShellEngine } from "./useShellEngine";
+import {
+  nextUnicodeCursorOffset,
+  previousUnicodeCursorOffset,
+} from "../../domain/terminal/UnicodeCursor.ts";
+import {
+  MobilePaneControls,
+  type MobilePaneControl,
+} from "../workspace/MobilePaneControls";
 
 type TerminalProps = Readonly<{
+  shellId: ShellId;
+  sessionId: ShellSessionId;
+  isActive: boolean;
+  focusVersion: number;
+  onActivate: () => void;
+  onPaneKeyInput: (
+    input: InputCapturePaneKeyInput,
+  ) => InputCapturePaneKeyResult;
+  paneCommandHandler: PaneCommandHandler;
   prompt?: string;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
 }>;
 
 export function Terminal({
+  shellId,
+  sessionId,
+  isActive,
+  focusVersion,
+  onActivate,
+  onPaneKeyInput,
+  paneCommandHandler,
   prompt = "$",
   secretPromptOutcomeHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
   const [initialState] = useState(() =>
     createShellState({
-      id: createShellId("main-terminal"),
-      sessionId: createShellSessionId("browser-session"),
+      id: createShellId(shellId),
+      sessionId: createShellSessionId(sessionId),
       scrollbackLimit: 200,
       commandHistoryLimit: 100,
     }),
   );
-  const [registry] = useState(() => createCommandRegistry({ commands: [] }));
+  const [registry] = useState(() =>
+    createCommandRegistry({
+      commands: [createPaneCommandDefinition(paneCommandHandler)],
+    }),
+  );
   const [completionService] = useState(() =>
     createCompletionService({
       commands: createRegistryCommandCompletionProvider(registry),
@@ -67,8 +106,10 @@ export function Terminal({
       : editor.buffer.value;
 
   useLayoutEffect(() => {
-    inputRef.current?.preserveFocus();
-  }, [shell.state.history, shell.transientDiagnostic]);
+    if (isActive) {
+      inputRef.current?.preserveFocus();
+    }
+  }, [isActive, shell.state.history, shell.transientDiagnostic]);
 
   const focusInputFromTerminal = (event: MouseEvent<HTMLDivElement>): void => {
     const target = event.target;
@@ -81,22 +122,90 @@ export function Terminal({
       return;
     }
 
+    onActivate();
     inputRef.current?.focus();
+  };
+
+  const handleMobileControl = (
+    control: MobilePaneControl,
+    ctrlKey: boolean,
+  ): void => {
+    if (ctrlKey) {
+      return;
+    }
+
+    switch (control) {
+      case "escape":
+        shell.normalKey({ kind: "escape" });
+        return;
+      case "tab":
+        shell.complete();
+        return;
+      case "left":
+        if (editor.buffer.mode.kind === "normal") {
+          shell.normalKey({ kind: "motion", motion: "left" });
+          return;
+        }
+
+        shell.moveCursor(
+          previousUnicodeCursorOffset(
+            editor.buffer.value,
+            editor.buffer.cursor,
+          ),
+        );
+        return;
+      case "right":
+        if (editor.buffer.mode.kind === "normal") {
+          shell.normalKey({ kind: "motion", motion: "right" });
+          return;
+        }
+
+        shell.moveCursor(
+          nextUnicodeCursorOffset(editor.buffer.value, editor.buffer.cursor),
+        );
+        return;
+      case "up":
+        if (editor.buffer.mode.kind === "normal") {
+          shell.normalKey({ kind: "history-older" });
+        }
+        return;
+      case "down":
+        if (editor.buffer.mode.kind === "normal") {
+          shell.normalKey({ kind: "history-newer" });
+        }
+        return;
+    }
+  };
+
+  const handleMobilePrefix = (): void => {
+    onPaneKeyInput({
+      key: "b",
+      ctrlKey: true,
+      metaKey: false,
+    });
   };
 
   return (
     <div
-      className="h-screen w-screen rounded-md border border-neutral-800 bg-neutral-950 text-neutral-100"
+      className="flex h-full min-h-0 min-w-0 w-full flex-col rounded-md border border-neutral-800 bg-neutral-950 text-neutral-100"
       onClick={focusInputFromTerminal}
+      onFocusCapture={onActivate}
     >
-      <TerminalViewport
-        rows={shell.state.history}
-        prompt={displayPrompt}
-        currentInput={displayInput}
-        cursorColumn={editor.buffer.cursor}
-        status={getShellStatus(shell.state)}
-        completion={shell.state.completion}
-        transientDiagnostic={shell.transientDiagnostic?.message}
+      <div className="min-h-0 flex-1">
+        <TerminalViewport
+          rows={shell.state.history}
+          prompt={displayPrompt}
+          currentInput={displayInput}
+          cursorColumn={editor.buffer.cursor}
+          status={getShellStatus(shell.state)}
+          completion={shell.state.completion}
+          transientDiagnostic={shell.transientDiagnostic?.message}
+        />
+      </div>
+
+      <MobilePaneControls
+        onControl={handleMobileControl}
+        onPrefix={handleMobilePrefix}
       />
 
       <InputCapture
@@ -105,6 +214,8 @@ export function Terminal({
         cursor={editor.buffer.cursor}
         mode={editor.buffer.mode}
         isSecret={activePrompt.kind === "secret"}
+        isActive={isActive}
+        focusVersion={focusVersion}
         onInsertText={shell.insertText}
         onNativeValueChange={shell.replaceInputValue}
         onMoveCursor={shell.moveCursor}
@@ -112,6 +223,8 @@ export function Terminal({
         onSubmit={shell.submit}
         onCancel={shell.cancel}
         onComplete={shell.complete}
+        onFocus={onActivate}
+        onPaneKeyInput={onPaneKeyInput}
       />
     </div>
   );

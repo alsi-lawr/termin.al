@@ -28,11 +28,23 @@ export type InputCaptureHandle = Readonly<{
   preserveFocus: () => void;
 }>;
 
+export type InputCapturePaneKeyInput = Readonly<{
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}>;
+
+export type InputCapturePaneKeyResult =
+  | Readonly<{ kind: "handled" }>
+  | Readonly<{ kind: "unhandled" }>;
+
 type InputCaptureProps = Readonly<{
   value: string;
   cursor: number;
   mode: PromptMode;
   isSecret: boolean;
+  isActive: boolean;
+  focusVersion: number;
   onNativeValueChange: (value: string, cursor: number) => void;
   onMoveCursor: (cursor: number) => void;
   onInsertText: (text: string) => void;
@@ -40,6 +52,10 @@ type InputCaptureProps = Readonly<{
   onSubmit: () => void;
   onCancel: () => void;
   onComplete: () => void;
+  onFocus: () => void;
+  onPaneKeyInput: (
+    input: InputCapturePaneKeyInput,
+  ) => InputCapturePaneKeyResult;
 }>;
 
 function selectionCursor(element: HTMLTextAreaElement): number {
@@ -66,8 +82,10 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     }));
 
     useEffect(() => {
-      inputRef.current?.focus();
-    }, []);
+      if (props.isActive) {
+        inputRef.current?.focus({ preventScroll: true });
+      }
+    }, [props.focusVersion, props.isActive]);
 
     useLayoutEffect(() => {
       const input = inputRef.current;
@@ -151,6 +169,17 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
+      const paneKeyResult = props.onPaneKeyInput({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+      });
+
+      if (paneKeyResult.kind === "handled") {
+        event.preventDefault();
+        return;
+      }
+
       if (event.ctrlKey && event.key.toLowerCase() === "c") {
         event.preventDefault();
         props.onCancel();
@@ -224,6 +253,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         onCompositionStart={handleCompositionStart}
         onCompositionEnd={handleCompositionEnd}
         onPaste={handlePaste}
+        onFocus={props.onFocus}
         className="sr-only"
         autoCapitalize="off"
         autoComplete="off"

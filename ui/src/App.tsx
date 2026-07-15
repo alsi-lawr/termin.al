@@ -1,11 +1,7 @@
-import { Terminal } from "./ui/terminal/Terminal";
+import { Workspace } from "./ui/workspace/Workspace";
 
 function App() {
-  return (
-    <main className="min-h-0 flex-1 grid place-items-center">
-      <Terminal />
-    </main>
-  );
+  return <Workspace />;
 }
 
 export default App;

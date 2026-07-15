@@ -1249,6 +1249,10 @@ export function vimBufferText(buffer: VimBuffer): string {
   return joinLines(buffer.lines);
 }
 
+export function vimBufferCursorOffset(buffer: VimBuffer): number {
+  return textOffsetForPosition(buffer.lines, buffer.cursor);
+}
+
 export function isVimBufferDirty(buffer: VimBuffer): boolean {
   return vimBufferText(buffer) !== buffer.savedText;
 }
@@ -1272,6 +1276,20 @@ export function moveVimInsertCursor(
   return withTextState(
     buffer,
     createTextState(buffer.lines, cursor, VimMode.Insert, { kind: "none" }),
+  );
+}
+
+export function moveVimInsertCursorToTextOffset(
+  buffer: VimBuffer,
+  cursorOffset: number,
+): VimBuffer {
+  if (buffer.mode.kind !== "insert") {
+    return buffer;
+  }
+
+  return moveVimInsertCursor(
+    buffer,
+    positionForTextOffset(buffer.lines, cursorOffset, VimMode.Insert),
   );
 }
 
