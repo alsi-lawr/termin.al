@@ -5,5 +5,4 @@ open Microsoft.AspNetCore.Routing
 
 [<RequireQualifiedAccess>]
 module Api =
-    let mapEndpoints (routes: IEndpointRouteBuilder) : unit =
-        routes.MapGroup("/api") |> ignore
+    let mapEndpoints (routes: IEndpointRouteBuilder) : unit = routes.MapGroup("/api") |> ignore

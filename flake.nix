@@ -16,6 +16,7 @@
         packages = with pkgs; [
           nodejs_24
           dotnet-sdk_10
+          fantomas
           git
         ];
       };

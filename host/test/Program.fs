@@ -29,9 +29,7 @@ module Program =
             use response = client.GetAsync("/healthz").GetAwaiter().GetResult()
 
             if response.StatusCode <> HttpStatusCode.OK then
-                failwithf
-                    "Expected GET /healthz to return 200 OK, but received %O."
-                    response.StatusCode
+                failwithf "Expected GET /healthz to return 200 OK, but received %O." response.StatusCode
 
             0
         finally

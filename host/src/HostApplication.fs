@@ -22,8 +22,7 @@ module HostApplication =
         application.UseDefaultFiles() |> ignore
         application.UseStaticFiles() |> ignore
 
-        application.MapGet("/healthz", Func<IResult>(fun () -> Results.Ok()))
-        |> ignore
+        application.MapGet("/healthz", Func<IResult>(fun () -> Results.Ok())) |> ignore
 
         Api.mapEndpoints application
         application
