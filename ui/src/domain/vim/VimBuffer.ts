@@ -1265,14 +1265,6 @@ export function isVimBufferDirty(buffer: VimBuffer): boolean {
   return vimBufferText(buffer) !== buffer.savedText;
 }
 
-export function markVimBufferSaved(buffer: VimBuffer): VimBuffer {
-  return { ...buffer, savedText: vimBufferText(buffer) };
-}
-
-export function clearVimCommandEffect(buffer: VimBuffer): VimBuffer {
-  return { ...buffer, commandEffect: { kind: "none" } };
-}
-
 export function moveVimInsertCursor(
   buffer: VimBuffer,
   cursor: VimPosition,
@@ -1336,52 +1328,6 @@ export function replaceVimInsertText(
   }
 
   const lines = splitText(text);
-  const cursor = positionForTextOffset(lines, cursorOffset, VimMode.Insert);
-
-  return commitEdit(
-    buffer,
-    createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
-    buffer.register,
-  );
-}
-
-export function backspaceVimText(buffer: VimBuffer): VimBuffer {
-  if (buffer.mode.kind !== "insert") {
-    return buffer;
-  }
-
-  const text = vimBufferText(buffer);
-  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-
-  if (cursorOffset === 0) {
-    return buffer;
-  }
-
-  const start = previousUnicodeCursorOffset(text, cursorOffset);
-  const lines = splitText(text.slice(0, start) + text.slice(cursorOffset));
-  const cursor = positionForTextOffset(lines, start, VimMode.Insert);
-
-  return commitEdit(
-    buffer,
-    createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
-    buffer.register,
-  );
-}
-
-export function deleteVimTextAtCursor(buffer: VimBuffer): VimBuffer {
-  if (buffer.mode.kind !== "insert") {
-    return buffer;
-  }
-
-  const text = vimBufferText(buffer);
-  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-
-  if (cursorOffset === text.length) {
-    return buffer;
-  }
-
-  const end = nextUnicodeCursorOffset(text, cursorOffset);
-  const lines = splitText(text.slice(0, cursorOffset) + text.slice(end));
   const cursor = positionForTextOffset(lines, cursorOffset, VimMode.Insert);
 
   return commitEdit(
