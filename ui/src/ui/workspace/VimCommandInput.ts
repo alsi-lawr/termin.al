@@ -18,24 +18,36 @@ export type VimCommandKeyboardInput = Readonly<{
   metaKey: boolean;
 }>;
 
+export type VimCommandKeyboardResult =
+  | Readonly<{ kind: "allow-default" }>
+  | Readonly<{ kind: "prevent-default" }>
+  | Readonly<{ kind: "input"; input: VimCommandInput }>;
+
 export function vimCommandInputFromKeyboard(
   input: VimCommandKeyboardInput,
-): VimCommandInput | undefined {
+): VimCommandKeyboardResult {
+  if (
+    (input.ctrlKey || input.metaKey) &&
+    input.key.toLowerCase() === "v"
+  ) {
+    return { kind: "allow-default" };
+  }
+
   if (input.ctrlKey || input.metaKey) {
-    return undefined;
+    return { kind: "prevent-default" };
   }
 
   switch (input.key) {
     case "Escape":
-      return { kind: "escape" };
+      return { kind: "input", input: { kind: "escape" } };
     case "Enter":
-      return { kind: "submit" };
+      return { kind: "input", input: { kind: "submit" } };
     case "Backspace":
-      return { kind: "backspace" };
+      return { kind: "input", input: { kind: "backspace" } };
     default:
       return Array.from(input.key).length === 1
-        ? { kind: "text", text: input.key }
-        : undefined;
+        ? { kind: "input", input: { kind: "text", text: input.key } }
+        : { kind: "prevent-default" };
   }
 }
 

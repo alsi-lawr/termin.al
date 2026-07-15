@@ -16,13 +16,24 @@ test("accepts an astral search key as complete command input", () => {
     mode: VimMode.Normal,
   });
   const search = applyNormalVimKey(start, { kind: "enter-search" });
+  const keyboardInput = vimCommandInputFromKeyboard({
+    key: "😀",
+    ctrlKey: false,
+    metaKey: false,
+  });
+
+  assert.deepEqual(keyboardInput, {
+    kind: "input",
+    input: { kind: "text", text: "😀" },
+  });
+
+  if (keyboardInput.kind !== "input") {
+    throw new Error("expected command text input");
+  }
+
   const typed = applyVimCommandInput(
     search,
-    vimCommandInputFromKeyboard({
-      key: "😀",
-      ctrlKey: false,
-      metaKey: false,
-    }) ?? { kind: "text", text: "" },
+    keyboardInput.input,
   );
   const submitted = applyVimCommandInput(typed, { kind: "submit" });
 
@@ -71,6 +82,37 @@ test("accepts pasted command text as complete command input", () => {
   assert.deepEqual(submitted.commandEffect, { kind: "force-quit" });
 });
 
+test("allows keyboard paste and applies its payload once", () => {
+  const start = createVimBuffer({ text: "", mode: VimMode.Normal });
+  const command = applyNormalVimKey(start, { kind: "enter-command" });
+  const ctrlPaste = vimCommandInputFromKeyboard({
+    key: "v",
+    ctrlKey: true,
+    metaKey: false,
+  });
+  const metaPaste = vimCommandInputFromKeyboard({
+    key: "v",
+    ctrlKey: false,
+    metaKey: true,
+  });
+
+  assert.deepEqual(ctrlPaste, { kind: "allow-default" });
+  assert.deepEqual(metaPaste, { kind: "allow-default" });
+
+  const afterKeydown = command;
+  const afterPaste = applyVimCommandInput(afterKeydown, {
+    kind: "text",
+    text: "q!",
+  });
+
+  assert.equal(afterKeydown, command);
+  assert.deepEqual(afterPaste.mode, {
+    kind: "command",
+    prompt: ":",
+    input: "q!",
+  });
+});
+
 test("keeps physical command controls and pane-prefix keys distinct", () => {
   const start = createVimBuffer({ text: "", mode: VimMode.Normal });
   const command = applyNormalVimKey(start, { kind: "enter-command" });
@@ -86,12 +128,20 @@ test("keeps physical command controls and pane-prefix keys distinct", () => {
   });
   assert.equal(escaped.mode.kind, "normal");
   assert.deepEqual(submitted.commandEffect, { kind: "write" });
-  assert.equal(
+  assert.deepEqual(
     vimCommandInputFromKeyboard({
       key: "b",
       ctrlKey: true,
       metaKey: false,
     }),
-    undefined,
+    { kind: "prevent-default" },
+  );
+  assert.deepEqual(
+    vimCommandInputFromKeyboard({
+      key: "c",
+      ctrlKey: false,
+      metaKey: true,
+    }),
+    { kind: "prevent-default" },
   );
 });

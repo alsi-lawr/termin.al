@@ -243,16 +243,21 @@ export function VimEditorPane({
   const handleCommandKey = (
     event: KeyboardEvent<HTMLTextAreaElement>,
   ): void => {
-    event.preventDefault();
-
-    const input = vimCommandInputFromKeyboard({
+    const result = vimCommandInputFromKeyboard({
       key: event.key,
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
     });
 
-    if (input !== undefined) {
-      onBufferChange(applyVimCommandInput(buffer, input));
+    switch (result.kind) {
+      case "allow-default":
+        return;
+      case "prevent-default":
+        event.preventDefault();
+        return;
+      case "input":
+        event.preventDefault();
+        onBufferChange(applyVimCommandInput(buffer, result.input));
     }
   };
 
