@@ -653,6 +653,12 @@ module GitHubContentClientTests =
         let catalogPath =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
+        let ordinalFirstTieDocumentPath =
+            "/repos/example-owner/content/contents/content/cache-document-001.md?ref=main"
+
+        let ordinalSecondTieDocumentPath =
+            "/repos/example-owner/content/contents/content/cache-document-002.md?ref=main"
+
         let projectsPath =
             "/repos/example-owner/content/contents/content/projects.json?ref=main"
 
@@ -724,6 +730,8 @@ module GitHubContentClientTests =
                 let path = request.PathAndQuery
 
                 if path = contentRepositoryPath && (stage = 1 || stage = 3) then
+                    response HttpStatusCode.ServiceUnavailable "" None
+                elif stage = 3 && path = ordinalFirstTieDocumentPath then
                     response HttpStatusCode.ServiceUnavailable "" None
                 elif stage = 2 && path = releasesPath then
                     linkResponse
@@ -833,6 +841,15 @@ module GitHubContentClientTests =
             |> expectCacheContent $"Initial cache document {id}"
             |> ignore
 
+            if id = cacheDocumentId 2 then
+                now <- now.AddMinutes(5.0)
+
+                contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+                |> expectCacheContent "Refresh cache catalog before the equal-time eviction tie"
+                |> ignore
+
+                now <- now.AddMinutes(1.0)
+
         contentClient.GetProjects(CancellationToken.None).GetAwaiter().GetResult()
         |> expectCacheContent "Initial cache projects"
         |> ignore
@@ -845,8 +862,11 @@ module GitHubContentClientTests =
         |> expectCacheContent "Initial cache changelog"
         |> ignore
 
-        if handler.Requests |> List.length <> 512 then
-            failwithf "Expected 512 retained payload requests, but received %d." (handler.Requests |> List.length)
+        let initialPayloadRequests =
+            handler.Requests |> List.filter (fun request -> request.IfNoneMatch.IsNone)
+
+        if initialPayloadRequests |> List.length <> 512 then
+            failwithf "Expected 512 retained payload requests, but received %d." (initialPayloadRequests |> List.length)
 
         stage <- 1
         now <- now.AddMinutes(6.0)
@@ -871,16 +891,37 @@ module GitHubContentClientTests =
         if handler.Requests |> List.length <> requestsAfterOverflow then
             failwith "A refreshed payload must remain cached after the 513th payload is admitted."
 
-        stage <- 3
+        let ordinalSecondTieDocumentId =
+            match ContentDomain.ContentId.tryCreate "test.documentId" (cacheDocumentId 2) with
+            | Ok value -> value
+            | Error failure -> failwithf "%s: %s" failure.Field failure.Message
 
-        match contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult() with
-        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
-        | _ -> failwith "The oldest cached payload must be evicted before the 513th payload is admitted."
+        contentClient.GetDocument(ordinalSecondTieDocumentId, CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Retained ordinal-later equal-time cache document"
+        |> ignore
 
         match handler.Requests |> List.last with
-        | { PathAndQuery = "/repos/example-owner/content"
-            IfNoneMatch = None } -> ()
-        | _ -> failwith "Evicted payloads must not retain conditional request validators."
+        | { PathAndQuery = path
+            IfNoneMatch = Some _ } when path = ordinalSecondTieDocumentPath -> ()
+        | _ -> failwith "The ordinal-later equal-time cache key must remain retained after overflow."
+
+        stage <- 3
+
+        let ordinalFirstTieDocumentId =
+            match ContentDomain.ContentId.tryCreate "test.documentId" (cacheDocumentId 1) with
+            | Ok value -> value
+            | Error failure -> failwithf "%s: %s" failure.Field failure.Message
+
+        match contentClient.GetDocument(ordinalFirstTieDocumentId, CancellationToken.None).GetAwaiter().GetResult() with
+        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+        | _ -> failwith "The ordinal-first equal-time cache key must be evicted before the 513th payload is admitted."
+
+        match handler.Requests |> List.last with
+        | { PathAndQuery = path
+            IfNoneMatch = None } when path = ordinalFirstTieDocumentPath -> ()
+        | { PathAndQuery = path } when path = ordinalFirstTieDocumentPath ->
+            failwith "Evicted equal-time cache keys must not retain conditional request validators."
+        | _ -> failwith "The ordinal-first equal-time cache key must be requested after eviction."
 
     let private testRateMalformedAndTimeoutFailures () =
         let rateHandler =
