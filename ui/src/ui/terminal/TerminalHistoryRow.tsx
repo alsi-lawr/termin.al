@@ -22,10 +22,8 @@ const outcomeClassMap = {
 }>;
 
 function TerminalHistoryOutcome({
-  historyEntryId,
   outcome,
 }: Readonly<{
-  historyEntryId: ShellHistoryEntry["id"];
   outcome: ShellHistoryOutcome;
 }>): ReactElement {
   switch (outcome.kind) {
@@ -35,7 +33,6 @@ function TerminalHistoryOutcome({
           {outcome.outputs.map((output) => (
             <TerminalOutputBlock
               key={output.id}
-              historyEntryId={historyEntryId}
               output={output}
             />
           ))}
@@ -82,7 +79,6 @@ export function TerminalHistoryRow({
         </div>
       </div>
       <TerminalHistoryOutcome
-        historyEntryId={entry.id}
         outcome={entry.outcome}
       />
     </article>

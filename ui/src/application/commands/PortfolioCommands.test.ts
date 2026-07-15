@@ -113,27 +113,37 @@ function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "su
   return outcome;
 }
 
-test("groups help and derives manual output from command registry metadata", async () => {
+test("renders help and manual metadata as terminal-native text", async () => {
   const registry = createRegistry();
   const help = succeeded(await execute("help", registry));
   const manual = succeeded(await execute("man open", registry));
   const output = help.outputs[0];
   const manualOutput = manual.outputs[0];
 
-  if (output === undefined || output.kind !== "rich") {
-    assert.fail("Expected grouped help output.");
+  if (output === undefined || output.kind !== "text") {
+    assert.fail("Expected terminal help output.");
   }
 
-  if (manualOutput === undefined || manualOutput.kind !== "rich") {
-    assert.fail("Expected manual metadata output.");
+  if (manualOutput === undefined || manualOutput.kind !== "text") {
+    assert.fail("Expected terminal manual output.");
   }
 
-  assert.match(output.fields[0]?.value ?? "", /ls — List virtual files/u);
-  assert.match(output.fields[1]?.value ?? "", /open — Open virtual content/u);
-  assert.match(output.fields[1]?.value ?? "", /pane — Manage terminal panes/u);
-  assert.match(output.fields[2]?.value ?? "", /about — Open about content/u);
-  assert.equal(manualOutput.fields[0]?.value, "open [--split horizontal|vertical] <target>");
-  assert.match(manualOutput.fields[2]?.value ?? "", /open --split vertical projects/u);
+  assert.match(output.text, /^HELP\(1\).*HELP\(1\)$/mu);
+  assert.match(output.text, /\nCOMMANDS\n       GNU-like commands/u);
+  assert.match(output.text, /\n       Application commands\n         help/u);
+  assert.match(output.text, /open +Open virtual content/u);
+  assert.match(output.text, /pane +Manage terminal panes/u);
+  assert.match(output.text, /about +Open about content/u);
+  assert.match(output.text, /\nEXAMPLES\n       \$ help\n       \$ man ls/u);
+  assert.match(manualOutput.text, /^OPEN\(1\).*OPEN\(1\)$/mu);
+  assert.match(
+    manualOutput.text,
+    /\nSYNOPSIS\n       open \[--split horizontal\|vertical\] <target>/u,
+  );
+  assert.match(
+    manualOutput.text,
+    /\nEXAMPLES\n       \$ open about\.md\n       \$ open --split vertical projects/u,
+  );
 });
 
 test("opens fixture documents inline and directory targets in requested split effects", async () => {

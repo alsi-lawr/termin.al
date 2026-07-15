@@ -20,7 +20,6 @@ import {
 import {
   createShellDiagnosticId,
   createShellOutputId,
-  createShellOutputPartId,
   type CommandOutcome,
   type ShellOutput,
 } from "../../domain/terminal/Shell.ts";
@@ -207,6 +206,51 @@ function commandGroupLabel(group: CommandGroup): string {
     case "navigation":
       return "Navigation commands";
   }
+}
+
+function formatTerminalHelpIndex(context: CommandExecutionContext): string {
+  const commandLines = commandGroups.flatMap((group) => {
+    const commands = context.registry.commands.filter(
+      (command) => command.metadata.group === group,
+    );
+    const maximumNameLength = Math.max(
+      1,
+      ...commands.map((command) => command.metadata.name.length),
+    );
+    const lines = commands.map((command) => {
+      let aliases = "";
+
+      if (command.metadata.aliases.length > 0) {
+        aliases = ` (${command.metadata.aliases.join(", ")})`;
+      }
+
+      return `         ${command.metadata.name.padEnd(maximumNameLength)} ${command.metadata.summary}${aliases}`;
+    });
+
+    return [`       ${commandGroupLabel(group)}`, ...lines, ""];
+  });
+  const header = "HELP(1)                      TERMIN.AL                      HELP(1)";
+
+  return [
+    header,
+    "",
+    "NAME",
+    "       help - show terminal command index",
+    "",
+    "SYNOPSIS",
+    "       help",
+    "",
+    "COMMANDS",
+    ...commandLines,
+    "EXAMPLES",
+    "       $ help",
+    "       $ man ls",
+    "",
+    "SEE ALSO",
+    "       man(1)",
+    "",
+    header,
+  ].join("\n");
 }
 
 function noArguments(
@@ -488,22 +532,9 @@ function createHelpCommand(): CommandDefinition {
 
       return succeededOutcome([
         {
-          kind: "rich",
+          kind: "text",
           id: createShellOutputId("help-output"),
-          title: "Command help",
-          fields: commandGroups.map((group) => ({
-            id: createShellOutputPartId(`help-${group}`),
-            label: commandGroupLabel(group),
-            value: context.registry.commands
-              .filter((command) => command.metadata.group === group)
-              .map(
-                (command) =>
-                  `${command.metadata.name} — ${command.metadata.summary}\n` +
-                  `  ${command.metadata.usage}\n` +
-                  `  e.g. ${command.metadata.examples[0] ?? command.metadata.name}`,
-              )
-              .join("\n\n"),
-          })),
+          text: formatTerminalHelpIndex(context),
         },
       ]);
     },

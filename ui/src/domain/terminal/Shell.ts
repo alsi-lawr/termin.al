@@ -39,7 +39,6 @@ declare const secretPromptIdBrand: unique symbol;
 declare const secretPromptValueBrand: unique symbol;
 declare const shellDiagnosticIdBrand: unique symbol;
 declare const shellOutputIdBrand: unique symbol;
-declare const shellOutputPartIdBrand: unique symbol;
 
 export type ShellId = string & {
   readonly [shellIdBrand]: "ShellId";
@@ -77,10 +76,6 @@ export type ShellOutputId = string & {
   readonly [shellOutputIdBrand]: "ShellOutputId";
 };
 
-export type ShellOutputPartId = string & {
-  readonly [shellOutputPartIdBrand]: "ShellOutputPartId";
-};
-
 export type ShellDiagnostic =
   | Readonly<{
       kind: "parse";
@@ -109,39 +104,11 @@ export type ShellDiagnostic =
       message: string;
     }>;
 
-export type ShellTableColumn = Readonly<{
-  id: ShellOutputPartId;
-  label: string;
-}>;
-
-export type ShellTableCell = Readonly<{
-  id: ShellOutputPartId;
-  columnId: ShellOutputPartId;
-  value: string;
-}>;
-
-export type ShellTableRow = Readonly<{
-  id: ShellOutputPartId;
-  cells: ReadonlyArray<ShellTableCell>;
-}>;
-
-export type ShellRichField = Readonly<{
-  id: ShellOutputPartId;
-  label: string;
-  value: string;
-}>;
-
 export type ShellOutput =
   | Readonly<{
       kind: "text";
       id: ShellOutputId;
       text: string;
-    }>
-  | Readonly<{
-      kind: "table";
-      id: ShellOutputId;
-      columns: ReadonlyArray<ShellTableColumn>;
-      rows: ReadonlyArray<ShellTableRow>;
     }>
   | Readonly<{
       kind: "diagnostic";
@@ -153,12 +120,6 @@ export type ShellOutput =
       id: ShellOutputId;
       label: string;
       message: string;
-    }>
-  | Readonly<{
-      kind: "rich";
-      id: ShellOutputId;
-      title: string;
-      fields: ReadonlyArray<ShellRichField>;
     }>;
 
 export type SecretPromptRequest = Readonly<{
@@ -812,11 +773,6 @@ export function createShellDiagnosticId(value: string): ShellDiagnosticId {
 export function createShellOutputId(value: string): ShellOutputId {
   assertStableIdentifier(value, "Shell output IDs");
   return value as ShellOutputId;
-}
-
-export function createShellOutputPartId(value: string): ShellOutputPartId {
-  assertStableIdentifier(value, "Shell output part IDs");
-  return value as ShellOutputPartId;
 }
 
 export function createSecretPromptRequest(

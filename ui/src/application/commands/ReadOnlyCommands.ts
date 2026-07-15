@@ -15,19 +15,17 @@ import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
 import {
   createShellDiagnosticId,
   createShellOutputId,
-  createShellOutputPartId,
   type CommandEffect,
   type CommandOutcome,
   type ShellDiagnostic,
   type ShellOutput,
-  type ShellTableColumn,
-  type ShellTableRow,
 } from "../../domain/terminal/Shell.ts";
 import {
   resolveCommand,
   type CommandDefinition,
   type CommandExecutionContext,
   type CommandInvocation,
+  type CommandMetadata,
 } from "./CommandRegistry.ts";
 
 export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
@@ -101,8 +99,9 @@ type GrepFileSelection =
   | Readonly<{ kind: "cancelled" }>;
 
 type DisplayEntry = Readonly<{
+  kind: "directory" | "file" | "locked-file";
   name: string;
-  size: string;
+  size: number;
   updatedAt: string;
 }>;
 
@@ -512,16 +511,30 @@ function parseLineReaderOptions(
   return { kind: "parsed", value: { lineCount, path } };
 }
 
-function displayEntry(node: VirtualDirectoryNode | VirtualFileNode): DisplayEntry {
-  return {
-    name: node.kind === "directory" ? `${node.name}/` : node.name,
-    size: String(node.size),
-    updatedAt: node.updatedAt,
-  };
-}
-
-function displayLockedEntry(name: string, updatedAt: string): DisplayEntry {
-  return { name: `${name} [locked]`, size: "0", updatedAt };
+function displayEntry(node: VirtualNode): DisplayEntry {
+  switch (node.kind) {
+    case "directory":
+      return {
+        kind: "directory",
+        name: `${node.name}/`,
+        size: node.size,
+        updatedAt: node.updatedAt,
+      };
+    case "file":
+      return {
+        kind: "file",
+        name: node.name,
+        size: node.size,
+        updatedAt: node.updatedAt,
+      };
+    case "locked-file":
+      return {
+        kind: "locked-file",
+        name: `${node.name} [locked]`,
+        size: node.size,
+        updatedAt: node.updatedAt,
+      };
+  }
 }
 
 function displayEntries(
@@ -533,50 +546,61 @@ function displayEntries(
   const mapped: DisplayEntry[] = [];
 
   if (showAll) {
-    mapped.push({ name: ".", size: "0", updatedAt: directory.updatedAt });
-    mapped.push({ name: "..", size: "0", updatedAt: directory.updatedAt });
+    mapped.push({
+      kind: "directory",
+      name: "./",
+      size: directory.size,
+      updatedAt: directory.updatedAt,
+    });
+    mapped.push({
+      kind: "directory",
+      name: "../",
+      size: directory.size,
+      updatedAt: directory.updatedAt,
+    });
   }
 
   for (const entry of visible) {
-    if (entry.kind === "locked-file") {
-      mapped.push(displayLockedEntry(entry.name, entry.updatedAt));
-      continue;
-    }
-
     mapped.push(displayEntry(entry));
   }
 
   return mapped;
 }
 
-function longListingOutput(entries: ReadonlyArray<DisplayEntry>): ShellOutput {
-  const columns: ReadonlyArray<ShellTableColumn> = [
-    { id: createShellOutputPartId("ls-name"), label: "Name" },
-    { id: createShellOutputPartId("ls-size"), label: "Size" },
-    { id: createShellOutputPartId("ls-updated"), label: "Updated" },
-  ];
-  const rows: ReadonlyArray<ShellTableRow> = entries.map((entry, index) => ({
-    id: createShellOutputPartId(`ls-row-${index}`),
-    cells: [
-      {
-        id: createShellOutputPartId(`ls-name-${index}`),
-        columnId: createShellOutputPartId("ls-name"),
-        value: entry.name,
-      },
-      {
-        id: createShellOutputPartId(`ls-size-${index}`),
-        columnId: createShellOutputPartId("ls-size"),
-        value: entry.size,
-      },
-      {
-        id: createShellOutputPartId(`ls-updated-${index}`),
-        columnId: createShellOutputPartId("ls-updated"),
-        value: entry.updatedAt,
-      },
-    ],
-  }));
+function listingPermissions(entry: DisplayEntry): string {
+  switch (entry.kind) {
+    case "directory":
+      return "dr-xr-xr-x";
+    case "file":
+      return "-r--r--r--";
+    case "locked-file":
+      return "----------";
+  }
+}
 
-  return { kind: "table", id: createShellOutputId("ls-output"), columns, rows };
+function utcModificationTime(value: string): string {
+  return value.replace(".000Z", " UTC");
+}
+
+function formatLongListing(entries: ReadonlyArray<DisplayEntry>): string {
+  const rows = entries.map((entry) => ({
+    permissions: listingPermissions(entry),
+    size: String(entry.size),
+    updatedAt: utcModificationTime(entry.updatedAt),
+    name: entry.name,
+  }));
+  const sizeWidth = Math.max(1, ...rows.map((row) => row.size.length));
+  const updatedAtWidth = Math.max(
+    1,
+    ...rows.map((row) => row.updatedAt.length),
+  );
+
+  return rows
+    .map(
+      (row) =>
+        `${row.permissions} ${row.size.padStart(sizeWidth)} ${row.updatedAt.padEnd(updatedAtWidth)} ${row.name}`,
+    )
+    .join("\n");
 }
 
 async function readFile(
@@ -794,7 +818,7 @@ function createLsCommand(
             )
           : [displayEntry(resolution.node)];
       const output = parsed.value.long
-        ? longListingOutput(display)
+        ? textOutput("ls-output", formatLongListing(display))
         : textOutput(
             "ls-output",
             display.map((entry) => entry.name).join("\n"),
@@ -1240,6 +1264,67 @@ function createClearCommand(): CommandDefinition {
   };
 }
 
+function formatHistoryEntries(
+  entries: CommandExecutionContext["commandHistory"],
+): string {
+  const numberWidth = Math.max(1, String(entries.length).length);
+
+  return entries
+    .map(
+      (entry, index) =>
+        `${String(index + 1).padStart(numberWidth)}  ${entry.source}`,
+    )
+    .join("\n");
+}
+
+function manualHeader(name: string): string {
+  const label = `${name.toUpperCase()}(1)`;
+
+  return `${label.padEnd(28)}TERMIN.AL${label.padStart(28)}`;
+}
+
+function manualSection(
+  title: string,
+  lines: ReadonlyArray<string>,
+): string {
+  return [title, ...lines.map((line) => `       ${line}`)].join("\n");
+}
+
+export function formatTerminalManualPage(metadata: CommandMetadata): string {
+  const sections = [
+    manualSection("NAME", [`${metadata.name} - ${metadata.summary}`]),
+    manualSection("SYNOPSIS", [metadata.usage]),
+    manualSection("DESCRIPTION", [metadata.summary]),
+  ];
+
+  if (metadata.usage.includes("[")) {
+    sections.push(
+      manualSection("OPTIONS", ["Supported options are shown in SYNOPSIS."]),
+    );
+  }
+
+  if (metadata.aliases.length > 0) {
+    sections.push(manualSection("ALIASES", [metadata.aliases.join(", ")]));
+  }
+
+  if (metadata.examples.length > 0) {
+    sections.push(
+      manualSection(
+        "EXAMPLES",
+        metadata.examples.map((example) => `$ ${example}`),
+      ),
+    );
+  }
+
+  sections.push(manualSection("SEE ALSO", ["help(1), man(1)"]));
+
+  const header = manualHeader(metadata.name);
+
+  return [header, "", ...sections.flatMap((section) => [section, ""]), header].join(
+    "\n",
+  );
+}
+
 function createHistoryCommand(): CommandDefinition {
   return {
     metadata: {
@@ -1257,33 +1342,8 @@ function createHistoryCommand(): CommandDefinition {
         return rejectedOutcome("history", parsed.message);
       }
 
-      const numberColumn = createShellOutputPartId("history-number");
-      const commandColumn = createShellOutputPartId("history-command");
-
       return succeededOutcome([
-        {
-          kind: "table",
-          id: createShellOutputId("history-output"),
-          columns: [
-            { id: numberColumn, label: "#" },
-            { id: commandColumn, label: "Command" },
-          ],
-          rows: context.commandHistory.map((entry, index) => ({
-            id: createShellOutputPartId(`history-row-${entry.id}`),
-            cells: [
-              {
-                id: createShellOutputPartId(`history-number-${entry.id}`),
-                columnId: numberColumn,
-                value: String(index + 1),
-              },
-              {
-                id: createShellOutputPartId(`history-command-${entry.id}`),
-                columnId: commandColumn,
-                value: entry.source,
-              },
-            ],
-          })),
-        },
+        textOutput("history-output", formatHistoryEntries(context.commandHistory)),
       ]);
     },
   };
@@ -1321,28 +1381,7 @@ function createManCommand(): CommandDefinition {
       const metadata = resolution.command.metadata;
 
       return succeededOutcome([
-        {
-          kind: "rich",
-          id: createShellOutputId("man-output"),
-          title: `${metadata.name} manual`,
-          fields: [
-            {
-              id: createShellOutputPartId("man-synopsis"),
-              label: "Synopsis",
-              value: metadata.usage,
-            },
-            {
-              id: createShellOutputPartId("man-description"),
-              label: "Description",
-              value: metadata.summary,
-            },
-            {
-              id: createShellOutputPartId("man-examples"),
-              label: "Examples",
-              value: metadata.examples.join("\n"),
-            },
-          ],
-        },
+        textOutput("man-output", formatTerminalManualPage(metadata)),
       ]);
     },
   };

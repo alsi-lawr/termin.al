@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
+  createVirtualFilesystem,
   virtualHomeDirectory,
   type VirtualDirectoryPath,
   type VirtualDocumentSupplier,
@@ -20,7 +21,10 @@ import {
   resolveCommand,
   type CommandRegistry,
 } from "./CommandRegistry.ts";
-import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
+import {
+  createReadOnlyCommandDefinitions,
+  formatTerminalManualPage,
+} from "./ReadOnlyCommands.ts";
 
 function createRegistry(
   recursiveEntryLimit = 100,
@@ -38,15 +42,32 @@ function createRegistry(
 function commandRequest(
   source: string,
   currentDirectory: VirtualDirectoryPath = virtualHomeDirectory(),
+  previousCommands: ReadonlyArray<string> = [],
 ): ShellCommandRequest {
-  const initial = createShellState({
+  let state = createShellState({
     id: createShellId("terminal"),
     sessionId: createShellSessionId("session"),
     currentDirectory,
     scrollbackLimit: 10,
     commandHistoryLimit: 10,
   });
-  const typed = reduceShellState(initial, { kind: "input.insert", text: source });
+
+  for (const command of previousCommands) {
+    state = reduceShellState(state, { kind: "input.insert", text: command });
+    state = reduceShellState(state, { kind: "prompt.submit" });
+
+    if (state.lifecycle.kind !== "running") {
+      assert.fail("Expected a prior command request.");
+    }
+
+    state = reduceShellState(state, {
+      kind: "command.settled",
+      commandId: state.lifecycle.command.id,
+      outcome: { kind: "succeeded", outputs: [], effects: [] },
+    });
+  }
+
+  const typed = reduceShellState(state, { kind: "input.insert", text: source });
   const submitted = reduceShellState(typed, { kind: "prompt.submit" });
 
   if (submitted.lifecycle.kind !== "running") {
@@ -60,10 +81,11 @@ async function execute(
   source: string,
   registry: CommandRegistry,
   currentDirectory: VirtualDirectoryPath = virtualHomeDirectory(),
+  previousCommands: ReadonlyArray<string> = [],
 ): Promise<CommandOutcome> {
   return executeCommandLine({
     registry,
-    request: commandRequest(source, currentDirectory),
+    request: commandRequest(source, currentDirectory, previousCommands),
     signal: new AbortController().signal,
   });
 }
@@ -115,7 +137,7 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
 
 test("executes virtual readers for quoted, relative, and current-directory paths", async () => {
   const registry = createRegistry();
-  const listing = succeeded(await execute("ls -al", registry));
+  const listing = outputText(await execute("ls -al", registry));
   const quoted = outputText(await execute('cat "about.md"', registry));
   const projects = virtualHomeDirectory();
   const cd = succeeded(await execute("cd projects", registry));
@@ -132,16 +154,10 @@ test("executes virtual readers for quoted, relative, and current-directory paths
   );
   const pwd = outputText(await execute("pwd", registry, projectDirectory.directory));
 
-  const table = listing.outputs[0];
-
-  if (table === undefined || table.kind !== "table") {
-    assert.fail("Expected a long ls table.");
-  }
-
-  assert.deepEqual(
-    table.rows.slice(0, 2).map((row) => row.cells[0]?.value),
-    [".", ".."],
-  );
+  assert.match(listing, /^dr-xr-xr-x\s+0\s+2026-01-01T00:00:00 UTC \.\/$/mu);
+  assert.match(listing, /^dr-xr-xr-x\s+0\s+2026-01-01T00:00:00 UTC \.\.\/$/mu);
+  assert.match(listing, /projects\/$/mu);
+  assert.match(listing, /cv\.md \[locked\]$/mu);
   assert.equal(
     quoted,
     "# About\n\nThis is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.",
@@ -151,14 +167,19 @@ test("executes virtual readers for quoted, relative, and current-directory paths
   assert.equal(projects, "~");
 });
 
-test("implements line readers, utility commands, history, manual metadata, and pager effects", async () => {
+test("implements line readers, terminal history, manual pages, and pager effects", async () => {
   const registry = createRegistry();
   const head = outputText(await execute("head -n 1 about.md", registry));
   const tail = outputText(await execute("tail -n 1 about.md", registry));
   const echo = outputText(await execute('echo "hello terminal"', registry));
   const whoami = outputText(await execute("whoami", registry));
-  const history = succeeded(await execute("history", registry));
-  const manual = succeeded(await execute("man grep", registry));
+  const history = outputText(
+    await execute("history", registry, virtualHomeDirectory(), [
+      "echo first",
+      "echo 😀 second",
+    ]),
+  );
+  const manual = outputText(await execute("man grep", registry));
   const pager = succeeded(await execute("less notes/sample-note.md", registry));
   const clear = succeeded(await execute("clear", registry));
 
@@ -170,18 +191,13 @@ test("implements line readers, utility commands, history, manual metadata, and p
   assert.equal(echo, "hello terminal");
   assert.equal(whoami, "anonymous");
 
-  const historyOutput = history.outputs[0];
-  if (historyOutput === undefined || historyOutput.kind !== "table") {
-    assert.fail("Expected history table output.");
-  }
-  assert.equal(historyOutput.rows[0]?.cells[1]?.value, "history");
-
-  const manualOutput = manual.outputs[0];
-  if (manualOutput === undefined || manualOutput.kind !== "rich") {
-    assert.fail("Expected manual metadata output.");
-  }
-  assert.equal(manualOutput.title, "grep manual");
-  assert.equal(manualOutput.fields[0]?.value, "grep [-i] [-n] <pattern> [path]");
+  assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
+  assert.match(manual, /^GREP\(1\).*GREP\(1\)$/mu);
+  assert.match(manual, /\nNAME\n       grep - Search raw virtual document text\./u);
+  assert.match(manual, /\nSYNOPSIS\n       grep \[-i\] \[-n\] <pattern> \[path\]/u);
+  assert.match(manual, /\nOPTIONS\n       Supported options are shown in SYNOPSIS\./u);
+  assert.match(manual, /\nEXAMPLES\n       \$ grep -n fixture about\.md/u);
+  assert.match(manual, /\nSEE ALSO\n       help\(1\), man\(1\)/u);
 
   const pagerEffect = pager.effects.find(
     (effect) => effect.kind === "open-viewer",
@@ -195,6 +211,90 @@ test("implements line readers, utility commands, history, manual metadata, and p
   assert.equal(pagerEffect.viewer.document.source.path, "~/notes/sample-note.md");
   assert.equal(pagerEffect.viewer.presentation, "raw-pager");
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
+});
+
+test("formats aliases, examples, and Unicode in conventional terminal manuals", () => {
+  const manual = formatTerminalManualPage({
+    group: "gnu-like",
+    name: "inspect",
+    aliases: ["i"],
+    summary: "Inspect a Unicode-aware virtual document.",
+    usage: "inspect [path]",
+    examples: ["inspect notes/長い名前😀.md"],
+  });
+
+  assert.match(manual, /^INSPECT\(1\).*INSPECT\(1\)$/mu);
+  assert.match(manual, /\nALIASES\n       i/u);
+  assert.match(manual, /\nEXAMPLES\n       \$ inspect notes\/長い名前😀\.md/u);
+  assert.match(manual, /\nSEE ALSO\n       help\(1\), man\(1\)/u);
+});
+
+test("renders hidden, locked, directory, and long Unicode listings as text", async () => {
+  const filesystem = createVirtualFilesystem({
+    entries: [
+      {
+        kind: "directory",
+        id: "home",
+        path: "~",
+        updatedAt: "2026-02-01T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "directory",
+        id: "empty",
+        path: "~/empty",
+        updatedAt: "2026-02-02T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "directory",
+        id: "unicode-directory",
+        path: "~/目录",
+        updatedAt: "2026-02-03T00:00:00.000Z",
+        size: 0,
+      },
+      {
+        kind: "file",
+        id: "hidden",
+        path: "~/.hidden.md",
+        updatedAt: "2026-02-04T00:00:00.000Z",
+        size: 8,
+        documentHandle: "hidden",
+      },
+      {
+        kind: "locked-file",
+        id: "locked",
+        path: "~/cv.md",
+        updatedAt: "2026-02-05T00:00:00.000Z",
+        size: 144,
+      },
+      {
+        kind: "file",
+        id: "long-unicode",
+        path: "~/a-very-long-unicode-name-長い😀.md",
+        updatedAt: "2026-02-06T00:00:00.000Z",
+        size: 12,
+        documentHandle: "long-unicode",
+      },
+    ],
+  });
+  const registry = createCommandRegistry({
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents: demoContentCorpus.documents,
+      recursiveEntryLimit: 100,
+    }),
+  });
+  const longListing = outputText(await execute("ls -al", registry));
+  const normalListing = outputText(await execute("ls", registry));
+  const emptyListing = outputText(await execute("ls empty", registry));
+
+  assert.match(longListing, /^dr-xr-xr-x\s+0\s+2026-02-01T00:00:00 UTC \.\/$/mu);
+  assert.match(longListing, /^----------\s+144\s+2026-02-05T00:00:00 UTC cv\.md \[locked\]$/mu);
+  assert.match(longListing, /目录\/$/mu);
+  assert.match(longListing, /a-very-long-unicode-name-長い😀\.md$/mu);
+  assert.equal(normalListing.includes(".hidden.md"), false);
+  assert.equal(emptyListing, "");
 });
 
 test("searches with documented flags and marks bounded recursive results", async () => {
