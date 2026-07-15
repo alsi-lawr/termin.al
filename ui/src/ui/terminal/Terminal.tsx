@@ -51,7 +51,7 @@ type TerminalProps = Readonly<{
   paneId: PaneId;
   state: ShellState;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
-  hasShellState: (paneId: PaneId) => boolean;
+  hasShellRuntime: (paneId: PaneId) => boolean;
   isActive: boolean;
   focusVersion: number;
   onActivate: () => void;
@@ -71,7 +71,7 @@ export function Terminal({
   paneId,
   state,
   onShellAction,
-  hasShellState,
+  hasShellRuntime,
   isActive,
   focusVersion,
   onActivate,
@@ -92,8 +92,8 @@ export function Terminal({
     [onShellAction, paneId],
   );
   const isSessionOpen = useCallback(
-    (): boolean => hasShellState(paneId),
-    [hasShellState, paneId],
+    (): boolean => hasShellRuntime(paneId),
+    [hasShellRuntime, paneId],
   );
   const [registry] = useState(() =>
     createCommandRegistry({

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import {
@@ -12,12 +12,13 @@ import {
   type PaneWorkspace,
 } from "../../domain/workspace/PaneTree.ts";
 import {
-  createPaneShellStates,
-  hasPaneShellState,
-  reconcilePaneShellStates,
-  reducePaneShellState,
-  type PaneShellStates,
-} from "../../domain/workspace/PaneShellStates.ts";
+  createPaneShellRuntimes,
+  disposePaneShellRuntimes,
+  hasPaneShellRuntime,
+  reconcilePaneShellRuntimes,
+  reducePaneShellRuntime,
+  type PaneShellRuntimes,
+} from "./PaneShellRuntimes.ts";
 import {
   applyPaneKeyInput,
   initialPanePrefixState,
@@ -37,12 +38,12 @@ export type PaneCloseConfirmation =
 
 export type PaneWorkspaceController = Readonly<{
   workspace: PaneWorkspace;
-  shellStates: PaneShellStates;
+  shellRuntimes: PaneShellRuntimes;
   focusVersion: number;
   closeConfirmation: PaneCloseConfirmation;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
-  hasShellState: (paneId: PaneId) => boolean;
+  hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
@@ -54,8 +55,8 @@ export function usePaneWorkspace(): PaneWorkspaceController {
   const [workspace, setWorkspace] = useState<PaneWorkspace>(() =>
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
   );
-  const [shellStates, setShellStates] = useState<PaneShellStates>(() =>
-    createPaneShellStates({
+  const [shellRuntimes, setShellRuntimes] = useState<PaneShellRuntimes>(() =>
+    createPaneShellRuntimes({
       workspace,
       currentDirectory: developmentFixtureCorpus.filesystem.root.path,
     }),
@@ -64,8 +65,15 @@ export function usePaneWorkspace(): PaneWorkspaceController {
   const [closeConfirmation, setCloseConfirmation] =
     useState<PaneCloseConfirmation>({ kind: "none" });
   const workspaceRef = useRef(workspace);
-  const shellStatesRef = useRef(shellStates);
+  const shellRuntimesRef = useRef(shellRuntimes);
   const prefixState = useRef<PanePrefixState>(initialPanePrefixState);
+
+  useEffect(
+    () => () => {
+      disposePaneShellRuntimes(shellRuntimesRef.current);
+    },
+    [],
+  );
 
   const applyOperation = useCallback(
     (operation: PaneOperation): PaneOperationResult => {
@@ -76,17 +84,17 @@ export function usePaneWorkspace(): PaneWorkspaceController {
           return result;
         }
 
-        const currentShellStates = shellStatesRef.current;
-        const nextShellStates = reconcilePaneShellStates({
-          states: currentShellStates,
+        const currentShellRuntimes = shellRuntimesRef.current;
+        const nextShellRuntimes = reconcilePaneShellRuntimes({
+          runtimes: currentShellRuntimes,
           workspace: result.workspace,
           currentDirectory: developmentFixtureCorpus.filesystem.root.path,
         });
         workspaceRef.current = result.workspace;
-        shellStatesRef.current = nextShellStates;
+        shellRuntimesRef.current = nextShellRuntimes;
         setWorkspace(result.workspace);
-        if (nextShellStates !== currentShellStates) {
-          setShellStates(nextShellStates);
+        if (nextShellRuntimes !== currentShellRuntimes) {
+          setShellRuntimes(nextShellRuntimes);
         }
         setFocusVersion((current) => current + 1);
         return result;
@@ -106,25 +114,25 @@ export function usePaneWorkspace(): PaneWorkspaceController {
 
   const onShellAction = useCallback(
     (paneId: PaneId, action: ShellAction): void => {
-      const nextShellStates = reducePaneShellState({
-        states: shellStatesRef.current,
+      const nextShellRuntimes = reducePaneShellRuntime({
+        runtimes: shellRuntimesRef.current,
         paneId,
         action,
       });
 
-      if (nextShellStates === shellStatesRef.current) {
+      if (nextShellRuntimes === shellRuntimesRef.current) {
         return;
       }
 
-      shellStatesRef.current = nextShellStates;
-      setShellStates(nextShellStates);
+      shellRuntimesRef.current = nextShellRuntimes;
+      setShellRuntimes(nextShellRuntimes);
     },
     [],
   );
 
-  const hasShellState = useCallback(
+  const hasShellRuntime = useCallback(
     (paneId: PaneId): boolean =>
-      hasPaneShellState(shellStatesRef.current, paneId),
+      hasPaneShellRuntime(shellRuntimesRef.current, paneId),
     [],
   );
 
@@ -171,12 +179,12 @@ export function usePaneWorkspace(): PaneWorkspaceController {
 
   return {
     workspace,
-    shellStates,
+    shellRuntimes,
     focusVersion,
     closeConfirmation,
     applyOperation,
     onShellAction,
-    hasShellState,
+    hasShellRuntime,
     onPaneKeyInput,
     confirmClose,
     dismissClose,

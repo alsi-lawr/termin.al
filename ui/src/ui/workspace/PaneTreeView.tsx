@@ -12,9 +12,9 @@ import type {
 } from "../../domain/workspace/PaneTree.ts";
 import { createViewerPaneContent } from "../../domain/workspace/PaneTree.ts";
 import {
-  paneShellState,
-  type PaneShellStates,
-} from "../../domain/workspace/PaneShellStates.ts";
+  paneShellRuntime,
+  type PaneShellRuntimes,
+} from "./PaneShellRuntimes.ts";
 import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
@@ -27,11 +27,11 @@ type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
   activePaneId: PaneId;
   zoom: PaneZoom;
-  shellStates: PaneShellStates;
+  shellRuntimes: PaneShellRuntimes;
   focusVersion: number;
   onOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
-  hasShellState: (paneId: PaneId) => boolean;
+  hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
@@ -89,11 +89,11 @@ function branchClass(
 function PaneLeaf({
   tree,
   activePaneId,
-  shellStates,
+  shellRuntimes,
   focusVersion,
   onOperation,
   onShellAction,
-  hasShellState,
+  hasShellRuntime,
   onPaneKeyInput,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
@@ -123,9 +123,9 @@ function PaneLeaf({
           <Terminal
             key={pane.id}
             paneId={pane.id}
-            state={paneShellState(shellStates, pane.id)}
+            state={paneShellRuntime(shellRuntimes, pane.id).state}
             onShellAction={onShellAction}
-            hasShellState={hasShellState}
+            hasShellRuntime={hasShellRuntime}
             isActive={isActive}
             focusVersion={focusVersion}
             onActivate={activate}
@@ -174,11 +174,11 @@ export function PaneTreeView({
   tree,
   activePaneId,
   zoom,
-  shellStates,
+  shellRuntimes,
   focusVersion,
   onOperation,
   onShellAction,
-  hasShellState,
+  hasShellRuntime,
   onPaneKeyInput,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
@@ -186,11 +186,11 @@ export function PaneTreeView({
       <PaneLeaf
         tree={tree}
         activePaneId={activePaneId}
-        shellStates={shellStates}
+        shellRuntimes={shellRuntimes}
         focusVersion={focusVersion}
         onOperation={onOperation}
         onShellAction={onShellAction}
-        hasShellState={hasShellState}
+        hasShellRuntime={hasShellRuntime}
         onPaneKeyInput={onPaneKeyInput}
       />
     );
@@ -226,11 +226,11 @@ export function PaneTreeView({
           tree={tree.first}
           activePaneId={activePaneId}
           zoom={zoom}
-          shellStates={shellStates}
+          shellRuntimes={shellRuntimes}
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
-          hasShellState={hasShellState}
+          hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
         />
       </div>
@@ -246,11 +246,11 @@ export function PaneTreeView({
           tree={tree.second}
           activePaneId={activePaneId}
           zoom={zoom}
-          shellStates={shellStates}
+          shellRuntimes={shellRuntimes}
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
-          hasShellState={hasShellState}
+          hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
         />
       </div>
