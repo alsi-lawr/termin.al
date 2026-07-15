@@ -4,6 +4,7 @@ import {
   createShellPaneContent,
   type PaneContent,
   type PaneDirection,
+  type PaneId,
   type PaneLayout,
   type PaneOperation,
   type PaneOperationResult,
@@ -123,6 +124,7 @@ function invalid(message: string): PaneCommandParseResult {
 
 function parseSplit(
   argumentsList: ReadonlyArray<string>,
+  paneId: PaneId,
 ): PaneCommandParseResult {
   const orientation = argumentsList[1];
 
@@ -144,6 +146,7 @@ function parseSplit(
     kind: "parsed",
     operation: {
       kind: "split",
+      paneId,
       orientation,
       content: parsedContent.content,
     },
@@ -248,10 +251,11 @@ function parseLayout(
 
 export function parsePaneCommand(
   argumentsList: ReadonlyArray<string>,
+  paneId: PaneId,
 ): PaneCommandParseResult {
   switch (argumentsList[0]) {
     case "split":
-      return parseSplit(argumentsList);
+      return parseSplit(argumentsList, paneId);
     case "focus":
       return parseFocus(argumentsList);
     case "select": {
@@ -336,9 +340,10 @@ function commandOutcome(result: PaneOperationResult): CommandOutcome {
 
 function executePaneCommand(
   invocation: CommandInvocation,
+  paneId: PaneId,
   handler: PaneCommandHandler,
 ): CommandOutcome {
-  const parsed = parsePaneCommand(invocation.arguments);
+  const parsed = parsePaneCommand(invocation.arguments, paneId);
 
   return parsed.kind === "invalid"
     ? rejectedOutcome(parsed.message)
@@ -346,6 +351,7 @@ function executePaneCommand(
 }
 
 export function createPaneCommandDefinition(
+  paneId: PaneId,
   handler: PaneCommandHandler,
 ): CommandDefinition {
   return {
@@ -357,6 +363,7 @@ export function createPaneCommandDefinition(
       usage: "pane split|focus|select|resize|close|zoom|swap|rotate|layout",
       examples: ["pane split horizontal viewer", "pane focus next"],
     },
-    execute: (invocation) => Promise.resolve(executePaneCommand(invocation, handler)),
+    execute: (invocation) =>
+      Promise.resolve(executePaneCommand(invocation, paneId, handler)),
   };
 }

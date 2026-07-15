@@ -4,18 +4,21 @@ import {
   applyPaneKeyInput,
   initialPanePrefixState,
 } from "./PaneKeyBindings.ts";
+import { createPaneId } from "./PaneTree.ts";
+
+const paneId = createPaneId("pane-1");
 
 test("maps the accepted Ctrl-b pane prefix without leaking ordinary Vim keys", () => {
   const ignored = applyPaneKeyInput(initialPanePrefixState, {
     key: "h",
     ctrlKey: false,
     metaKey: false,
-  });
+  }, paneId);
   const prefix = applyPaneKeyInput(initialPanePrefixState, {
     key: "b",
     ctrlKey: true,
     metaKey: false,
-  });
+  }, paneId);
 
   if (prefix.kind !== "prefix-entered") {
     assert.fail("Expected Ctrl-b to enter the pane prefix.");
@@ -25,12 +28,12 @@ test("maps the accepted Ctrl-b pane prefix without leaking ordinary Vim keys", (
     key: "%",
     ctrlKey: false,
     metaKey: false,
-  });
+  }, paneId);
   const resizePrefix = applyPaneKeyInput(initialPanePrefixState, {
     key: "b",
     ctrlKey: true,
     metaKey: false,
-  });
+  }, paneId);
 
   if (resizePrefix.kind !== "prefix-entered") {
     assert.fail("Expected Ctrl-b to enter the pane prefix.");
@@ -40,7 +43,7 @@ test("maps the accepted Ctrl-b pane prefix without leaking ordinary Vim keys", (
     key: "L",
     ctrlKey: false,
     metaKey: false,
-  });
+  }, paneId);
 
   assert.deepEqual(ignored, {
     kind: "ignored",
@@ -51,6 +54,7 @@ test("maps the accepted Ctrl-b pane prefix without leaking ordinary Vim keys", (
     state: { kind: "idle" },
     operation: {
       kind: "split",
+      paneId,
       orientation: "horizontal",
       content: { kind: "shell" },
     },
@@ -67,7 +71,7 @@ test("selects a pane number only after the q prefix command", () => {
     key: "b",
     ctrlKey: true,
     metaKey: false,
-  });
+  }, paneId);
 
   if (prefix.kind !== "prefix-entered") {
     assert.fail("Expected Ctrl-b to enter the pane prefix.");
@@ -77,7 +81,7 @@ test("selects a pane number only after the q prefix command", () => {
     key: "q",
     ctrlKey: false,
     metaKey: false,
-  });
+  }, paneId);
 
   if (select.kind !== "selection-pending") {
     assert.fail("Expected q to request a pane number.");
@@ -87,7 +91,7 @@ test("selects a pane number only after the q prefix command", () => {
     key: "3",
     ctrlKey: false,
     metaKey: false,
-  });
+  }, paneId);
 
   assert.deepEqual(numbered, {
     kind: "operation",

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  createPlaceholderViewerContent,
+  type ViewerContent,
+} from "../../content/ViewerContent.ts";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import {
   resolveVirtualDirectory,
@@ -20,6 +24,8 @@ import {
   type PaneWorkspace,
 } from "../../domain/workspace/PaneTree.ts";
 import {
+  applyPaneShellAction,
+  closePaneShellViewer,
   createPaneShellRuntimes,
   disposePaneShellRuntimes,
   hasPaneShellRuntime,
@@ -145,6 +151,40 @@ function successfulCommandOutcome(): CommandOutcome {
   return { kind: "succeeded", outputs: [], effects: [] };
 }
 
+function viewerCommandOutcome(
+  viewer: ViewerContent,
+  disposition: "inline" | "split",
+): CommandOutcome {
+  return {
+    kind: "succeeded",
+    outputs: [],
+    effects: [
+      {
+        kind: "open-viewer",
+        viewer,
+        disposition:
+          disposition === "inline"
+            ? { kind: "inline" }
+            : { kind: "split", orientation: "vertical" },
+      },
+    ],
+  };
+}
+
+function deferredCommandOutcome(): Readonly<{
+  promise: Promise<CommandOutcome>;
+  resolve: (outcome: CommandOutcome) => void;
+}> {
+  let resolveOutcome: (outcome: CommandOutcome) => void = () => {
+    throw new Error("Deferred command outcomes must initialize their resolver.");
+  };
+  const promise = new Promise<CommandOutcome>((resolve) => {
+    resolveOutcome = resolve;
+  });
+
+  return { promise, resolve: resolveOutcome };
+}
+
 test("keeps shell state and current directory with stable pane IDs through pane tree transforms", () => {
   let workspace = createPaneWorkspace({
     initialContent: createShellPaneContent(),
@@ -157,6 +197,7 @@ test("keeps shell state and current directory with stable pane IDs through pane 
 
   workspace = apply(workspace, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "horizontal",
     content: createShellPaneContent(),
   });
@@ -165,6 +206,7 @@ test("keeps shell state and current directory with stable pane IDs through pane 
 
   workspace = apply(workspace, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "vertical",
     content: createShellPaneContent(),
   });
@@ -212,6 +254,7 @@ test("keeps two pane-owned shell runtimes after swap and layout reconstruction",
   });
   workspace = apply(workspace, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "horizontal",
     content: createShellPaneContent(),
   });
@@ -257,6 +300,7 @@ test("preserves runtime controls across transforms and disposes them when a pane
 
   workspace = apply(workspace, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "horizontal",
     content: createShellPaneContent(),
   });
@@ -347,6 +391,7 @@ test("cancels the original command after its pane moves and rejects a late resul
 
   workspace = apply(workspace, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "horizontal",
     content: createShellPaneContent(),
   });
@@ -386,5 +431,151 @@ test("cancels the original command after its pane moves and rejects a late resul
       successfulCommandOutcome(),
     ),
     false,
+  );
+});
+
+test("routes an asynchronous inline viewer resolution to its moved shell runtime", async () => {
+  let workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  let runtimes = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const originPaneId = workspace.activePaneId;
+
+  workspace = apply(workspace, {
+    kind: "split",
+    paneId: originPaneId,
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  runtimes = synchronise(runtimes, workspace);
+  const otherPaneId = workspace.activePaneId;
+  runtimes = submitRunningCommand(runtimes, originPaneId);
+  const running = stateFor(runtimes, originPaneId);
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected the originating shell command to be running.");
+  }
+
+  const swapped = apply(workspace, { kind: "swap", direction: "previous" });
+  const rotated = apply(swapped, { kind: "rotate", direction: "next" });
+  const rebuilt = apply(rotated, { kind: "set-layout", layout: "tiled" });
+  workspace = apply(rebuilt, {
+    kind: "focus-pane",
+    paneId: otherPaneId,
+  });
+  runtimes = synchronise(runtimes, workspace);
+  const delayed = deferredCommandOutcome();
+  const viewer = createPlaceholderViewerContent("Inline viewer");
+
+  delayed.resolve(viewerCommandOutcome(viewer, "inline"));
+  const outcome = await delayed.promise;
+  const settled = applyPaneShellAction({
+    workspace,
+    runtimes,
+    paneId: originPaneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.lifecycle.command.id,
+      outcome,
+    },
+  });
+  const movedAgain = apply(settled.workspace, {
+    kind: "swap",
+    direction: "previous",
+  });
+  const rebuiltAgain = apply(movedAgain, {
+    kind: "set-layout",
+    layout: "main-vertical",
+  });
+  const presentedRuntimes = synchronise(settled.runtimes, rebuiltAgain);
+  const presented = paneShellRuntime(presentedRuntimes, originPaneId);
+
+  assert.equal(settled.workspace, workspace);
+  assert.equal(presentedRuntimes, settled.runtimes);
+  assert.deepEqual(presented.presentation, {
+    kind: "inline-viewer",
+    viewer,
+  });
+  assert.equal(
+    paneShellRuntime(settled.runtimes, otherPaneId).presentation.kind,
+    "shell",
+  );
+
+  const returned = closePaneShellViewer(presentedRuntimes, originPaneId);
+
+  assert.equal(paneShellRuntime(returned, originPaneId).presentation.kind, "shell");
+  assert.equal(
+    paneShellRuntime(returned, originPaneId).state,
+    presented.state,
+  );
+  assert.equal(
+    paneShellRuntime(returned, originPaneId).state.sessionId,
+    running.sessionId,
+  );
+});
+
+test("routes an asynchronous split viewer resolution to its originating pane", async () => {
+  let workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  let runtimes = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const originPaneId = workspace.activePaneId;
+
+  workspace = apply(workspace, {
+    kind: "split",
+    paneId: originPaneId,
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  runtimes = synchronise(runtimes, workspace);
+  const otherPaneId = workspace.activePaneId;
+  runtimes = submitRunningCommand(runtimes, originPaneId);
+  const running = stateFor(runtimes, originPaneId);
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected the originating shell command to be running.");
+  }
+
+  const swapped = apply(workspace, { kind: "swap", direction: "previous" });
+  const rotated = apply(swapped, { kind: "rotate", direction: "next" });
+  const rebuilt = apply(rotated, { kind: "set-layout", layout: "tiled" });
+  workspace = apply(rebuilt, {
+    kind: "focus-pane",
+    paneId: otherPaneId,
+  });
+  runtimes = synchronise(runtimes, workspace);
+  const delayed = deferredCommandOutcome();
+  const viewer = createPlaceholderViewerContent("Split viewer");
+
+  delayed.resolve(viewerCommandOutcome(viewer, "split"));
+  const outcome = await delayed.promise;
+  const settled = applyPaneShellAction({
+    workspace,
+    runtimes,
+    paneId: originPaneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.lifecycle.command.id,
+      outcome,
+    },
+  });
+  const panes = paneLeaves(settled.workspace.tree);
+  const originIndex = panes.findIndex((pane) => pane.id === originPaneId);
+  const viewerIndex = panes.findIndex(
+    (pane) => pane.content.kind === "viewer" && pane.content.viewer === viewer,
+  );
+
+  assert.equal(workspace.activePaneId, otherPaneId);
+  assert.equal(settled.workspace.activePaneId, "pane-3");
+  assert.equal(viewerIndex, originIndex + 1);
+  assert.equal(
+    paneShellRuntime(settled.runtimes, originPaneId).presentation.kind,
+    "shell",
   );
 });

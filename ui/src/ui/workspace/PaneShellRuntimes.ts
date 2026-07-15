@@ -1,4 +1,5 @@
 import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
+import type { ViewerContent } from "../../content/ViewerContent.ts";
 import {
   createShellId,
   createShellSessionId,
@@ -10,6 +11,8 @@ import {
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import {
+  applyPaneOperation,
+  createViewerPaneContent,
   paneLeaves,
   type PaneId,
   type PaneWorkspace,
@@ -30,10 +33,18 @@ export type PaneShellRuntimeControl = Readonly<{
 
 export type PaneShellRuntime = Readonly<{
   state: ShellState;
+  presentation: PaneShellPresentation;
   control: PaneShellRuntimeControl;
 }>;
 
 export type PaneShellRuntimes = ReadonlyMap<PaneId, PaneShellRuntime>;
+
+export type PaneShellPresentation =
+  | Readonly<{ kind: "shell" }>
+  | Readonly<{
+      kind: "inline-viewer";
+      viewer: ViewerContent;
+    }>;
 
 export type CreatePaneShellRuntimesOptions = Readonly<{
   workspace: PaneWorkspace;
@@ -50,6 +61,18 @@ export type ReducePaneShellRuntimeOptions = Readonly<{
   runtimes: PaneShellRuntimes;
   paneId: PaneId;
   action: ShellAction;
+}>;
+
+export type ApplyPaneShellActionOptions = Readonly<{
+  workspace: PaneWorkspace;
+  runtimes: PaneShellRuntimes;
+  paneId: PaneId;
+  action: ShellAction;
+}>;
+
+export type PaneShellActionResult = Readonly<{
+  workspace: PaneWorkspace;
+  runtimes: PaneShellRuntimes;
 }>;
 
 type ActiveCommand = Readonly<{
@@ -151,6 +174,7 @@ function createPaneShellRuntime(
 ): PaneShellRuntime {
   return {
     state: createPaneShellState(paneId, currentDirectory),
+    presentation: { kind: "shell" },
     control: createPaneShellRuntimeControl(),
   };
 }
@@ -263,4 +287,97 @@ export function reducePaneShellRuntime({
   const nextRuntimes = new Map(runtimes);
   nextRuntimes.set(paneId, { ...runtime, state: nextState });
   return nextRuntimes;
+}
+
+export function showPaneShellViewer(
+  runtimes: PaneShellRuntimes,
+  paneId: PaneId,
+  viewer: ViewerContent,
+): PaneShellRuntimes {
+  const runtime = runtimes.get(paneId);
+
+  if (
+    runtime === undefined ||
+    (runtime.presentation.kind === "inline-viewer" &&
+      runtime.presentation.viewer === viewer)
+  ) {
+    return runtimes;
+  }
+
+  const nextRuntimes = new Map(runtimes);
+  nextRuntimes.set(paneId, {
+    ...runtime,
+    presentation: { kind: "inline-viewer", viewer },
+  });
+  return nextRuntimes;
+}
+
+export function closePaneShellViewer(
+  runtimes: PaneShellRuntimes,
+  paneId: PaneId,
+): PaneShellRuntimes {
+  const runtime = runtimes.get(paneId);
+
+  if (runtime === undefined || runtime.presentation.kind === "shell") {
+    return runtimes;
+  }
+
+  const nextRuntimes = new Map(runtimes);
+  nextRuntimes.set(paneId, {
+    ...runtime,
+    presentation: { kind: "shell" },
+  });
+  return nextRuntimes;
+}
+
+export function applyPaneShellAction({
+  workspace,
+  runtimes,
+  paneId,
+  action,
+}: ApplyPaneShellActionOptions): PaneShellActionResult {
+  const reducedRuntimes = reducePaneShellRuntime({
+    runtimes,
+    paneId,
+    action,
+  });
+
+  if (
+    reducedRuntimes === runtimes ||
+    action.kind !== "command.settled" ||
+    action.outcome.kind !== "succeeded"
+  ) {
+    return { workspace, runtimes: reducedRuntimes };
+  }
+
+  let nextWorkspace = workspace;
+  let nextRuntimes = reducedRuntimes;
+
+  for (const effect of action.outcome.effects) {
+    if (effect.kind !== "open-viewer") {
+      continue;
+    }
+
+    if (effect.disposition.kind === "inline") {
+      nextRuntimes = showPaneShellViewer(
+        nextRuntimes,
+        paneId,
+        effect.viewer,
+      );
+      continue;
+    }
+
+    const split = applyPaneOperation(nextWorkspace, {
+      kind: "split",
+      paneId,
+      orientation: effect.disposition.orientation,
+      content: createViewerPaneContent(effect.viewer),
+    });
+
+    if (split.kind === "applied") {
+      nextWorkspace = split.workspace;
+    }
+  }
+
+  return { workspace: nextWorkspace, runtimes: nextRuntimes };
 }

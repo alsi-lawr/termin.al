@@ -1,6 +1,5 @@
 import type { ReactElement } from "react";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
-import type { ViewerContent } from "../../content/ViewerContent.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
 import type {
   PaneId,
@@ -10,7 +9,6 @@ import type {
   PaneTree,
   PaneZoom,
 } from "../../domain/workspace/PaneTree.ts";
-import { createViewerPaneContent } from "../../domain/workspace/PaneTree.ts";
 import {
   paneShellRuntime,
   type PaneShellRuntimes,
@@ -31,6 +29,7 @@ type PaneTreeViewProps = Readonly<{
   focusVersion: number;
   onOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
+  onCloseInlineViewer: (paneId: PaneId) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -93,6 +92,7 @@ function PaneLeaf({
   focusVersion,
   onOperation,
   onShellAction,
+  onCloseInlineViewer,
   hasShellRuntime,
   onPaneKeyInput,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
@@ -102,16 +102,6 @@ function PaneLeaf({
     onOperation({ kind: "focus-pane", paneId: pane.id });
   };
   const commandHandler: PaneCommandHandler = onOperation;
-  const openSplitViewer = (
-    viewer: ViewerContent,
-    orientation: "horizontal" | "vertical",
-  ): void => {
-    onOperation({
-      kind: "split",
-      orientation,
-      content: createViewerPaneContent(viewer),
-    });
-  };
   const paneClass = isActive
     ? "h-full min-h-0 min-w-0 flex-1 rounded-md ring-1 ring-green-500"
     : "h-full min-h-0 min-w-0 flex-1 rounded-md";
@@ -126,15 +116,16 @@ function PaneLeaf({
             key={pane.id}
             paneId={pane.id}
             state={runtime.state}
+            presentation={runtime.presentation}
             runtimeControl={runtime.control}
             onShellAction={onShellAction}
+            onCloseInlineViewer={onCloseInlineViewer}
             hasShellRuntime={hasShellRuntime}
             isActive={isActive}
             focusVersion={focusVersion}
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
             paneCommandHandler={commandHandler}
-            onOpenSplitViewer={openSplitViewer}
           />
         </div>
       );
@@ -182,6 +173,7 @@ export function PaneTreeView({
   focusVersion,
   onOperation,
   onShellAction,
+  onCloseInlineViewer,
   hasShellRuntime,
   onPaneKeyInput,
 }: PaneTreeViewProps): ReactElement {
@@ -194,6 +186,7 @@ export function PaneTreeView({
         focusVersion={focusVersion}
         onOperation={onOperation}
         onShellAction={onShellAction}
+        onCloseInlineViewer={onCloseInlineViewer}
         hasShellRuntime={hasShellRuntime}
         onPaneKeyInput={onPaneKeyInput}
       />
@@ -234,6 +227,7 @@ export function PaneTreeView({
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
+          onCloseInlineViewer={onCloseInlineViewer}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
         />
@@ -254,6 +248,7 @@ export function PaneTreeView({
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
+          onCloseInlineViewer={onCloseInlineViewer}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
         />

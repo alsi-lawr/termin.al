@@ -29,6 +29,7 @@ function split(
   return applied(
     applyPaneOperation(workspace, {
       kind: "split",
+      paneId: workspace.activePaneId,
       orientation,
       content,
     }),
@@ -74,6 +75,38 @@ test("models stable pane IDs, binary split geometry, and directional focus", () 
   assert.equal(left.activePaneId, "pane-1");
   assert.equal(up.activePaneId, "pane-2");
   assert.equal(selected.activePaneId, "pane-1");
+});
+
+test("splits an explicit pane target after focus changes", () => {
+  const first = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  const second = split(first, "horizontal");
+  const focused = applied(
+    applyPaneOperation(second, {
+      kind: "focus-pane",
+      paneId: first.activePaneId,
+    }),
+  );
+  const splitTarget = applied(
+    applyPaneOperation(focused, {
+      kind: "split",
+      paneId: second.activePaneId,
+      orientation: "vertical",
+      content: createPlaceholderViewerPaneContent("Viewer"),
+    }),
+  );
+
+  assert.deepEqual(
+    paneLeaves(splitTarget.tree).map((pane) => pane.id),
+    ["pane-1", "pane-2", "pane-3"],
+  );
+  assert.deepEqual(paneGeometries(splitTarget), [
+    { paneId: "pane-1", x: 0, y: 0, width: 0.5, height: 1 },
+    { paneId: "pane-2", x: 0.5, y: 0, width: 0.5, height: 0.5 },
+    { paneId: "pane-3", x: 0.5, y: 0.5, width: 0.5, height: 0.5 },
+  ]);
+  assert.equal(splitTarget.activePaneId, "pane-3");
 });
 
 test("resizes by five percent, protects the minimum ratio, and protects the last pane", () => {

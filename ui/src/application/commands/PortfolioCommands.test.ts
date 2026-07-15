@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
+import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
   createShellId,
   createShellSessionId,
@@ -28,7 +29,7 @@ function createRegistry(): CommandRegistry {
         filesystem: developmentFixtureCorpus.filesystem,
         documents: developmentFixtureCorpus.documents,
       }),
-      createPaneCommandDefinition(() => ({
+      createPaneCommandDefinition(createPaneId("pane-1"), () => ({
         kind: "rejected",
         reason: "close-last-pane",
       })),

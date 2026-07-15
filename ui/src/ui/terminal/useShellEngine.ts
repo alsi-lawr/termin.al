@@ -5,7 +5,6 @@ import {
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
-  type CommandEffect,
   type CommandOutcome,
   type ShellAction,
   type ShellState,
@@ -28,10 +27,6 @@ import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts"
 
 export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
 
-export type ShellCommandEffectsHandler = (
-  effects: ReadonlyArray<CommandEffect>,
-) => void;
-
 export type UseShellEngineOptions = Readonly<{
   state: ShellState;
   onAction: (action: ShellAction) => void;
@@ -40,7 +35,6 @@ export type UseShellEngineOptions = Readonly<{
   registry: CommandRegistry;
   completionService: CompletionService;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
-  onCommandEffects?: ShellCommandEffectsHandler;
 }>;
 
 export type ShellEngine = Readonly<{
@@ -78,7 +72,6 @@ export function useShellEngine({
   registry,
   completionService,
   secretPromptOutcomeHandler,
-  onCommandEffects,
 }: UseShellEngineOptions): ShellEngine {
   const [transientDiagnostic, setTransientDiagnostic] = useState<
     ShellEngineDiagnostic | undefined
@@ -165,10 +158,6 @@ export function useShellEngine({
             outcome,
           ) && isSessionOpen()
         ) {
-          if (outcome.kind === "succeeded") {
-            onCommandEffects?.(outcome.effects);
-          }
-
           onAction({
             kind: "command.settled",
             commandId: effect.command.id,
@@ -196,7 +185,6 @@ export function useShellEngine({
 
     void runCommand();
   }, [
-    onCommandEffects,
     onAction,
     isSessionOpen,
     registry,

@@ -12,11 +12,12 @@ import {
   type PaneWorkspace,
 } from "../../domain/workspace/PaneTree.ts";
 import {
+  applyPaneShellAction,
+  closePaneShellViewer,
   createPaneShellRuntimes,
   disposePaneShellRuntimes,
   hasPaneShellRuntime,
   reconcilePaneShellRuntimes,
-  reducePaneShellRuntime,
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 import {
@@ -43,6 +44,7 @@ export type PaneWorkspaceController = Readonly<{
   closeConfirmation: PaneCloseConfirmation;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
+  onCloseInlineViewer: (paneId: PaneId) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -114,21 +116,49 @@ export function usePaneWorkspace(): PaneWorkspaceController {
 
   const onShellAction = useCallback(
     (paneId: PaneId, action: ShellAction): void => {
-      const nextShellRuntimes = reducePaneShellRuntime({
-        runtimes: shellRuntimesRef.current,
+      const currentWorkspace = workspaceRef.current;
+      const currentShellRuntimes = shellRuntimesRef.current;
+      const next = applyPaneShellAction({
+        workspace: currentWorkspace,
+        runtimes: currentShellRuntimes,
         paneId,
         action,
       });
 
-      if (nextShellRuntimes === shellRuntimesRef.current) {
+      if (
+        next.workspace === currentWorkspace &&
+        next.runtimes === currentShellRuntimes
+      ) {
         return;
       }
 
-      shellRuntimesRef.current = nextShellRuntimes;
-      setShellRuntimes(nextShellRuntimes);
+      workspaceRef.current = next.workspace;
+      shellRuntimesRef.current = next.runtimes;
+      if (next.workspace !== currentWorkspace) {
+        setWorkspace(next.workspace);
+        setFocusVersion((current) => current + 1);
+      }
+      if (next.runtimes !== currentShellRuntimes) {
+        setShellRuntimes(next.runtimes);
+      }
     },
     [],
   );
+
+  const onCloseInlineViewer = useCallback((paneId: PaneId): void => {
+    const currentShellRuntimes = shellRuntimesRef.current;
+    const nextShellRuntimes = closePaneShellViewer(
+      currentShellRuntimes,
+      paneId,
+    );
+
+    if (nextShellRuntimes === currentShellRuntimes) {
+      return;
+    }
+
+    shellRuntimesRef.current = nextShellRuntimes;
+    setShellRuntimes(nextShellRuntimes);
+  }, []);
 
   const hasShellRuntime = useCallback(
     (paneId: PaneId): boolean =>
@@ -139,7 +169,11 @@ export function usePaneWorkspace(): PaneWorkspaceController {
   const onPaneKeyInput = useCallback(
     (input: InputCapturePaneKeyInput): InputCapturePaneKeyResult => {
       const previousState = prefixState.current;
-      const result = applyPaneKeyInput(previousState, input);
+      const result = applyPaneKeyInput(
+        previousState,
+        input,
+        workspaceRef.current.activePaneId,
+      );
       prefixState.current = result.state;
 
       switch (result.kind) {
@@ -184,6 +218,7 @@ export function usePaneWorkspace(): PaneWorkspaceController {
     closeConfirmation,
     applyOperation,
     onShellAction,
+    onCloseInlineViewer,
     hasShellRuntime,
     onPaneKeyInput,
     confirmClose,

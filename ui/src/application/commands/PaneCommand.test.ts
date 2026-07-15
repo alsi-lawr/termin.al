@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   applyPaneOperation,
+  createPaneId,
   createPaneWorkspace,
   createShellPaneContent,
   type PaneOperation,
@@ -18,10 +19,11 @@ import {
 import { createCommandRegistry } from "./CommandRegistry.ts";
 
 test("parses the full pane-management command seam", () => {
-  const split = parsePaneCommand(["split", "vertical", "editor"]);
-  const focus = parsePaneCommand(["focus", "3"]);
-  const layout = parsePaneCommand(["layout", "tiled"]);
-  const invalid = parsePaneCommand(["resize", "diagonal"]);
+  const paneId = createPaneId("pane-1");
+  const split = parsePaneCommand(["split", "vertical", "editor"], paneId);
+  const focus = parsePaneCommand(["focus", "3"], paneId);
+  const layout = parsePaneCommand(["layout", "tiled"], paneId);
+  const invalid = parsePaneCommand(["resize", "diagonal"], paneId);
 
   if (split.kind !== "parsed") {
     assert.fail("Expected a pane split command.");
@@ -30,6 +32,7 @@ test("parses the full pane-management command seam", () => {
   assert.deepEqual(split.operation.kind, "split");
   if (split.operation.kind === "split") {
     assert.equal(split.operation.orientation, "vertical");
+    assert.equal(split.operation.paneId, paneId);
     assert.equal(split.operation.content.kind, "editor");
   }
   assert.deepEqual(focus, {
@@ -48,7 +51,7 @@ test("executes parsed pane operations through the existing command registry cont
     initialContent: createShellPaneContent(),
   });
   let received: PaneOperation | undefined;
-  const command = createPaneCommandDefinition((operation) => {
+  const command = createPaneCommandDefinition(workspace.activePaneId, (operation) => {
     received = operation;
     return applyPaneOperation(workspace, operation);
   });
@@ -72,6 +75,7 @@ test("executes parsed pane operations through the existing command registry cont
 
   assert.deepEqual(received, {
     kind: "split",
+    paneId: workspace.activePaneId,
     orientation: "horizontal",
     content: {
       kind: "viewer",

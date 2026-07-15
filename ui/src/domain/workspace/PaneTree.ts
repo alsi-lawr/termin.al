@@ -101,6 +101,7 @@ export type PaneGeometry = Readonly<{
 export type PaneOperation =
   | Readonly<{
       kind: "split";
+      paneId: PaneId;
       orientation: PaneOrientation;
       content: PaneContent;
     }>
@@ -837,6 +838,10 @@ export function applyPaneOperation(
 ): PaneOperationResult {
   switch (operation.kind) {
     case "split": {
+      if (!paneTreeContains(workspace.tree, operation.paneId)) {
+        return { kind: "rejected", reason: "target-pane-unavailable" };
+      }
+
       const pane = {
         id: createPaneId("pane-" + workspace.nextPaneSequence),
         content: operation.content,
@@ -848,7 +853,7 @@ export function applyPaneOperation(
           ...workspace,
           tree: splitPane(
             workspace.tree,
-            workspace.activePaneId,
+            operation.paneId,
             operation.orientation,
             pane,
           ),

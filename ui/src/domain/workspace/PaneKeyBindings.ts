@@ -1,5 +1,6 @@
 import {
   createShellPaneContent,
+  type PaneId,
   type PaneOperation,
 } from "./PaneTree.ts";
 
@@ -35,17 +36,22 @@ export type PaneKeyResult =
 
 export const initialPanePrefixState: PanePrefixState = { kind: "idle" };
 
-function operationForPrefixKey(key: string): PaneOperation | undefined {
+function operationForPrefixKey(
+  key: string,
+  paneId: PaneId,
+): PaneOperation | undefined {
   switch (key) {
     case "%":
       return {
         kind: "split",
+        paneId,
         orientation: "horizontal",
         content: createShellPaneContent(),
       };
     case '"':
       return {
         kind: "split",
+        paneId,
         orientation: "vertical",
         content: createShellPaneContent(),
       };
@@ -93,6 +99,7 @@ function paneNumber(key: string): number | undefined {
 export function applyPaneKeyInput(
   state: PanePrefixState,
   input: PaneKeyInput,
+  paneId: PaneId,
 ): PaneKeyResult {
   if (state.kind === "idle") {
     if (
@@ -128,7 +135,7 @@ export function applyPaneKeyInput(
     };
   }
 
-  const operation = operationForPrefixKey(input.key);
+  const operation = operationForPrefixKey(input.key, paneId);
 
   return operation === undefined
     ? { kind: "ignored", state: initialPanePrefixState }

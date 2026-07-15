@@ -9,14 +9,15 @@ import {
 import {
   getActiveShellPrompt,
   getShellStatus,
-  type CommandEffect,
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
-import type { ViewerContent } from "../../content/ViewerContent.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
-import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts";
+import type {
+  PaneShellPresentation,
+  PaneShellRuntimeControl,
+} from "../workspace/PaneShellRuntimes.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import {
   createPaneCommandDefinition,
@@ -51,6 +52,7 @@ import { ViewerPane } from "../workspace/ViewerPane";
 type TerminalProps = Readonly<{
   paneId: PaneId;
   state: ShellState;
+  presentation: PaneShellPresentation;
   runtimeControl: PaneShellRuntimeControl;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
@@ -61,10 +63,7 @@ type TerminalProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   paneCommandHandler: PaneCommandHandler;
-  onOpenSplitViewer: (
-    viewer: ViewerContent,
-    orientation: "horizontal" | "vertical",
-  ) => void;
+  onCloseInlineViewer: (paneId: PaneId) => void;
   prompt?: string;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
 }>;
@@ -72,6 +71,7 @@ type TerminalProps = Readonly<{
 export function Terminal({
   paneId,
   state,
+  presentation,
   runtimeControl,
   onShellAction,
   hasShellRuntime,
@@ -80,14 +80,11 @@ export function Terminal({
   onActivate,
   onPaneKeyInput,
   paneCommandHandler,
-  onOpenSplitViewer,
+  onCloseInlineViewer,
   prompt = "$",
   secretPromptOutcomeHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
-  const [inlineViewer, setInlineViewer] = useState<ViewerContent | undefined>(
-    undefined,
-  );
   const dispatchShellAction = useCallback(
     (action: ShellAction): void => {
       onShellAction(paneId, action);
@@ -110,7 +107,7 @@ export function Terminal({
           filesystem: developmentFixtureCorpus.filesystem,
           documents: developmentFixtureCorpus.documents,
         }),
-        createPaneCommandDefinition(paneCommandHandler),
+        createPaneCommandDefinition(paneId, paneCommandHandler),
       ],
     }),
   );
@@ -120,23 +117,6 @@ export function Terminal({
       paths: createEmptyPathCompletionProvider(),
     }),
   );
-  const handleCommandEffects = useCallback(
-    (effects: ReadonlyArray<CommandEffect>): void => {
-      for (const effect of effects) {
-        if (effect.kind !== "open-viewer") {
-          continue;
-        }
-
-        if (effect.disposition.kind === "inline") {
-          setInlineViewer(effect.viewer);
-          continue;
-        }
-
-        onOpenSplitViewer(effect.viewer, effect.disposition.orientation);
-      }
-    },
-    [onOpenSplitViewer],
-  );
   const shell = useShellEngine({
     state,
     onAction: dispatchShellAction,
@@ -145,7 +125,6 @@ export function Terminal({
     registry,
     completionService,
     secretPromptOutcomeHandler,
-    onCommandEffects: handleCommandEffects,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
   const editor =
@@ -160,10 +139,10 @@ export function Terminal({
       : editor.buffer.value;
 
   useLayoutEffect(() => {
-    if (isActive && inlineViewer === undefined) {
+    if (isActive && presentation.kind === "shell") {
       inputRef.current?.preserveFocus();
     }
-  }, [inlineViewer, isActive, shell.state.history, shell.transientDiagnostic]);
+  }, [isActive, presentation, shell.state.history, shell.transientDiagnostic]);
 
   const focusInputFromTerminal = (event: MouseEvent<HTMLDivElement>): void => {
     const target = event.target;
@@ -239,16 +218,16 @@ export function Terminal({
     });
   };
 
-  if (inlineViewer !== undefined) {
+  if (presentation.kind === "inline-viewer") {
     return (
       <ViewerPane
-        viewer={inlineViewer}
+        viewer={presentation.viewer}
         isActive={isActive}
         focusVersion={focusVersion}
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
         onClose={() => {
-          setInlineViewer(undefined);
+          onCloseInlineViewer(paneId);
         }}
       />
     );

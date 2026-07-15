@@ -20,6 +20,7 @@ export function Workspace(): ReactElement {
           focusVersion={controller.focusVersion}
           onOperation={controller.applyOperation}
           onShellAction={controller.onShellAction}
+          onCloseInlineViewer={controller.onCloseInlineViewer}
           hasShellRuntime={controller.hasShellRuntime}
           onPaneKeyInput={controller.onPaneKeyInput}
         />
