@@ -30,6 +30,17 @@ export type RawPagerOperation =
   | Readonly<{ kind: "end" }>
   | Readonly<{ kind: "quit" }>;
 
+export type RawPagerKeyInput = Readonly<{
+  key: string;
+  altKey: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+}>;
+
+export type RawPagerKeyResult =
+  | Readonly<{ kind: "ignored" }>
+  | Readonly<{ kind: "operation"; operation: RawPagerOperation }>;
+
 export type RawPagerTransition =
   | Readonly<{ kind: "updated"; state: RawPagerState }>
   | Readonly<{ kind: "quit" }>;
@@ -129,6 +140,38 @@ export function applyRawPagerOperation(
       };
     case "quit":
       return { kind: "quit" };
+  }
+}
+
+export function rawPagerOperationFromKey(
+  input: RawPagerKeyInput,
+): RawPagerKeyResult {
+  if (input.altKey || input.ctrlKey || input.metaKey) {
+    return { kind: "ignored" };
+  }
+
+  switch (input.key) {
+    case "ArrowUp":
+    case "k":
+      return { kind: "operation", operation: { kind: "line-up" } };
+    case "ArrowDown":
+    case "j":
+      return { kind: "operation", operation: { kind: "line-down" } };
+    case "PageDown":
+    case " ":
+      return { kind: "operation", operation: { kind: "page-forward" } };
+    case "PageUp":
+    case "b":
+      return { kind: "operation", operation: { kind: "page-back" } };
+    case "g":
+      return { kind: "operation", operation: { kind: "start" } };
+    case "G":
+      return { kind: "operation", operation: { kind: "end" } };
+    case "Escape":
+    case "q":
+      return { kind: "operation", operation: { kind: "quit" } };
+    default:
+      return { kind: "ignored" };
   }
 }
 

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   applyRawPagerOperation,
   createRawPagerState,
+  rawPagerOperationFromKey,
   rawPagerPageText,
   rawPagerStatus,
   type RawPagerOperation,
@@ -116,4 +117,57 @@ test("returns an explicit quit transition", () => {
   assert.deepEqual(applyRawPagerOperation(state, { kind: "quit" }), {
     kind: "quit",
   });
+});
+
+test("maps practical pager keys to typed operations", () => {
+  const mappings: ReadonlyArray<readonly [string, RawPagerOperation]> = [
+    ["ArrowUp", { kind: "line-up" }],
+    ["k", { kind: "line-up" }],
+    ["ArrowDown", { kind: "line-down" }],
+    ["j", { kind: "line-down" }],
+    ["PageDown", { kind: "page-forward" }],
+    [" ", { kind: "page-forward" }],
+    ["PageUp", { kind: "page-back" }],
+    ["b", { kind: "page-back" }],
+    ["g", { kind: "start" }],
+    ["G", { kind: "end" }],
+    ["Escape", { kind: "quit" }],
+    ["q", { kind: "quit" }],
+  ];
+
+  for (const [key, operation] of mappings) {
+    assert.deepEqual(rawPagerOperationFromKey({
+      key,
+      altKey: false,
+      ctrlKey: false,
+      metaKey: false,
+    }), { kind: "operation", operation });
+  }
+});
+
+test("ignores modified and unrelated keys so pane prefixes remain authoritative", () => {
+  assert.deepEqual(rawPagerOperationFromKey({
+    key: "b",
+    altKey: false,
+    ctrlKey: true,
+    metaKey: false,
+  }), { kind: "ignored" });
+  assert.deepEqual(rawPagerOperationFromKey({
+    key: "q",
+    altKey: false,
+    ctrlKey: false,
+    metaKey: true,
+  }), { kind: "ignored" });
+  assert.deepEqual(rawPagerOperationFromKey({
+    key: "ArrowDown",
+    altKey: true,
+    ctrlKey: false,
+    metaKey: false,
+  }), { kind: "ignored" });
+  assert.deepEqual(rawPagerOperationFromKey({
+    key: "x",
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+  }), { kind: "ignored" });
 });

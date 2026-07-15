@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createDocumentViewerContent,
   createPlaceholderViewerContent,
   type ViewerContent,
 } from "../../content/ViewerContent.ts";
@@ -411,7 +412,7 @@ test("cancels the original command after its pane moves and rejects a late resul
   );
 });
 
-test("routes an asynchronous inline viewer resolution to its moved shell runtime", async () => {
+test("returns an asynchronous raw pager to its moved shell runtime", async () => {
   let workspace = createPaneWorkspace({
     initialContent: createShellPaneContent(),
   });
@@ -445,7 +446,14 @@ test("routes an asynchronous inline viewer resolution to its moved shell runtime
   });
   runtimes = synchronise(runtimes, workspace);
   const delayed = deferredCommandOutcome();
-  const viewer = createPlaceholderViewerContent("Inline viewer");
+  const viewer = createDocumentViewerContent({
+    title: "Raw pager",
+    presentation: "raw-pager",
+    document: {
+      text: "one\ntwo\nthree",
+      source: { path: "~/notes/raw.txt" },
+    },
+  });
 
   delayed.resolve(viewerCommandOutcome(viewer, "inline"));
   const outcome = await delayed.promise;

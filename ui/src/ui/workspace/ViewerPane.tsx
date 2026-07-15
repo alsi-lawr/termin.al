@@ -1,6 +1,7 @@
 import {
   useEffect,
   useRef,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
   type ReactElement,
@@ -9,6 +10,14 @@ import {
   viewerTitle,
   type ViewerContent,
 } from "../../content/ViewerContent.ts";
+import {
+  applyRawPagerOperation,
+  createRawPagerState,
+  rawPagerOperationFromKey,
+  rawPagerPageText,
+  rawPagerStatus,
+  type RawPagerOperation,
+} from "../../domain/viewer/RawPager.ts";
 import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
 import { MobilePaneControls, type MobilePaneControl } from "./MobilePaneControls";
@@ -34,12 +43,30 @@ export function ViewerPane({
 }: ViewerPaneProps): ReactElement {
   const viewerRef = useRef<HTMLElement | null>(null);
   const title = viewerTitle(viewer);
+  const isRawPager =
+    viewer.kind === "document" && viewer.presentation === "raw-pager";
+  const rawText = isRawPager ? viewer.document.text : "";
+  const [rawPagerState, setRawPagerState] = useState(() =>
+    createRawPagerState(rawText),
+  );
 
   useEffect(() => {
     if (isActive) {
       viewerRef.current?.focus({ preventScroll: true });
     }
   }, [focusVersion, isActive]);
+
+  const applyPagerOperation = (operation: RawPagerOperation): void => {
+    if (operation.kind === "quit") {
+      onClose?.();
+      return;
+    }
+
+    setRawPagerState((current) => {
+      const transition = applyRawPagerOperation(current, operation);
+      return transition.kind === "updated" ? transition.state : current;
+    });
+  };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     const result = onPaneKeyInput({
@@ -51,6 +78,21 @@ export function ViewerPane({
     if (result.kind === "handled") {
       event.preventDefault();
       return;
+    }
+
+    if (isRawPager) {
+      const pagerKey = rawPagerOperationFromKey({
+        key: event.key,
+        altKey: event.altKey,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+      });
+
+      if (pagerKey.kind === "operation") {
+        event.preventDefault();
+        applyPagerOperation(pagerKey.operation);
+        return;
+      }
     }
 
     if (
@@ -82,6 +124,24 @@ export function ViewerPane({
   };
 
   const handleMobileControl = (control: MobilePaneControl): void => {
+    if (isRawPager) {
+      switch (control) {
+        case "escape":
+          applyPagerOperation({ kind: "quit" });
+          return;
+        case "up":
+          applyPagerOperation({ kind: "line-up" });
+          return;
+        case "down":
+          applyPagerOperation({ kind: "line-down" });
+          return;
+        case "tab":
+        case "left":
+        case "right":
+          return;
+      }
+    }
+
     if (control === "escape") {
       onClose?.();
     }
@@ -96,6 +156,34 @@ export function ViewerPane({
           </p>
         );
       case "document":
+        if (viewer.presentation === "raw-pager") {
+          const status = rawPagerStatus(rawPagerState);
+          const statusText = status.kind === "empty"
+            ? "No lines"
+            : `Lines ${status.firstLine}-${status.lastLine} of ${status.totalLines}`;
+
+          return (
+            <>
+              <p
+                className="mt-2 text-neutral-400"
+                role="status"
+                aria-live="polite"
+              >
+                Raw pager · {statusText}
+              </p>
+              <pre
+                className="mt-2 whitespace-pre-wrap wrap-break-words text-neutral-300"
+                aria-label="Current raw pager page"
+              >
+                {rawPagerPageText(viewer.document.text, rawPagerState)}
+              </pre>
+              <p className="mt-3 text-xs text-neutral-500">
+                ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · Esc/q return
+              </p>
+            </>
+          );
+        }
+
         return (
           <pre className="mt-2 whitespace-pre-wrap wrap-break-words text-neutral-300">
             {viewer.document.text}
@@ -141,9 +229,6 @@ export function ViewerPane({
             </button>
           )}
         </div>
-        {viewer.kind === "document" && viewer.presentation === "raw-pager" ? (
-          <p className="mt-2 text-neutral-500">Raw pager</p>
-        ) : null}
         {content}
       </div>
       <MobilePaneControls onControl={handleMobileControl} onPrefix={triggerPrefix} />
