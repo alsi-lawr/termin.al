@@ -7,17 +7,15 @@ import {
   type ReactElement,
 } from "react";
 import {
-  createShellId,
-  createShellSessionId,
-  createShellState,
   getActiveShellPrompt,
   getShellStatus,
   type CommandEffect,
-  type ShellId,
-  type ShellSessionId,
+  type ShellAction,
+  type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import type { ViewerContent } from "../../content/ViewerContent.ts";
+import type { PaneId } from "../../domain/workspace/PaneTree.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import {
   createPaneCommandDefinition,
@@ -50,8 +48,10 @@ import {
 import { ViewerPane } from "../workspace/ViewerPane";
 
 type TerminalProps = Readonly<{
-  shellId: ShellId;
-  sessionId: ShellSessionId;
+  paneId: PaneId;
+  state: ShellState;
+  onShellAction: (paneId: PaneId, action: ShellAction) => void;
+  hasShellState: (paneId: PaneId) => boolean;
   isActive: boolean;
   focusVersion: number;
   onActivate: () => void;
@@ -68,8 +68,10 @@ type TerminalProps = Readonly<{
 }>;
 
 export function Terminal({
-  shellId,
-  sessionId,
+  paneId,
+  state,
+  onShellAction,
+  hasShellState,
   isActive,
   focusVersion,
   onActivate,
@@ -83,14 +85,15 @@ export function Terminal({
   const [inlineViewer, setInlineViewer] = useState<ViewerContent | undefined>(
     undefined,
   );
-  const [initialState] = useState(() =>
-    createShellState({
-      id: createShellId(shellId),
-      sessionId: createShellSessionId(sessionId),
-      currentDirectory: developmentFixtureCorpus.filesystem.root.path,
-      scrollbackLimit: 200,
-      commandHistoryLimit: 100,
-    }),
+  const dispatchShellAction = useCallback(
+    (action: ShellAction): void => {
+      onShellAction(paneId, action);
+    },
+    [onShellAction, paneId],
+  );
+  const isSessionOpen = useCallback(
+    (): boolean => hasShellState(paneId),
+    [hasShellState, paneId],
   );
   const [registry] = useState(() =>
     createCommandRegistry({
@@ -132,7 +135,9 @@ export function Terminal({
     [onOpenSplitViewer],
   );
   const shell = useShellEngine({
-    initialState,
+    state,
+    onAction: dispatchShellAction,
+    isSessionOpen,
     registry,
     completionService,
     secretPromptOutcomeHandler,

@@ -16,8 +16,11 @@ export function Workspace(): ReactElement {
           tree={controller.workspace.tree}
           activePaneId={controller.workspace.activePaneId}
           zoom={controller.workspace.zoom}
+          shellStates={controller.shellStates}
           focusVersion={controller.focusVersion}
           onOperation={controller.applyOperation}
+          onShellAction={controller.onShellAction}
+          hasShellState={controller.hasShellState}
           onPaneKeyInput={controller.onPaneKeyInput}
         />
       </div>

@@ -1,14 +1,14 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createCompletionRequest,
 } from "../../domain/terminal/Completion.ts";
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
-  reduceShellState,
   type CommandId,
   type CommandEffect,
   type CommandOutcome,
+  type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import type { NormalPromptKey } from "../../domain/terminal/PromptEditor.ts";
@@ -33,7 +33,9 @@ export type ShellCommandEffectsHandler = (
 ) => void;
 
 export type UseShellEngineOptions = Readonly<{
-  initialState: ShellState;
+  state: ShellState;
+  onAction: (action: ShellAction) => void;
+  isSessionOpen: () => boolean;
   registry: CommandRegistry;
   completionService: CompletionService;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
@@ -68,13 +70,14 @@ function discardedCommandOutcome(commandName: string): CommandOutcome {
 }
 
 export function useShellEngine({
-  initialState,
+  state,
+  onAction,
+  isSessionOpen,
   registry,
   completionService,
   secretPromptOutcomeHandler,
   onCommandEffects,
 }: UseShellEngineOptions): ShellEngine {
-  const [state, dispatch] = useReducer(reduceShellState, initialState);
   const [transientDiagnostic, setTransientDiagnostic] = useState<
     ShellEngineDiagnostic | undefined
   >(undefined);
@@ -93,6 +96,10 @@ export function useShellEngine({
     return () => {
       mounted.current = false;
 
+      if (isSessionOpen()) {
+        return;
+      }
+
       for (const controller of activeControllers.values()) {
         controller.abort();
       }
@@ -104,7 +111,7 @@ export function useShellEngine({
       activeControllers.clear();
       activeCompletionControllers.clear();
     };
-  }, []);
+  }, [isSessionOpen]);
 
   useEffect(() => {
     const secretPromptConsumption = consumePendingSecretPromptEffect({
@@ -119,13 +126,14 @@ export function useShellEngine({
     }
 
     if (secretPromptConsumption.kind === "consumed") {
-      dispatch(secretPromptConsumption.action);
+      onAction(secretPromptConsumption.action);
 
       const updateSecretPromptDiagnostic = async (): Promise<void> => {
         const diagnostic = await secretPromptConsumption.diagnostic;
 
         if (
           mounted.current &&
+          isSessionOpen() &&
           shouldApplySecretPromptEffectDiagnostic(
             secretPromptEffectConsumption.current,
             secretPromptConsumption.generation,
@@ -146,7 +154,7 @@ export function useShellEngine({
     }
 
     if (effect.kind === "cancel-command") {
-      dispatch({ kind: "effect.consumed", commandId: effect.commandId });
+      onAction({ kind: "effect.consumed", commandId: effect.commandId });
       controllers.current.get(effect.commandId)?.abort();
       return;
     }
@@ -157,7 +165,7 @@ export function useShellEngine({
 
     const controller = new AbortController();
     controllers.current.set(effect.command.id, controller);
-    dispatch({ kind: "effect.consumed", commandId: effect.command.id });
+    onAction({ kind: "effect.consumed", commandId: effect.command.id });
 
     const runCommand = async (): Promise<void> => {
       try {
@@ -169,12 +177,12 @@ export function useShellEngine({
 
         controllers.current.delete(effect.command.id);
 
-        if (mounted.current) {
+        if (isSessionOpen()) {
           if (outcome.kind === "succeeded") {
             onCommandEffects?.(outcome.effects);
           }
 
-          dispatch({
+          onAction({
             kind: "command.settled",
             commandId: effect.command.id,
             outcome,
@@ -183,8 +191,8 @@ export function useShellEngine({
       } catch {
         controllers.current.delete(effect.command.id);
 
-        if (mounted.current) {
-          dispatch({
+        if (isSessionOpen()) {
+          onAction({
             kind: "command.settled",
             commandId: effect.command.id,
             outcome: discardedCommandOutcome(effect.command.source),
@@ -196,6 +204,8 @@ export function useShellEngine({
     void runCommand();
   }, [
     onCommandEffects,
+    onAction,
+    isSessionOpen,
     registry,
     secretPromptOutcomeHandler,
     state.pendingEffect,
@@ -222,21 +232,21 @@ export function useShellEngine({
     );
     const controller = new AbortController();
     completionControllers.current.add(controller);
-    dispatch({ kind: "completion.request", request });
+    onAction({ kind: "completion.request", request });
 
     const resolveCompletion = async (): Promise<void> => {
       try {
         const result = await completionService.complete(request, controller.signal);
         completionControllers.current.delete(controller);
 
-        if (mounted.current) {
-          dispatch({ kind: "completion.resolved", request, result });
+        if (isSessionOpen()) {
+          onAction({ kind: "completion.resolved", request, result });
         }
       } catch {
         completionControllers.current.delete(controller);
 
-        if (mounted.current) {
-          dispatch({ kind: "completion.failed", request });
+        if (isSessionOpen()) {
+          onAction({ kind: "completion.failed", request });
         }
       }
     };
@@ -247,13 +257,13 @@ export function useShellEngine({
   return {
     state,
     transientDiagnostic,
-    insertText: (text) => dispatch({ kind: "input.insert", text }),
+    insertText: (text) => onAction({ kind: "input.insert", text }),
     replaceInputValue: (value, cursor) =>
-      dispatch({ kind: "input.replace", value, cursor }),
-    moveCursor: (cursor) => dispatch({ kind: "input.move-cursor", cursor }),
-    normalKey: (key) => dispatch({ kind: "prompt.normal-key", key }),
-    submit: () => dispatch({ kind: "prompt.submit" }),
-    cancel: () => dispatch({ kind: "prompt.cancel" }),
+      onAction({ kind: "input.replace", value, cursor }),
+    moveCursor: (cursor) => onAction({ kind: "input.move-cursor", cursor }),
+    normalKey: (key) => onAction({ kind: "prompt.normal-key", key }),
+    submit: () => onAction({ kind: "prompt.submit" }),
+    cancel: () => onAction({ kind: "prompt.cancel" }),
     complete,
   };
 }

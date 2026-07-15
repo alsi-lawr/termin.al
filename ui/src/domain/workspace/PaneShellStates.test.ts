@@ -180,3 +180,43 @@ test("keeps shell state and current directory with stable pane IDs through pane 
   assert.equal(stateFor(states, firstPaneId).input.buffer.value, "first input");
   assert.equal(stateFor(states, thirdPaneId).input.buffer.value, "third input");
 });
+
+test("keeps two pane-owned shell states after swap and layout reconstruction", () => {
+  let workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  workspace = apply(workspace, {
+    kind: "split",
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  const [firstPane, secondPane] = paneLeaves(workspace.tree);
+
+  if (firstPane === undefined || secondPane === undefined) {
+    assert.fail("Expected two shell panes.");
+  }
+
+  let states = createPaneShellStates({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  states = insert(states, firstPane.id, "first pane input");
+  states = insert(states, secondPane.id, "second pane input");
+
+  const swapped = apply(workspace, { kind: "swap", direction: "previous" });
+  states = synchronise(states, swapped);
+  const rebuilt = apply(swapped, {
+    kind: "set-layout",
+    layout: "main-vertical",
+  });
+  states = synchronise(states, rebuilt);
+
+  assert.equal(
+    stateFor(states, firstPane.id).input.buffer.value,
+    "first pane input",
+  );
+  assert.equal(
+    stateFor(states, secondPane.id).input.buffer.value,
+    "second pane input",
+  );
+});
