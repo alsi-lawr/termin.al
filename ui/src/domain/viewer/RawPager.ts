@@ -1,15 +1,15 @@
 export const RAW_PAGER_DEFAULT_PAGE_SIZE = 20;
 
-export type RawPagerBounds = Readonly<{
-  firstOffset: 0;
-  lastOffset: number;
+const rawPagerStateData: unique symbol = Symbol("rawPagerStateData");
+
+type RawPagerStateData = Readonly<{
+  lineOffset: number;
+  pageSize: number;
   lineCount: number;
 }>;
 
 export type RawPagerState = Readonly<{
-  lineOffset: number;
-  pageSize: number;
-  bounds: RawPagerBounds;
+  [rawPagerStateData]: RawPagerStateData;
 }>;
 
 export type RawPagerStatus =
@@ -79,64 +79,74 @@ export function createRawPagerState(
   const pageSize = Math.min(maximumPageSize, lineCount);
 
   return {
-    lineOffset: 0,
-    pageSize,
-    bounds: {
-      firstOffset: 0,
-      lastOffset: Math.max(0, lineCount - pageSize),
+    [rawPagerStateData]: {
+      lineOffset: 0,
+      pageSize,
       lineCount,
     },
   };
+}
+
+function rawPagerMaximumOffset(data: RawPagerStateData): number {
+  return Math.max(0, data.lineCount - data.pageSize);
 }
 
 function moveRawPager(
   state: RawPagerState,
   requestedOffset: number,
 ): RawPagerState {
+  const data = state[rawPagerStateData];
   const lineOffset = Math.min(
-    state.bounds.lastOffset,
-    Math.max(state.bounds.firstOffset, requestedOffset),
+    rawPagerMaximumOffset(data),
+    Math.max(0, requestedOffset),
   );
 
-  return lineOffset === state.lineOffset
+  return lineOffset === data.lineOffset
     ? state
-    : { ...state, lineOffset };
+    : {
+        [rawPagerStateData]: {
+          ...data,
+          lineOffset,
+        },
+      };
 }
 
 export function applyRawPagerOperation(
   state: RawPagerState,
   operation: RawPagerOperation,
 ): RawPagerTransition {
+  const data = state[rawPagerStateData];
+
   switch (operation.kind) {
     case "line-up":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.lineOffset - 1),
+        state: moveRawPager(state, data.lineOffset - 1),
       };
     case "line-down":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.lineOffset + 1),
+        state: moveRawPager(state, data.lineOffset + 1),
       };
     case "page-back":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.lineOffset - state.pageSize),
+        state: moveRawPager(state, data.lineOffset - data.pageSize),
       };
     case "page-forward":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.lineOffset + state.pageSize),
+        state: moveRawPager(state, data.lineOffset + data.pageSize),
       };
     case "start":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.bounds.firstOffset),
+        state: moveRawPager(state, 0),
       };
     case "end":
       return {
         kind: "updated",
-        state: moveRawPager(state, state.bounds.lastOffset),
+        state: moveRawPager(state, rawPagerMaximumOffset(data)),
       };
     case "quit":
       return { kind: "quit" };
@@ -176,18 +186,17 @@ export function rawPagerOperationFromKey(
 }
 
 export function rawPagerStatus(state: RawPagerState): RawPagerStatus {
-  if (state.bounds.lineCount === 0) {
+  const data = state[rawPagerStateData];
+
+  if (data.lineCount === 0) {
     return { kind: "empty" };
   }
 
   return {
     kind: "range",
-    firstLine: state.lineOffset + 1,
-    lastLine: Math.min(
-      state.lineOffset + state.pageSize,
-      state.bounds.lineCount,
-    ),
-    totalLines: state.bounds.lineCount,
+    firstLine: data.lineOffset + 1,
+    lastLine: Math.min(data.lineOffset + data.pageSize, data.lineCount),
+    totalLines: data.lineCount,
   };
 }
 
@@ -195,7 +204,9 @@ export function rawPagerPageText(
   text: string,
   state: RawPagerState,
 ): string {
+  const data = state[rawPagerStateData];
+
   return rawPagerLineChunks(text)
-    .slice(state.lineOffset, state.lineOffset + state.pageSize)
+    .slice(data.lineOffset, data.lineOffset + data.pageSize)
     .join("");
 }
