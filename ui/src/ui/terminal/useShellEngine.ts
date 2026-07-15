@@ -8,7 +8,6 @@ import {
   reduceShellState,
   type CommandId,
   type CommandOutcome,
-  type SecretPromptId,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import type { NormalPromptKey } from "../../domain/terminal/PromptEditor.ts";
@@ -18,14 +17,14 @@ import {
 import type { CommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import type { CompletionService } from "../../application/commands/Completion.ts";
 import {
-  deliverSecretPromptEffect,
-  type SecretPromptOutcomeHandler,
-} from "../../application/commands/SecretPromptDelivery.ts";
+  consumePendingSecretPromptEffect,
+  createSecretPromptEffectConsumptionState,
+  type SecretPromptEffectConsumptionDiagnostic,
+  type SecretPromptEffectConsumptionState,
+} from "../../application/commands/SecretPromptEffectConsumption.ts";
+import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
 
-export type ShellEngineDiagnostic = Readonly<{
-  kind: "secret-prompt-delivery-failed";
-  message: "Secret prompt delivery failed.";
-}>;
+export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
 
 export type UseShellEngineOptions = Readonly<{
   initialState: ShellState;
@@ -61,11 +60,6 @@ function discardedCommandOutcome(commandName: string): CommandOutcome {
   };
 }
 
-const secretPromptDeliveryFailureDiagnostic = {
-  kind: "secret-prompt-delivery-failed",
-  message: "Secret prompt delivery failed.",
-} as const satisfies ShellEngineDiagnostic;
-
 export function useShellEngine({
   initialState,
   registry,
@@ -78,8 +72,8 @@ export function useShellEngine({
   >(undefined);
   const controllers = useRef<Map<CommandId, AbortController>>(new Map());
   const completionControllers = useRef<Set<AbortController>>(new Set());
-  const handledSecretPromptRequestId = useRef<SecretPromptId | undefined>(
-    undefined,
+  const secretPromptEffectConsumption = useRef<SecretPromptEffectConsumptionState>(
+    createSecretPromptEffectConsumptionState(),
   );
   const mounted = useRef(false);
 
@@ -105,52 +99,41 @@ export function useShellEngine({
   }, []);
 
   useEffect(() => {
-    const effect = state.pendingEffect;
+    const secretPromptConsumption = consumePendingSecretPromptEffect({
+      state: secretPromptEffectConsumption.current,
+      effect: state.pendingEffect,
+      handler: secretPromptOutcomeHandler,
+    });
+    secretPromptEffectConsumption.current = secretPromptConsumption.state;
+
+    if (secretPromptConsumption.kind === "duplicate") {
+      return;
+    }
+
+    if (secretPromptConsumption.kind === "consumed") {
+      dispatch(secretPromptConsumption.action);
+
+      const updateSecretPromptDiagnostic = async (): Promise<void> => {
+        const diagnostic = await secretPromptConsumption.diagnostic;
+
+        if (mounted.current) {
+          setTransientDiagnostic(diagnostic);
+        }
+      };
+
+      void updateSecretPromptDiagnostic();
+      return;
+    }
+
+    const effect = secretPromptConsumption.effect;
 
     if (effect.kind === "none") {
-      handledSecretPromptRequestId.current = undefined;
       return;
     }
 
     if (effect.kind === "cancel-command") {
       dispatch({ kind: "effect.consumed", commandId: effect.commandId });
       controllers.current.get(effect.commandId)?.abort();
-      return;
-    }
-
-    if (
-      effect.kind === "secret-submitted" ||
-      effect.kind === "secret-cancelled"
-    ) {
-      if (handledSecretPromptRequestId.current === effect.requestId) {
-        return;
-      }
-
-      handledSecretPromptRequestId.current = effect.requestId;
-      dispatch({
-        kind: "secret-prompt.effect.consumed",
-        requestId: effect.requestId,
-      });
-
-      const deliverSecretPromptOutcome = async (): Promise<void> => {
-        const result = await deliverSecretPromptEffect({
-          effect,
-          handler: secretPromptOutcomeHandler,
-        });
-
-        if (!mounted.current) {
-          return;
-        }
-
-        if (result.kind === "delivered") {
-          setTransientDiagnostic(undefined);
-          return;
-        }
-
-        setTransientDiagnostic(secretPromptDeliveryFailureDiagnostic);
-      };
-
-      void deliverSecretPromptOutcome();
       return;
     }
 
