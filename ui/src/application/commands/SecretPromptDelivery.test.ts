@@ -9,6 +9,7 @@ import {
   reduceShellState,
   type SecretPromptEffect,
 } from "../../domain/terminal/Shell.ts";
+import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { deliverSecretPromptEffect } from "./SecretPromptDelivery.ts";
 
 test("delivers a correlated secret submission once without retaining it in shell history", async () => {
@@ -20,6 +21,7 @@ test("delivers a correlated secret submission once without retaining it in shell
     createShellState({
       id: createShellId("terminal"),
       sessionId: createShellSessionId("session"),
+      currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
       commandHistoryLimit: 3,
     }),

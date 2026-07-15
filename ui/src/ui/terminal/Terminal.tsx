@@ -14,6 +14,7 @@ import {
   type ShellId,
   type ShellSessionId,
 } from "../../domain/terminal/Shell.ts";
+import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import {
   createPaneCommandDefinition,
@@ -72,6 +73,7 @@ export function Terminal({
     createShellState({
       id: createShellId(shellId),
       sessionId: createShellSessionId(sessionId),
+      currentDirectory: developmentFixtureCorpus.filesystem.root.path,
       scrollbackLimit: 200,
       commandHistoryLimit: 100,
     }),

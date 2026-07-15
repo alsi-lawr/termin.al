@@ -18,6 +18,7 @@ import {
   type CompletionResult,
 } from "./Completion.ts";
 import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
+import type { VirtualDirectoryPath } from "../filesystem/VirtualFilesystem.ts";
 
 declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
@@ -165,6 +166,10 @@ export type SecretPromptEffect =
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
   | Readonly<{
+      kind: "set-current-directory";
+      directory: VirtualDirectoryPath;
+    }>
+  | Readonly<{
       kind: "request-secret-prompt";
       request: SecretPromptRequest;
     }>;
@@ -212,6 +217,7 @@ export type ShellCommandRequest = Readonly<{
   shellId: ShellId;
   sessionId: ShellSessionId;
   source: string;
+  currentDirectory: VirtualDirectoryPath;
 }>;
 
 export type CommandLifecycle =
@@ -292,6 +298,7 @@ export type ShellEffect =
 export type ShellState = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
+  currentDirectory: VirtualDirectoryPath;
   input: PromptEditor;
   secretPrompt: SecretPrompt;
   lifecycle: CommandLifecycle;
@@ -328,6 +335,7 @@ export type ShellStatus =
 export type CreateShellStateOptions = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
+  currentDirectory: VirtualDirectoryPath;
   scrollbackLimit: number;
   commandHistoryLimit: number;
 }>;
@@ -599,6 +607,16 @@ function clearsScrollback(effects: ReadonlyArray<CommandEffect>): boolean {
   return effects.some((effect) => effect.kind === "clear-scrollback");
 }
 
+function changedCurrentDirectory(
+  effects: ReadonlyArray<CommandEffect>,
+): VirtualDirectoryPath | undefined {
+  const effect = effects.find(
+    (candidate) => candidate.kind === "set-current-directory",
+  );
+
+  return effect?.kind === "set-current-directory" ? effect.directory : undefined;
+}
+
 export function createShellId(value: string): ShellId {
   assertStableIdentifier(value, "Shell IDs");
   return value as ShellId;
@@ -643,6 +661,7 @@ export function createSecretPromptRequest(
 export function createShellState({
   id,
   sessionId,
+  currentDirectory,
   scrollbackLimit,
   commandHistoryLimit,
 }: CreateShellStateOptions): ShellState {
@@ -652,6 +671,7 @@ export function createShellState({
   return {
     id,
     sessionId,
+    currentDirectory,
     input: createEmptyPromptEditor(),
     secretPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
@@ -822,6 +842,7 @@ export function reduceShellState(
         shellId: state.id,
         sessionId: state.sessionId,
         source: state.input.buffer.value,
+        currentDirectory: state.currentDirectory,
       };
       const commandHistoryEntry: CommandHistoryEntry = {
         id: createCommandHistoryEntryId(
@@ -960,9 +981,11 @@ export function reduceShellState(
       const effects = commandEffects(action.outcome);
       const existingHistory = clearsScrollback(effects) ? [] : state.history;
       const secretPrompt = requestedSecretPrompt(effects);
+      const currentDirectory = changedCurrentDirectory(effects);
 
       return {
         ...state,
+        currentDirectory: currentDirectory ?? state.currentDirectory,
         lifecycle: { kind: "idle" },
         history: appendBounded(existingHistory, state.scrollbackLimit, {
           id: createHistoryEntryId(

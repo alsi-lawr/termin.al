@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import { createCompletionRequest } from "./Completion.ts";
+import {
+  resolveVirtualDirectory,
+  virtualHomeDirectory,
+} from "../filesystem/VirtualFilesystem.ts";
 import {
   createSecretPromptId,
   createSecretPromptRequest,
@@ -22,6 +27,7 @@ function createState(
   return createShellState({
     id: createShellId("terminal"),
     sessionId: createShellSessionId("session"),
+    currentDirectory: virtualHomeDirectory(),
     scrollbackLimit,
     commandHistoryLimit,
   });
@@ -68,6 +74,20 @@ function settleSucceeded(state: ShellState, message: string): ShellState {
   });
 }
 
+function projectsDirectory() {
+  const resolution = resolveVirtualDirectory(
+    developmentFixtureCorpus.filesystem,
+    virtualHomeDirectory(),
+    "projects",
+  );
+
+  if (resolution.kind !== "found") {
+    assert.fail("Expected the development projects directory.");
+  }
+
+  return resolution.directory;
+}
+
 test("reduces command execution and bounds per-shell histories", () => {
   const firstSubmitted = submit(createState(2, 2), "first");
   const firstCommandId = runningCommandId(firstSubmitted);
@@ -79,6 +99,7 @@ test("reduces command execution and bounds per-shell histories", () => {
       shellId: "terminal",
       sessionId: "session",
       source: "first",
+      currentDirectory: "~",
     },
   });
 
@@ -104,6 +125,34 @@ test("reduces command execution and bounds per-shell histories", () => {
   );
   assert.deepEqual(thirdSettled.lifecycle, { kind: "idle" });
   assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
+});
+
+test("keeps each shell current directory in its own immutable state", () => {
+  const first = submit(createState(), "cd projects");
+  const second = createState();
+  const commandId = runningCommandId(first);
+  const settled = reduceShellState(first, {
+    kind: "command.settled",
+    commandId,
+    outcome: {
+      kind: "succeeded",
+      outputs: [],
+      effects: [
+        {
+          kind: "set-current-directory",
+          directory: projectsDirectory().path,
+        },
+      ],
+    },
+  });
+
+  assert.equal(first.currentDirectory, "~");
+  assert.equal(second.currentDirectory, "~");
+  assert.equal(settled.currentDirectory, "~/projects");
+  assert.equal(
+    settled.history[0]?.command.currentDirectory,
+    "~",
+  );
 });
 
 test("requests cancellation through the active command AbortSignal seam", () => {

@@ -11,6 +11,7 @@ import {
   type SecretPromptRequest,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
+import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   consumePendingSecretPromptEffect,
   createSecretPromptEffectConsumptionState,
@@ -47,6 +48,7 @@ function createSecretSubmission(value: string): SecretSubmission {
     createShellState({
       id: createShellId("terminal"),
       sessionId: createShellSessionId("session"),
+      currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
       commandHistoryLimit: 3,
     }),
@@ -71,6 +73,7 @@ function createSecretCancellation(value: string): SecretCancellation {
     createShellState({
       id: createShellId("terminal"),
       sessionId: createShellSessionId("session"),
+      currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
       commandHistoryLimit: 3,
     }),
@@ -197,6 +200,7 @@ test("consumes secret cancellation without invoking a handler", async () => {
     createShellState({
       id: createShellId("terminal"),
       sessionId: createShellSessionId("session"),
+      currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
       commandHistoryLimit: 3,
     }),
