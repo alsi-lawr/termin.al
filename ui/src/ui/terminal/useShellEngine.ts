@@ -5,7 +5,6 @@ import {
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
-  type CommandId,
   type CommandEffect,
   type CommandOutcome,
   type ShellAction,
@@ -25,6 +24,7 @@ import {
   type SecretPromptEffectConsumptionState,
 } from "../../application/commands/SecretPromptEffectConsumption.ts";
 import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
+import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts";
 
 export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
 
@@ -36,6 +36,7 @@ export type UseShellEngineOptions = Readonly<{
   state: ShellState;
   onAction: (action: ShellAction) => void;
   isSessionOpen: () => boolean;
+  runtimeControl: PaneShellRuntimeControl;
   registry: CommandRegistry;
   completionService: CompletionService;
   secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
@@ -73,6 +74,7 @@ export function useShellEngine({
   state,
   onAction,
   isSessionOpen,
+  runtimeControl,
   registry,
   completionService,
   secretPromptOutcomeHandler,
@@ -81,37 +83,18 @@ export function useShellEngine({
   const [transientDiagnostic, setTransientDiagnostic] = useState<
     ShellEngineDiagnostic | undefined
   >(undefined);
-  const controllers = useRef<Map<CommandId, AbortController>>(new Map());
-  const completionControllers = useRef<Set<AbortController>>(new Set());
   const secretPromptEffectConsumption = useRef<SecretPromptEffectConsumptionState>(
     createSecretPromptEffectConsumptionState(),
   );
   const mounted = useRef(false);
 
   useEffect(() => {
-    const activeControllers = controllers.current;
-    const activeCompletionControllers = completionControllers.current;
     mounted.current = true;
 
     return () => {
       mounted.current = false;
-
-      if (isSessionOpen()) {
-        return;
-      }
-
-      for (const controller of activeControllers.values()) {
-        controller.abort();
-      }
-
-      for (const controller of activeCompletionControllers) {
-        controller.abort();
-      }
-
-      activeControllers.clear();
-      activeCompletionControllers.clear();
     };
-  }, [isSessionOpen]);
+  }, []);
 
   useEffect(() => {
     const secretPromptConsumption = consumePendingSecretPromptEffect({
@@ -155,16 +138,16 @@ export function useShellEngine({
 
     if (effect.kind === "cancel-command") {
       onAction({ kind: "effect.consumed", commandId: effect.commandId });
-      controllers.current.get(effect.commandId)?.abort();
+      runtimeControl.abortCommand(effect.commandId);
       return;
     }
 
-    if (controllers.current.has(effect.command.id)) {
+    const controller = runtimeControl.startCommand(effect.command.id);
+
+    if (controller === undefined) {
       return;
     }
 
-    const controller = new AbortController();
-    controllers.current.set(effect.command.id, controller);
     onAction({ kind: "effect.consumed", commandId: effect.command.id });
 
     const runCommand = async (): Promise<void> => {
@@ -175,9 +158,13 @@ export function useShellEngine({
           signal: controller.signal,
         });
 
-        controllers.current.delete(effect.command.id);
-
-        if (isSessionOpen()) {
+        if (
+          runtimeControl.finishCommand(
+            effect.command.id,
+            controller,
+            outcome,
+          ) && isSessionOpen()
+        ) {
           if (outcome.kind === "succeeded") {
             onCommandEffects?.(outcome.effects);
           }
@@ -189,13 +176,19 @@ export function useShellEngine({
           });
         }
       } catch {
-        controllers.current.delete(effect.command.id);
+        const outcome = discardedCommandOutcome(effect.command.source);
 
-        if (isSessionOpen()) {
+        if (
+          runtimeControl.finishCommand(
+            effect.command.id,
+            controller,
+            outcome,
+          ) && isSessionOpen()
+        ) {
           onAction({
             kind: "command.settled",
             commandId: effect.command.id,
-            outcome: discardedCommandOutcome(effect.command.source),
+            outcome,
           });
         }
       }
@@ -207,6 +200,7 @@ export function useShellEngine({
     onAction,
     isSessionOpen,
     registry,
+    runtimeControl,
     secretPromptOutcomeHandler,
     state.pendingEffect,
   ]);
@@ -218,34 +212,29 @@ export function useShellEngine({
       return;
     }
 
-    for (const controller of completionControllers.current) {
-      controller.abort();
-    }
-
-    completionControllers.current.clear();
-
     const request = createCompletionRequest(
       state.id,
       state.sessionId,
       prompt.editor.buffer.value,
       prompt.editor.buffer.cursor,
     );
-    const controller = new AbortController();
-    completionControllers.current.add(controller);
+    const controller = runtimeControl.startCompletion();
+
+    if (controller === undefined) {
+      return;
+    }
+
     onAction({ kind: "completion.request", request });
 
     const resolveCompletion = async (): Promise<void> => {
       try {
         const result = await completionService.complete(request, controller.signal);
-        completionControllers.current.delete(controller);
 
-        if (isSessionOpen()) {
+        if (runtimeControl.finishCompletion(controller) && isSessionOpen()) {
           onAction({ kind: "completion.resolved", request, result });
         }
       } catch {
-        completionControllers.current.delete(controller);
-
-        if (isSessionOpen()) {
+        if (runtimeControl.finishCompletion(controller) && isSessionOpen()) {
           onAction({ kind: "completion.failed", request });
         }
       }

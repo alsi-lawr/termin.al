@@ -16,6 +16,7 @@ import {
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
 import type { ViewerContent } from "../../content/ViewerContent.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
+import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts";
 import { createCommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import {
   createPaneCommandDefinition,
@@ -50,6 +51,7 @@ import { ViewerPane } from "../workspace/ViewerPane";
 type TerminalProps = Readonly<{
   paneId: PaneId;
   state: ShellState;
+  runtimeControl: PaneShellRuntimeControl;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
   isActive: boolean;
@@ -70,6 +72,7 @@ type TerminalProps = Readonly<{
 export function Terminal({
   paneId,
   state,
+  runtimeControl,
   onShellAction,
   hasShellRuntime,
   isActive,
@@ -138,6 +141,7 @@ export function Terminal({
     state,
     onAction: dispatchShellAction,
     isSessionOpen,
+    runtimeControl,
     registry,
     completionService,
     secretPromptOutcomeHandler,

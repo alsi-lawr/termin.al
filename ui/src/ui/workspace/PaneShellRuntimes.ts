@@ -5,6 +5,7 @@ import {
   createShellState,
   reduceShellState,
   type CommandId,
+  type CommandOutcome,
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
@@ -20,6 +21,7 @@ export type PaneShellRuntimeControl = Readonly<{
   finishCommand: (
     commandId: CommandId,
     controller: AbortController,
+    outcome: CommandOutcome,
   ) => boolean;
   startCompletion: () => AbortController | undefined;
   finishCompletion: (controller: AbortController) => boolean;
@@ -78,6 +80,7 @@ function createPaneShellRuntimeControl(): PaneShellRuntimeControl {
     finishCommand: (
       commandId: CommandId,
       controller: AbortController,
+      outcome: CommandOutcome,
     ): boolean => {
       const command = activeCommand;
 
@@ -91,7 +94,7 @@ function createPaneShellRuntimeControl(): PaneShellRuntimeControl {
       }
 
       activeCommand = undefined;
-      return !controller.signal.aborted;
+      return !controller.signal.aborted || outcome.kind === "cancelled";
     },
     startCompletion: (): AbortController | undefined => {
       if (disposed) {

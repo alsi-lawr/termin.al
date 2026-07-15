@@ -117,13 +117,16 @@ function PaneLeaf({
     : "h-full min-h-0 min-w-0 flex-1 rounded-md";
 
   switch (pane.content.kind) {
-    case "shell":
+    case "shell": {
+      const runtime = paneShellRuntime(shellRuntimes, pane.id);
+
       return (
         <div className={paneClass}>
           <Terminal
             key={pane.id}
             paneId={pane.id}
-            state={paneShellRuntime(shellRuntimes, pane.id).state}
+            state={runtime.state}
+            runtimeControl={runtime.control}
             onShellAction={onShellAction}
             hasShellRuntime={hasShellRuntime}
             isActive={isActive}
@@ -135,6 +138,7 @@ function PaneLeaf({
           />
         </div>
       );
+    }
     case "viewer":
       return (
         <div className={paneClass}>

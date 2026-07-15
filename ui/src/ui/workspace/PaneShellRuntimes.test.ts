@@ -5,7 +5,10 @@ import {
   resolveVirtualDirectory,
   virtualHomeDirectory,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
-import type { ShellState } from "../../domain/terminal/Shell.ts";
+import type {
+  CommandOutcome,
+  ShellState,
+} from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
   createPaneWorkspace,
@@ -136,6 +139,10 @@ function submitRunningCommand(
     paneId,
     action: { kind: "prompt.submit" },
   });
+}
+
+function successfulCommandOutcome(): CommandOutcome {
+  return { kind: "succeeded", outputs: [], effects: [] };
 }
 
 test("keeps shell state and current directory with stable pane IDs through pane tree transforms", () => {
@@ -326,4 +333,58 @@ test("releases pane runtime controls when the workspace unmounts", () => {
   assert.equal(commandController.signal.aborted, true);
   assert.equal(completionController.signal.aborted, true);
   assert.equal(runtime.control.startCompletion(), undefined);
+});
+
+test("cancels the original command after its pane moves and rejects a late result", () => {
+  let workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  let runtimes = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const firstPaneId = workspace.activePaneId;
+
+  workspace = apply(workspace, {
+    kind: "split",
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  runtimes = synchronise(runtimes, workspace);
+  runtimes = submitRunningCommand(runtimes, firstPaneId);
+  const state = stateFor(runtimes, firstPaneId);
+
+  if (state.lifecycle.kind !== "running") {
+    assert.fail("Expected a running command.");
+  }
+
+  const originalRuntime = paneShellRuntime(runtimes, firstPaneId);
+  const originalController = originalRuntime.control.startCommand(
+    state.lifecycle.command.id,
+  );
+
+  if (originalController === undefined) {
+    assert.fail("Expected the pane runtime to own the command controller.");
+  }
+
+  const swapped = apply(workspace, { kind: "swap", direction: "previous" });
+  runtimes = synchronise(runtimes, swapped);
+  const rotated = apply(swapped, { kind: "rotate", direction: "next" });
+  runtimes = synchronise(runtimes, rotated);
+  const rebuilt = apply(rotated, { kind: "set-layout", layout: "tiled" });
+  runtimes = synchronise(runtimes, rebuilt);
+
+  const movedRuntime = paneShellRuntime(runtimes, firstPaneId);
+  movedRuntime.control.abortCommand(state.lifecycle.command.id);
+
+  assert.equal(movedRuntime.control, originalRuntime.control);
+  assert.equal(originalController.signal.aborted, true);
+  assert.equal(
+    movedRuntime.control.finishCommand(
+      state.lifecycle.command.id,
+      originalController,
+      successfulCommandOutcome(),
+    ),
+    false,
+  );
 });
