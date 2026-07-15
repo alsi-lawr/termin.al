@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
-import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
+import {
+  virtualHomeDirectory,
+  type VirtualDocumentSupplier,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
   createShellId,
@@ -17,17 +20,19 @@ import { createPortfolioCommandDefinitions } from "./PortfolioCommands.ts";
 import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
 import { createCommandRegistry, type CommandRegistry } from "./CommandRegistry.ts";
 
-function createRegistry(): CommandRegistry {
+function createRegistry(
+  documents: VirtualDocumentSupplier = developmentFixtureCorpus.documents,
+): CommandRegistry {
   return createCommandRegistry({
     commands: [
       ...createReadOnlyCommandDefinitions({
         filesystem: developmentFixtureCorpus.filesystem,
-        documents: developmentFixtureCorpus.documents,
+        documents,
         recursiveEntryLimit: 100,
       }),
       ...createPortfolioCommandDefinitions({
         filesystem: developmentFixtureCorpus.filesystem,
-        documents: developmentFixtureCorpus.documents,
+        documents,
       }),
       createPaneCommandDefinition(createPaneId("pane-1"), () => ({
         kind: "rejected",
@@ -129,6 +134,37 @@ test("opens fixture documents inline and directory targets in requested split ef
       { name: "sample-project.md", kind: "file" },
     ]);
   }
+});
+
+test("routes portfolio supplier failures through the execution boundary", async () => {
+  const cause = new Error("Unexpected supplier failure.");
+  const outcome = await execute(
+    "open about.md",
+    createRegistry({
+      read: async () => {
+        throw cause;
+      },
+    }),
+  );
+
+  assert.equal(outcome.kind, "failed");
+  if (outcome.kind !== "failed") {
+    return;
+  }
+
+  assert.equal(outcome.failure.kind, "execution-error");
+  if (outcome.failure.kind !== "execution-error") {
+    return;
+  }
+
+  assert.strictEqual(outcome.failure.cause, cause);
+  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
+  assert.equal(
+    outcome.diagnostics.some(
+      (diagnostic) => diagnostic.code === "runtime.content-unavailable",
+    ),
+    false,
+  );
 });
 
 test("provides discoverable navigation commands and useful unavailable-feature diagnostics", async () => {
