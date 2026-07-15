@@ -1,6 +1,12 @@
-import { useEffect, useRef, type ReactElement } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type KeyboardEvent,
+  type ReactElement,
+} from "react";
 import { viewerTitle } from "../../content/ViewerContent.ts";
 import type { Pane } from "../../domain/workspace/PaneTree.ts";
+import { handleDirtyCloseConfirmationKey } from "./DirtyCloseConfirmationKeyHandler.ts";
 
 type DirtyCloseConfirmationProps = Readonly<{
   pane: Pane;
@@ -25,10 +31,36 @@ export function DirtyCloseConfirmation({
   onCancel,
 }: DirtyCloseConfirmationProps): ReactElement {
   const cancelRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     cancelRef.current?.focus();
   }, []);
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    const result = handleDirtyCloseConfirmationKey({
+      key: event.key,
+      focusedAction:
+        event.target === confirmRef.current ? "confirm" : "cancel",
+    });
+
+    switch (result.kind) {
+      case "cancel":
+        event.preventDefault();
+        onCancel();
+        return;
+      case "focus-cancel":
+        event.preventDefault();
+        cancelRef.current?.focus();
+        return;
+      case "focus-confirm":
+        event.preventDefault();
+        confirmRef.current?.focus();
+        return;
+      case "unhandled":
+        return;
+    }
+  };
 
   return (
     <div
@@ -37,6 +69,7 @@ export function DirtyCloseConfirmation({
       aria-modal="true"
       aria-labelledby="dirty-pane-close-title"
       aria-describedby="dirty-pane-close-description"
+      onKeyDown={handleKeyDown}
     >
       <section className="w-full max-w-md rounded-md border border-neutral-700 bg-neutral-900 p-4 text-neutral-100">
         <h2 id="dirty-pane-close-title" className="text-lg font-semibold">
@@ -55,6 +88,7 @@ export function DirtyCloseConfirmation({
             Keep editing
           </button>
           <button
+            ref={confirmRef}
             type="button"
             className="rounded border border-red-500 px-3 py-2 text-red-200"
             onClick={onConfirm}
