@@ -1,3 +1,5 @@
+declare const secretPromptEffectGenerationBrand: unique symbol;
+
 import type {
   SecretPromptEffect,
   SecretPromptId,
@@ -8,15 +10,19 @@ import {
   type SecretPromptOutcomeHandler,
 } from "./SecretPromptDelivery.ts";
 
+export type SecretPromptEffectGeneration = number & {
+  readonly [secretPromptEffectGenerationBrand]: "SecretPromptEffectGeneration";
+};
+
 export type SecretPromptEffectConsumptionState =
   | Readonly<{
       kind: "idle";
-      latestGeneration: number;
+      latestGeneration: SecretPromptEffectGeneration;
     }>
   | Readonly<{
       kind: "handled";
       requestId: SecretPromptId;
-      latestGeneration: number;
+      latestGeneration: SecretPromptEffectGeneration;
     }>;
 
 export type SecretPromptEffectConsumptionDiagnostic = Readonly<{
@@ -45,7 +51,7 @@ export type SecretPromptEffectConsumption =
       kind: "consumed";
       state: SecretPromptEffectConsumptionState;
       action: SecretPromptEffectConsumedAction;
-      generation: number;
+      generation: SecretPromptEffectGeneration;
       diagnostic: Promise<SecretPromptEffectConsumptionDiagnostic | undefined>;
     }>;
 
@@ -59,6 +65,15 @@ const secretPromptDeliveryFailureDiagnostic = {
   kind: "secret-prompt-delivery-failed",
   message: "Secret prompt delivery failed.",
 } as const satisfies SecretPromptEffectConsumptionDiagnostic;
+
+const initialSecretPromptEffectGeneration =
+  0 as SecretPromptEffectGeneration;
+
+function incrementSecretPromptEffectGeneration(
+  generation: SecretPromptEffectGeneration,
+): SecretPromptEffectGeneration {
+  return (generation + 1) as SecretPromptEffectGeneration;
+}
 
 function deliveryDiagnostic(
   effect: SecretPromptEffect,
@@ -79,12 +94,12 @@ function deliveryDiagnostic(
 }
 
 export function createSecretPromptEffectConsumptionState(): SecretPromptEffectConsumptionState {
-  return { kind: "idle", latestGeneration: 0 };
+  return { kind: "idle", latestGeneration: initialSecretPromptEffectGeneration };
 }
 
 export function shouldApplySecretPromptEffectDiagnostic(
   state: SecretPromptEffectConsumptionState,
-  generation: number,
+  generation: SecretPromptEffectGeneration,
 ): boolean {
   return state.latestGeneration === generation;
 }
@@ -113,7 +128,7 @@ export function consumePendingSecretPromptEffect({
     return { kind: "duplicate", state };
   }
 
-  const generation = state.latestGeneration + 1;
+  const generation = incrementSecretPromptEffectGeneration(state.latestGeneration);
 
   return {
     kind: "consumed",

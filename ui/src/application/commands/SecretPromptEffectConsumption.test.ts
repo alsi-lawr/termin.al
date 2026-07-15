@@ -141,6 +141,13 @@ function assertSecretIsNotRetained(state: ShellState, secret: string): void {
   assert.equal(JSON.stringify(state).includes(secret), false);
 }
 
+test("rejects plain numbers as secret prompt effect generations", () => {
+  const state = createSecretPromptEffectConsumptionState();
+
+  // @ts-expect-error: Diagnostic generations must come from the consumption adapter.
+  shouldApplySecretPromptEffectDiagnostic(state, 1);
+});
+
 test("consumes one correlated secret submission without retaining it", async () => {
   const secret = "sensitive-value";
   const { effect, request, state } = createSecretSubmission(secret);
