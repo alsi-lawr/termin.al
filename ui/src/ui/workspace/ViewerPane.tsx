@@ -20,6 +20,7 @@ import {
 import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
 import { MobilePaneControls, type MobilePaneControl } from "./MobilePaneControls";
+import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
 
 type ViewerPaneProps = Readonly<{
@@ -30,6 +31,12 @@ type ViewerPaneProps = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  mobileCtrlPressed: boolean;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
   onClose?: () => void;
 }>;
 
@@ -39,6 +46,10 @@ export function ViewerPane({
   focusVersion,
   onActivate,
   onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
   onClose,
 }: ViewerPaneProps): ReactElement {
   const viewerRef = useRef<HTMLElement | null>(null);
@@ -69,28 +80,41 @@ export function ViewerPane({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    const mobileCtrlInput = resolveMobileCtrlInput({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+    });
+    const input = mobileCtrlInput.input;
+    let defaultPrevented = false;
+
     handleViewerPaneKeyInput({
       input: isRawPager
         ? {
             kind: "raw-pager",
-            key: event.key,
+            key: input.key,
             altKey: event.altKey,
-            ctrlKey: event.ctrlKey,
-            metaKey: event.metaKey,
+            ctrlKey: input.ctrlKey,
+            metaKey: input.metaKey,
           }
         : {
             kind: "viewer",
-            key: event.key,
-            ctrlKey: event.ctrlKey,
-            metaKey: event.metaKey,
+            key: input.key,
+            ctrlKey: input.ctrlKey,
+            metaKey: input.metaKey,
           },
       onPaneKeyInput,
       onClose,
       onPagerOperation: applyPagerOperation,
       preventDefault: () => {
+        defaultPrevented = true;
         event.preventDefault();
       },
     });
+
+    if (mobileCtrlInput.mobileCtrlApplied && !defaultPrevented) {
+      event.preventDefault();
+    }
   };
 
   const handleClick = (event: MouseEvent<HTMLElement>): void => {
@@ -110,7 +134,14 @@ export function ViewerPane({
     });
   };
 
-  const handleMobileControl = (control: MobilePaneControl): void => {
+  const handleMobileControl = (
+    control: MobilePaneControl,
+    ctrlKey: boolean,
+  ): void => {
+    if (ctrlKey) {
+      return;
+    }
+
     if (isRawPager) {
       switch (control) {
         case "escape":
@@ -218,7 +249,13 @@ export function ViewerPane({
         </div>
         {content}
       </div>
-      <MobilePaneControls onControl={handleMobileControl} onPrefix={triggerPrefix} />
+      <MobilePaneControls
+        ctrlPressed={mobileCtrlPressed}
+        onCtrlToggle={onToggleMobileCtrl}
+        onCtrlConsumed={onConsumeMobileCtrl}
+        onControl={handleMobileControl}
+        onPrefix={triggerPrefix}
+      />
     </section>
   );
 }

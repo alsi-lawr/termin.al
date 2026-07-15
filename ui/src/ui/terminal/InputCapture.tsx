@@ -27,17 +27,17 @@ import {
   selectInputCaptureControl,
   type InputCapturePromptKind,
 } from "./InputCaptureControl.ts";
+import type {
+  MobileCtrlInputResolution,
+  MobileCtrlKeyInput,
+} from "../workspace/MobileCtrlModifier.ts";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
   preserveFocus: () => void;
 }>;
 
-export type InputCapturePaneKeyInput = Readonly<{
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-}>;
+export type InputCapturePaneKeyInput = MobileCtrlKeyInput;
 
 export type InputCapturePaneKeyResult =
   | Readonly<{ kind: "handled" }>
@@ -61,6 +61,9 @@ type InputCaptureProps = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
 }>;
 
 type NativeInputControlElement = HTMLInputElement | HTMLTextAreaElement;
@@ -170,13 +173,11 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       props.onInsertText(event.clipboardData.getData("text"));
     };
 
-    const handleNormalKey = (
-      event: KeyboardEvent<NativeInputControlElement>,
-    ): void => {
+    const handleNormalKey = (input: InputCapturePaneKeyInput): void => {
       const match = normalPromptKeyFromKeyboard(
-        event.key,
-        event.ctrlKey,
-        event.metaKey,
+        input.key,
+        input.ctrlKey,
+        input.metaKey,
       );
 
       if (match.kind === "recognized") {
@@ -191,18 +192,20 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      const paneKeyResult = props.onPaneKeyInput({
+      const mobileCtrlInput = props.resolveMobileCtrlInput({
         key: event.key,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
       });
+      const input = mobileCtrlInput.input;
+      const paneKeyResult = props.onPaneKeyInput(input);
 
       if (paneKeyResult.kind === "handled") {
         event.preventDefault();
         return;
       }
 
-      if (event.ctrlKey && event.key.toLowerCase() === "c") {
+      if (input.ctrlKey && input.key.toLowerCase() === "c") {
         event.preventDefault();
         props.onCancel();
         return;
@@ -216,13 +219,13 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
 
       if (props.mode.kind === "normal") {
         event.preventDefault();
-        handleNormalKey(event);
+        handleNormalKey(input);
         return;
       }
 
       if (event.key === "Escape") {
         event.preventDefault();
-        handleNormalKey(event);
+        handleNormalKey(input);
         return;
       }
 
@@ -257,6 +260,11 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       if (event.key === "End") {
         event.preventDefault();
         props.onMoveCursor(props.value.length);
+        return;
+      }
+
+      if (mobileCtrlInput.mobileCtrlApplied) {
+        event.preventDefault();
       }
     };
 

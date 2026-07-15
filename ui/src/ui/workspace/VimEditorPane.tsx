@@ -37,6 +37,7 @@ import {
   MobilePaneControls,
   type MobilePaneControl,
 } from "./MobilePaneControls";
+import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 
 type VimEditorPaneProps = Readonly<{
   title: string;
@@ -48,6 +49,12 @@ type VimEditorPaneProps = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  mobileCtrlPressed: boolean;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
 }>;
 
 function modeLabel(buffer: VimBuffer): string {
@@ -139,6 +146,10 @@ export function VimEditorPane({
   onBufferChange,
   onActivate,
   onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
 }: VimEditorPaneProps): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composing = useRef(false);
@@ -244,12 +255,13 @@ export function VimEditorPane({
 
   const handleNormalKey = (
     event: KeyboardEvent<HTMLTextAreaElement>,
+    input: InputCapturePaneKeyInput,
   ): void => {
     event.preventDefault();
     const key = normalVimKeyFromKeyboard(
-      event.key,
-      event.ctrlKey,
-      event.metaKey,
+      input.key,
+      input.ctrlKey,
+      input.metaKey,
     );
 
     if (key.kind === "recognized") {
@@ -262,14 +274,21 @@ export function VimEditorPane({
       return;
     }
 
+    const mobileCtrlInput = resolveMobileCtrlInput({
+      key: event.key,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+    });
+    const input = mobileCtrlInput.input;
+
     if (buffer.mode.kind === "command") {
       handleVimEditorPaneCommandInput({
         buffer,
         input: {
           kind: "keydown",
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
+          key: input.key,
+          ctrlKey: input.ctrlKey,
+          metaKey: input.metaKey,
         },
         onBufferChange,
         onPaneKeyInput,
@@ -280,11 +299,7 @@ export function VimEditorPane({
       return;
     }
 
-    const paneKeyResult = onPaneKeyInput({
-      key: event.key,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
-    });
+    const paneKeyResult = onPaneKeyInput(input);
 
     if (paneKeyResult.kind === "handled") {
       event.preventDefault();
@@ -292,7 +307,7 @@ export function VimEditorPane({
     }
 
     if (buffer.mode.kind === "normal" || buffer.mode.kind === "visual") {
-      handleNormalKey(event);
+      handleNormalKey(event, input);
       return;
     }
 
@@ -305,6 +320,11 @@ export function VimEditorPane({
     if (event.key === "Tab") {
       event.preventDefault();
       onBufferChange(insertVimText(buffer, "\t"));
+      return;
+    }
+
+    if (mobileCtrlInput.mobileCtrlApplied) {
+      event.preventDefault();
     }
   };
 
@@ -407,6 +427,9 @@ export function VimEditorPane({
         )}
       </div>
       <MobilePaneControls
+        ctrlPressed={mobileCtrlPressed}
+        onCtrlToggle={onToggleMobileCtrl}
+        onCtrlConsumed={onConsumeMobileCtrl}
         onControl={handleMobileControl}
         onPrefix={handleMobilePrefix}
       />

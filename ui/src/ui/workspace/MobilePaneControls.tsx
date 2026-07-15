@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import type { ReactElement } from "react";
 
 export type MobilePaneControl =
   | "escape"
@@ -9,24 +9,28 @@ export type MobilePaneControl =
   | "down";
 
 type MobilePaneControlsProps = Readonly<{
+  ctrlPressed: boolean;
+  onCtrlToggle: () => void;
+  onCtrlConsumed: () => void;
   onControl: (control: MobilePaneControl, ctrlKey: boolean) => void;
   onPrefix: () => void;
 }>;
 
 export function MobilePaneControls({
+  ctrlPressed,
+  onCtrlToggle,
+  onCtrlConsumed,
   onControl,
   onPrefix,
 }: MobilePaneControlsProps): ReactElement {
-  const [ctrlKey, setCtrlKey] = useState(false);
-
   const sendControl = (control: MobilePaneControl): void => {
-    onControl(control, ctrlKey);
-    setCtrlKey(false);
+    onControl(control, ctrlPressed);
+    onCtrlConsumed();
   };
 
   const sendPrefix = (): void => {
     onPrefix();
-    setCtrlKey(false);
+    onCtrlConsumed();
   };
 
   return (
@@ -45,8 +49,8 @@ export function MobilePaneControls({
       <button
         type="button"
         className="rounded border border-neutral-700 px-2 py-1 text-neutral-100 aria-pressed:bg-neutral-700"
-        aria-pressed={ctrlKey}
-        onClick={() => setCtrlKey((current) => !current)}
+        aria-pressed={ctrlPressed}
+        onClick={onCtrlToggle}
       >
         Ctrl
       </button>

@@ -17,6 +17,7 @@ import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
 } from "../terminal/InputCapture";
+import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { Terminal } from "../terminal/Terminal";
 import { ViewerPane } from "./ViewerPane";
 import { VimEditorPane } from "./VimEditorPane";
@@ -34,6 +35,12 @@ type PaneTreeViewProps = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  mobileCtrlPressed: boolean;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
 }>;
 
 const firstPaneBasisClass = {
@@ -95,6 +102,10 @@ function PaneLeaf({
   onCloseInlineViewer,
   hasShellRuntime,
   onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -125,6 +136,10 @@ function PaneLeaf({
             focusVersion={focusVersion}
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
             paneCommandHandler={commandHandler}
           />
         </div>
@@ -139,6 +154,10 @@ function PaneLeaf({
             focusVersion={focusVersion}
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
           />
         </div>
       );
@@ -159,6 +178,10 @@ function PaneLeaf({
               });
             }}
             onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
           />
         </div>
       );
@@ -176,6 +199,10 @@ export function PaneTreeView({
   onCloseInlineViewer,
   hasShellRuntime,
   onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -189,6 +216,10 @@ export function PaneTreeView({
         onCloseInlineViewer={onCloseInlineViewer}
         hasShellRuntime={hasShellRuntime}
         onPaneKeyInput={onPaneKeyInput}
+        mobileCtrlPressed={mobileCtrlPressed}
+        onToggleMobileCtrl={onToggleMobileCtrl}
+        onConsumeMobileCtrl={onConsumeMobileCtrl}
+        resolveMobileCtrlInput={resolveMobileCtrlInput}
       />
     );
   }
@@ -230,6 +261,10 @@ export function PaneTreeView({
           onCloseInlineViewer={onCloseInlineViewer}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
+          mobileCtrlPressed={mobileCtrlPressed}
+          onToggleMobileCtrl={onToggleMobileCtrl}
+          onConsumeMobileCtrl={onConsumeMobileCtrl}
+          resolveMobileCtrlInput={resolveMobileCtrlInput}
         />
       </div>
       <div
@@ -251,6 +286,10 @@ export function PaneTreeView({
           onCloseInlineViewer={onCloseInlineViewer}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
+          mobileCtrlPressed={mobileCtrlPressed}
+          onToggleMobileCtrl={onToggleMobileCtrl}
+          onConsumeMobileCtrl={onConsumeMobileCtrl}
+          resolveMobileCtrlInput={resolveMobileCtrlInput}
         />
       </div>
     </div>

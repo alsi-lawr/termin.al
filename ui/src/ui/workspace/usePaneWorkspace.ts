@@ -24,6 +24,13 @@ import {
   initialPanePrefixState,
   type PanePrefixState,
 } from "../../domain/workspace/PaneKeyBindings.ts";
+import {
+  consumeMobileCtrlModifier,
+  initialMobileCtrlModifier,
+  toggleMobileCtrlModifier,
+  type MobileCtrlInputResolution,
+  type MobileCtrlModifier,
+} from "./MobileCtrlModifier.ts";
 import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
@@ -41,6 +48,7 @@ export type PaneWorkspaceController = Readonly<{
   shellRuntimes: PaneShellRuntimes;
   focusVersion: number;
   closeConfirmation: PaneCloseConfirmation;
+  mobileCtrlPressed: boolean;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
   onCloseInlineViewer: (paneId: PaneId) => void;
@@ -48,6 +56,11 @@ export type PaneWorkspaceController = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
   confirmClose: () => void;
   dismissClose: () => void;
 }>;
@@ -65,16 +78,53 @@ export function usePaneWorkspace(): PaneWorkspaceController {
   const [focusVersion, setFocusVersion] = useState(0);
   const [closeConfirmation, setCloseConfirmation] =
     useState<PaneCloseConfirmation>({ kind: "none" });
+  const [mobileCtrlModifier, setMobileCtrlModifier] =
+    useState<MobileCtrlModifier>(initialMobileCtrlModifier);
   const workspaceRef = useRef(workspace);
   const shellRuntimesRef = useRef(shellRuntimes);
   const prefixState = useRef<PanePrefixState>(initialPanePrefixState);
+  const mobileCtrlModifierRef = useRef<MobileCtrlModifier>(
+    initialMobileCtrlModifier,
+  );
+
+  const setMobileCtrl = useCallback((modifier: MobileCtrlModifier): void => {
+    mobileCtrlModifierRef.current = modifier;
+    setMobileCtrlModifier(modifier);
+  }, []);
+
+  const onToggleMobileCtrl = useCallback((): void => {
+    setMobileCtrl(toggleMobileCtrlModifier(mobileCtrlModifierRef.current));
+  }, [setMobileCtrl]);
+
+  const onConsumeMobileCtrl = useCallback((): void => {
+    if (mobileCtrlModifierRef.current.kind === "armed") {
+      setMobileCtrl(initialMobileCtrlModifier);
+    }
+  }, [setMobileCtrl]);
+
+  const resolveMobileCtrlInput = useCallback(
+    (input: InputCapturePaneKeyInput): MobileCtrlInputResolution => {
+      const transition = consumeMobileCtrlModifier(
+        mobileCtrlModifierRef.current,
+        input,
+      );
+
+      if (transition.resolution.mobileCtrlApplied) {
+        setMobileCtrl(transition.modifier);
+      }
+
+      return transition.resolution;
+    },
+    [setMobileCtrl],
+  );
 
   const applyOperation = useCallback(
     (operation: PaneOperation): PaneOperationResult => {
-      const result = applyPaneOperation(workspaceRef.current, operation);
+      const currentWorkspace = workspaceRef.current;
+      const result = applyPaneOperation(currentWorkspace, operation);
 
       if (result.kind === "applied") {
-        if (result.workspace === workspaceRef.current) {
+        if (result.workspace === currentWorkspace) {
           return result;
         }
 
@@ -87,6 +137,9 @@ export function usePaneWorkspace(): PaneWorkspaceController {
         workspaceRef.current = result.workspace;
         shellRuntimesRef.current = nextShellRuntimes;
         setWorkspace(result.workspace);
+        if (result.workspace.activePaneId !== currentWorkspace.activePaneId) {
+          onConsumeMobileCtrl();
+        }
         if (nextShellRuntimes !== currentShellRuntimes) {
           setShellRuntimes(nextShellRuntimes);
         }
@@ -103,7 +156,7 @@ export function usePaneWorkspace(): PaneWorkspaceController {
 
       return result;
     },
-    [],
+    [onConsumeMobileCtrl],
   );
 
   const onShellAction = useCallback(
@@ -128,13 +181,16 @@ export function usePaneWorkspace(): PaneWorkspaceController {
       shellRuntimesRef.current = next.runtimes;
       if (next.workspace !== currentWorkspace) {
         setWorkspace(next.workspace);
+        if (next.workspace.activePaneId !== currentWorkspace.activePaneId) {
+          onConsumeMobileCtrl();
+        }
         setFocusVersion((current) => current + 1);
       }
       if (next.runtimes !== currentShellRuntimes) {
         setShellRuntimes(next.runtimes);
       }
     },
-    [],
+    [onConsumeMobileCtrl],
   );
 
   const onCloseInlineViewer = useCallback((paneId: PaneId): void => {
@@ -208,11 +264,15 @@ export function usePaneWorkspace(): PaneWorkspaceController {
     shellRuntimes,
     focusVersion,
     closeConfirmation,
+    mobileCtrlPressed: mobileCtrlModifier.kind === "armed",
     applyOperation,
     onShellAction,
     onCloseInlineViewer,
     hasShellRuntime,
     onPaneKeyInput,
+    onToggleMobileCtrl,
+    onConsumeMobileCtrl,
+    resolveMobileCtrlInput,
     confirmClose,
     dismissClose,
   };

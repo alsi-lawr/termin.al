@@ -23,6 +23,10 @@ export function Workspace(): ReactElement {
           onCloseInlineViewer={controller.onCloseInlineViewer}
           hasShellRuntime={controller.hasShellRuntime}
           onPaneKeyInput={controller.onPaneKeyInput}
+          mobileCtrlPressed={controller.mobileCtrlPressed}
+          onToggleMobileCtrl={controller.onToggleMobileCtrl}
+          onConsumeMobileCtrl={controller.onConsumeMobileCtrl}
+          resolveMobileCtrlInput={controller.resolveMobileCtrlInput}
         />
       </div>
       <MobilePaneSwitcher

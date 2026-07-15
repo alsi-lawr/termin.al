@@ -47,6 +47,7 @@ import {
   MobilePaneControls,
   type MobilePaneControl,
 } from "../workspace/MobilePaneControls";
+import type { MobileCtrlInputResolution } from "../workspace/MobileCtrlModifier.ts";
 import { ViewerPane } from "../workspace/ViewerPane";
 
 type TerminalProps = Readonly<{
@@ -62,6 +63,12 @@ type TerminalProps = Readonly<{
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
+  mobileCtrlPressed: boolean;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
   paneCommandHandler: PaneCommandHandler;
   onCloseInlineViewer: (paneId: PaneId) => void;
   prompt?: string;
@@ -79,6 +86,10 @@ export function Terminal({
   focusVersion,
   onActivate,
   onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
   paneCommandHandler,
   onCloseInlineViewer,
   prompt = "$",
@@ -226,6 +237,10 @@ export function Terminal({
         focusVersion={focusVersion}
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
+        mobileCtrlPressed={mobileCtrlPressed}
+        onToggleMobileCtrl={onToggleMobileCtrl}
+        onConsumeMobileCtrl={onConsumeMobileCtrl}
+        resolveMobileCtrlInput={resolveMobileCtrlInput}
         onClose={() => {
           onCloseInlineViewer(paneId);
         }}
@@ -252,6 +267,9 @@ export function Terminal({
       </div>
 
       <MobilePaneControls
+        ctrlPressed={mobileCtrlPressed}
+        onCtrlToggle={onToggleMobileCtrl}
+        onCtrlConsumed={onConsumeMobileCtrl}
         onControl={handleMobileControl}
         onPrefix={handleMobilePrefix}
       />
@@ -273,6 +291,7 @@ export function Terminal({
         onComplete={shell.complete}
         onFocus={onActivate}
         onPaneKeyInput={onPaneKeyInput}
+        resolveMobileCtrlInput={resolveMobileCtrlInput}
       />
     </div>
   );
