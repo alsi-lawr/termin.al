@@ -201,7 +201,7 @@ test("renders direct and supplier Markdown strings identically", async () => {
   );
 
   if (supplied.kind !== "available") {
-    assert.fail("Expected the development fixture document to be available.");
+    assert.fail("Expected the demo corpus document to be available.");
   }
 
   const direct: MarkdownDocument = {
