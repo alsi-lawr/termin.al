@@ -39,6 +39,7 @@ module Program =
     [<EntryPoint>]
     let main _ =
         try
+            ContentContractsTests.run ()
             runHealthCheck ()
         with error ->
             eprintfn "Host health check failed: %s" error.Message
