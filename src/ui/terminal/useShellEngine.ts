@@ -93,6 +93,17 @@ export function useShellEngine({
       return;
     }
 
+    if (
+      effect.kind === "secret-submitted" ||
+      effect.kind === "secret-cancelled"
+    ) {
+      dispatch({
+        kind: "secret-prompt.effect.consumed",
+        requestId: effect.requestId,
+      });
+      return;
+    }
+
     if (controllers.current.has(effect.command.id)) {
       return;
     }

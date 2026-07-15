@@ -190,6 +190,7 @@ test("keeps secret prompts separate from command input and all histories", () =>
     assert.fail("Expected a secret prompt.");
   }
 
+  assert.equal(activePrompt.prompt.request.id, request.id);
   assert.equal(activePrompt.prompt.editor.buffer.value, "sensitive-value");
 
   const submitted = reduceShellState(typed, { kind: "prompt.submit" });
@@ -198,6 +199,55 @@ test("keeps secret prompts separate from command input and all histories", () =>
   assert.equal(submitted.input.buffer.value, "");
   assert.deepEqual(submitted.history, []);
   assert.deepEqual(submitted.commandHistory, []);
+  assert.deepEqual(submitted.completion, { kind: "idle" });
+  assert.deepEqual(submitted.pendingEffect, {
+    kind: "secret-submitted",
+    requestId: request.id,
+    value: "sensitive-value",
+  });
+
+  const consumed = reduceShellState(submitted, {
+    kind: "secret-prompt.effect.consumed",
+    requestId: request.id,
+  });
+  const repeated = reduceShellState(consumed, { kind: "prompt.submit" });
+
+  assert.deepEqual(consumed.pendingEffect, { kind: "none" });
+  assert.deepEqual(repeated.pendingEffect, { kind: "none" });
+  assert.deepEqual(repeated.history, []);
+  assert.deepEqual(repeated.commandHistory, []);
+});
+
+test("emits one correlated secret cancellation without retaining the typed value", () => {
+  const request = createSecretPromptRequest(
+    createSecretPromptId("oauth-code"),
+    "One-time code",
+  );
+  const active = reduceShellState(createState(), {
+    kind: "secret.begin",
+    request,
+  });
+  const typed = reduceShellState(active, {
+    kind: "input.insert",
+    text: "sensitive-value",
+  });
+  const cancelled = reduceShellState(typed, { kind: "prompt.cancel" });
+
+  assert.deepEqual(cancelled.secretPrompt, { kind: "none" });
+  assert.deepEqual(cancelled.pendingEffect, {
+    kind: "secret-cancelled",
+    requestId: request.id,
+  });
+  assert.equal(JSON.stringify(cancelled).includes("sensitive-value"), false);
+
+  const consumed = reduceShellState(cancelled, {
+    kind: "secret-prompt.effect.consumed",
+    requestId: request.id,
+  });
+  const repeated = reduceShellState(consumed, { kind: "prompt.cancel" });
+
+  assert.deepEqual(consumed.pendingEffect, { kind: "none" });
+  assert.deepEqual(repeated.pendingEffect, { kind: "none" });
 });
 
 test("opens a typed secret prompt requested by a command effect", () => {

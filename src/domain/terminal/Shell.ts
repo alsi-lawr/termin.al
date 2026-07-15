@@ -25,6 +25,7 @@ declare const commandIdBrand: unique symbol;
 declare const shellHistoryEntryIdBrand: unique symbol;
 declare const commandHistoryEntryIdBrand: unique symbol;
 declare const secretPromptIdBrand: unique symbol;
+declare const secretPromptValueBrand: unique symbol;
 declare const shellDiagnosticIdBrand: unique symbol;
 declare const shellOutputIdBrand: unique symbol;
 declare const shellOutputPartIdBrand: unique symbol;
@@ -51,6 +52,10 @@ export type CommandHistoryEntryId = string & {
 
 export type SecretPromptId = string & {
   readonly [secretPromptIdBrand]: "SecretPromptId";
+};
+
+export type SecretPromptValue = string & {
+  readonly [secretPromptValueBrand]: "SecretPromptValue";
 };
 
 export type ShellDiagnosticId = string & {
@@ -145,6 +150,17 @@ export type SecretPromptRequest = Readonly<{
   id: SecretPromptId;
   label: string;
 }>;
+
+export type SecretPromptEffect =
+  | Readonly<{
+      kind: "secret-submitted";
+      requestId: SecretPromptId;
+      value: SecretPromptValue;
+    }>
+  | Readonly<{
+      kind: "secret-cancelled";
+      requestId: SecretPromptId;
+    }>;
 
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
@@ -270,7 +286,8 @@ export type ShellEffect =
   | Readonly<{
       kind: "cancel-command";
       commandId: CommandId;
-    }>;
+    }>
+  | SecretPromptEffect;
 
 export type ShellState = Readonly<{
   id: ShellId;
@@ -363,6 +380,10 @@ export type ShellAction =
   | Readonly<{
       kind: "effect.consumed";
       commandId: CommandId;
+    }>
+  | Readonly<{
+      kind: "secret-prompt.effect.consumed";
+      requestId: SecretPromptId;
     }>;
 
 const stableIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
@@ -415,7 +436,18 @@ function appendBounded<Value>(
 }
 
 function canEditPrompt(state: ShellState): boolean {
-  return state.lifecycle.kind === "idle";
+  return (
+    state.lifecycle.kind === "idle" &&
+    !isPendingSecretPromptEffect(state.pendingEffect)
+  );
+}
+
+function isPendingSecretPromptEffect(effect: ShellEffect): effect is SecretPromptEffect {
+  return effect.kind === "secret-submitted" || effect.kind === "secret-cancelled";
+}
+
+function createSecretPromptValue(value: string): SecretPromptValue {
+  return value as SecretPromptValue;
 }
 
 function activePrompt(state: ShellState): ActiveShellPrompt {
@@ -767,10 +799,17 @@ export function reduceShellState(
     }
     case "prompt.submit": {
       if (state.secretPrompt.kind === "active") {
+        const { request, editor } = state.secretPrompt.prompt;
+
         return {
           ...state,
           secretPrompt: { kind: "none" },
           completion: { kind: "idle" },
+          pendingEffect: {
+            kind: "secret-submitted",
+            requestId: request.id,
+            value: createSecretPromptValue(editor.buffer.value),
+          },
         };
       }
 
@@ -809,11 +848,21 @@ export function reduceShellState(
       };
     }
     case "prompt.cancel":
+      if (isPendingSecretPromptEffect(state.pendingEffect)) {
+        return state;
+      }
+
       if (state.secretPrompt.kind === "active") {
+        const { request } = state.secretPrompt.prompt;
+
         return {
           ...state,
           secretPrompt: { kind: "none" },
           completion: { kind: "idle" },
+          pendingEffect: {
+            kind: "secret-cancelled",
+            requestId: request.id,
+          },
         };
       }
 
@@ -947,6 +996,18 @@ export function reduceShellState(
           }
 
           return { ...state, pendingEffect: { kind: "none" } };
+        case "secret-submitted":
+        case "secret-cancelled":
+          return state;
       }
+    case "secret-prompt.effect.consumed":
+      if (
+        !isPendingSecretPromptEffect(state.pendingEffect) ||
+        state.pendingEffect.requestId !== action.requestId
+      ) {
+        return state;
+      }
+
+      return { ...state, pendingEffect: { kind: "none" } };
   }
 }
