@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import {
   createCompletionRequest,
 } from "../../domain/terminal/Completion.ts";
@@ -8,6 +8,7 @@ import {
   reduceShellState,
   type CommandId,
   type CommandOutcome,
+  type SecretPromptId,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import type { NormalPromptKey } from "../../domain/terminal/PromptEditor.ts";
@@ -16,15 +17,26 @@ import {
 } from "../../application/commands/CommandExecution.ts";
 import type { CommandRegistry } from "../../application/commands/CommandRegistry.ts";
 import type { CompletionService } from "../../application/commands/Completion.ts";
+import {
+  deliverSecretPromptEffect,
+  type SecretPromptOutcomeHandler,
+} from "../../application/commands/SecretPromptDelivery.ts";
+
+export type ShellEngineDiagnostic = Readonly<{
+  kind: "secret-prompt-delivery-failed";
+  message: "Secret prompt delivery failed.";
+}>;
 
 export type UseShellEngineOptions = Readonly<{
   initialState: ShellState;
   registry: CommandRegistry;
   completionService: CompletionService;
+  secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
 }>;
 
 export type ShellEngine = Readonly<{
   state: ShellState;
+  transientDiagnostic: ShellEngineDiagnostic | undefined;
   insertText: (text: string) => void;
   replaceInputValue: (value: string, cursor: number) => void;
   moveCursor: (cursor: number) => void;
@@ -49,14 +61,26 @@ function discardedCommandOutcome(commandName: string): CommandOutcome {
   };
 }
 
+const secretPromptDeliveryFailureDiagnostic = {
+  kind: "secret-prompt-delivery-failed",
+  message: "Secret prompt delivery failed.",
+} as const satisfies ShellEngineDiagnostic;
+
 export function useShellEngine({
   initialState,
   registry,
   completionService,
+  secretPromptOutcomeHandler,
 }: UseShellEngineOptions): ShellEngine {
   const [state, dispatch] = useReducer(reduceShellState, initialState);
+  const [transientDiagnostic, setTransientDiagnostic] = useState<
+    ShellEngineDiagnostic | undefined
+  >(undefined);
   const controllers = useRef<Map<CommandId, AbortController>>(new Map());
   const completionControllers = useRef<Set<AbortController>>(new Set());
+  const handledSecretPromptRequestId = useRef<SecretPromptId | undefined>(
+    undefined,
+  );
   const mounted = useRef(false);
 
   useEffect(() => {
@@ -84,6 +108,7 @@ export function useShellEngine({
     const effect = state.pendingEffect;
 
     if (effect.kind === "none") {
+      handledSecretPromptRequestId.current = undefined;
       return;
     }
 
@@ -97,10 +122,35 @@ export function useShellEngine({
       effect.kind === "secret-submitted" ||
       effect.kind === "secret-cancelled"
     ) {
+      if (handledSecretPromptRequestId.current === effect.requestId) {
+        return;
+      }
+
+      handledSecretPromptRequestId.current = effect.requestId;
       dispatch({
         kind: "secret-prompt.effect.consumed",
         requestId: effect.requestId,
       });
+
+      const deliverSecretPromptOutcome = async (): Promise<void> => {
+        const result = await deliverSecretPromptEffect({
+          effect,
+          handler: secretPromptOutcomeHandler,
+        });
+
+        if (!mounted.current) {
+          return;
+        }
+
+        if (result.kind === "delivered") {
+          setTransientDiagnostic(undefined);
+          return;
+        }
+
+        setTransientDiagnostic(secretPromptDeliveryFailureDiagnostic);
+      };
+
+      void deliverSecretPromptOutcome();
       return;
     }
 
@@ -143,7 +193,7 @@ export function useShellEngine({
     };
 
     void runCommand();
-  }, [registry, state.pendingEffect]);
+  }, [registry, secretPromptOutcomeHandler, state.pendingEffect]);
 
   const complete = (): void => {
     const prompt = getActiveShellPrompt(state);
@@ -190,6 +240,7 @@ export function useShellEngine({
 
   return {
     state,
+    transientDiagnostic,
     insertText: (text) => dispatch({ kind: "input.insert", text }),
     replaceInputValue: (value, cursor) =>
       dispatch({ kind: "input.replace", value, cursor }),

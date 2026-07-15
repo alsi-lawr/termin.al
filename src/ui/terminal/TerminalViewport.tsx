@@ -21,6 +21,7 @@ type TerminalViewportProps = Readonly<{
   cursorColumn: number;
   status: ShellStatus;
   completion: ShellCompletion;
+  transientDiagnostic: string | undefined;
 }>;
 
 type ScrollMode =
@@ -47,6 +48,7 @@ export function TerminalViewport({
   cursorColumn,
   status,
   completion,
+  transientDiagnostic,
 }: TerminalViewportProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const scrollbackId = useId();
@@ -70,6 +72,7 @@ export function TerminalViewport({
     rows,
     scrollMode,
     status,
+    transientDiagnostic,
   ]);
 
   useLayoutEffect(() => {
@@ -131,6 +134,17 @@ export function TerminalViewport({
             <TerminalHistoryRow key={row.id} entry={row} />
           ))}
         </div>
+
+        {transientDiagnostic === undefined ? null : (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="whitespace-pre-wrap wrap-break-words text-red-400"
+          >
+            {transientDiagnostic}
+          </div>
+        )}
 
         <TerminalPrompt
           prompt={prompt}

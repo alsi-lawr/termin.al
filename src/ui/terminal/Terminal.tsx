@@ -18,15 +18,20 @@ import {
   createEmptyPathCompletionProvider,
   createRegistryCommandCompletionProvider,
 } from "../../application/commands/Completion.ts";
+import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
 import { InputCapture, type InputCaptureHandle } from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
 import { useShellEngine } from "./useShellEngine";
 
 type TerminalProps = Readonly<{
   prompt?: string;
+  secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
 }>;
 
-export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
+export function Terminal({
+  prompt = "$",
+  secretPromptOutcomeHandler,
+}: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
   const [initialState] = useState(() =>
     createShellState({
@@ -47,6 +52,7 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
     initialState,
     registry,
     completionService,
+    secretPromptOutcomeHandler,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
   const editor =
@@ -62,7 +68,7 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
 
   useLayoutEffect(() => {
     inputRef.current?.preserveFocus();
-  }, [shell.state.history]);
+  }, [shell.state.history, shell.transientDiagnostic]);
 
   const focusInputFromTerminal = (event: MouseEvent<HTMLDivElement>): void => {
     const target = event.target;
@@ -90,6 +96,7 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
         cursorColumn={editor.buffer.cursor}
         status={getShellStatus(shell.state)}
         completion={shell.state.completion}
+        transientDiagnostic={shell.transientDiagnostic?.message}
       />
 
       <InputCapture
