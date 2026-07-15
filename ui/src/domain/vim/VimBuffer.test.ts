@@ -61,7 +61,7 @@ test("applies delete, change, yank, paste, undo, and redo through the unnamed re
   });
   const pasted = applyNormalVimKey(deleted, { kind: "paste-before" });
   const undone = applyNormalVimKey(pasted, { kind: "undo" });
-  const redone = applyNormalVimKey(undone, { kind: "redo" });
+  const restoredPasted = applyNormalVimKey(undone, { kind: "redo" });
   const changing = applyNormalVimKey(
     createVimBuffer({ text: "hello", mode: VimMode.Normal }),
     { kind: "operator", operator: "change" },
@@ -80,11 +80,21 @@ test("applies delete, change, yank, paste, undo, and redo through the unnamed re
     motion: "line-next",
   });
 
-  assert.equal(vimBufferText(deleted), "two\nthree");
+  assert.deepEqual(
+    {
+      deleted: vimBufferText(deleted),
+      pasted: vimBufferText(pasted),
+      undone: vimBufferText(undone),
+      restoredPasted: vimBufferText(restoredPasted),
+    },
+    {
+      deleted: "two\nthree",
+      pasted: "one two\nthree",
+      undone: "two\nthree",
+      restoredPasted: "one two\nthree",
+    },
+  );
   assert.deepEqual(deleted.register, { kind: "character", text: "one " });
-  assert.equal(vimBufferText(pasted), "one two\nthree");
-  assert.equal(vimBufferText(undone), "two\nthree");
-  assert.equal(vimBufferText(redone), "one two\nthree");
   assert.equal(changed.mode.kind, "insert");
   assert.equal(vimBufferText(inserted), "hi");
   assert.deepEqual(yanked.register, {
