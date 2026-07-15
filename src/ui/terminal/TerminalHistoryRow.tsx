@@ -2,8 +2,11 @@ import type { ReactElement } from "react";
 import type {
   CommandOutcome,
   ShellHistoryEntry,
-  ShellOutput,
 } from "../../domain/terminal/Shell.ts";
+import {
+  TerminalDiagnosticBlock,
+  TerminalOutputBlock,
+} from "./TerminalOutputBlock";
 
 type TerminalHistoryRowProps = Readonly<{
   entry: ShellHistoryEntry;
@@ -17,50 +20,64 @@ const outcomeClassMap = {
   [Kind in CommandOutcome["kind"]]: string;
 }>;
 
-function outputLines(output: ShellOutput): ReadonlyArray<string> {
-  switch (output.kind) {
-    case "text":
-      return [output.text];
-    case "table":
-      return [
-        output.columns.join("\t"),
-        ...output.rows.map((row) => row.join("\t")),
-      ];
-    case "diagnostic":
-      return [output.diagnostic.message];
-    case "prompt":
-      return [`${output.label} ${output.message}`];
-    case "rich":
-      return [output.title, ...output.lines];
-  }
-}
-
-function outcomeLines(outcome: CommandOutcome): ReadonlyArray<string> {
+function TerminalHistoryOutcome({
+  historyEntryId,
+  outcome,
+}: Readonly<{
+  historyEntryId: ShellHistoryEntry["id"];
+  outcome: CommandOutcome;
+}>): ReactElement {
   switch (outcome.kind) {
     case "succeeded":
-      return outcome.outputs.flatMap(outputLines);
+      return (
+        <div className="space-y-2">
+          {outcome.outputs.map((output) => (
+            <TerminalOutputBlock
+              key={output.id}
+              historyEntryId={historyEntryId}
+              output={output}
+            />
+          ))}
+        </div>
+      );
     case "failed":
-      return outcome.diagnostics.map((diagnostic) => diagnostic.message);
+      return (
+        <div className="space-y-1">
+          {outcome.diagnostics.map((diagnostic) => (
+            <TerminalDiagnosticBlock
+              key={diagnostic.id}
+              diagnostic={diagnostic}
+            />
+          ))}
+        </div>
+      );
     case "cancelled":
-      return [outcome.diagnostic.message];
+      return <TerminalDiagnosticBlock diagnostic={outcome.diagnostic} />;
   }
 }
 
 export function TerminalHistoryRow({
   entry,
 }: TerminalHistoryRowProps): ReactElement {
-  const lines = outcomeLines(entry.outcome);
-  const output = lines.join("\n");
+  const commandLabelId = `${entry.id}-command`;
 
   return (
-    <div className="whitespace-pre-wrap wrap-break-words">
-      <div className="text-neutral-500">
-        <span className="mr-1 text-neutral-500">&gt;</span>
+    <article
+      className="space-y-1 pb-4"
+      aria-labelledby={commandLabelId}
+    >
+      <div id={commandLabelId} className="whitespace-pre-wrap wrap-break-words">
+        <span className="mr-1 text-neutral-500" aria-hidden="true">
+          &gt;
+        </span>
         <span className={outcomeClassMap[entry.outcome.kind]}>
           {entry.command.source}
         </span>
       </div>
-      <div>{output}</div>
-    </div>
+      <TerminalHistoryOutcome
+        historyEntryId={entry.id}
+        outcome={entry.outcome}
+      />
+    </article>
   );
 }

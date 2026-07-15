@@ -20,6 +20,7 @@ import type { PromptMode } from "../../domain/terminal/PromptBuffer.ts";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
+  preserveFocus: () => void;
 }>;
 
 type InputCaptureProps = Readonly<{
@@ -47,6 +48,13 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus(),
+      preserveFocus: () => {
+        const input = inputRef.current;
+
+        if (input && document.activeElement === input) {
+          input.focus({ preventScroll: true });
+        }
+      },
     }));
 
     useEffect(() => {

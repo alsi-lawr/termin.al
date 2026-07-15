@@ -25,6 +25,9 @@ declare const commandIdBrand: unique symbol;
 declare const shellHistoryEntryIdBrand: unique symbol;
 declare const commandHistoryEntryIdBrand: unique symbol;
 declare const secretPromptIdBrand: unique symbol;
+declare const shellDiagnosticIdBrand: unique symbol;
+declare const shellOutputIdBrand: unique symbol;
+declare const shellOutputPartIdBrand: unique symbol;
 
 export type ShellId = string & {
   readonly [shellIdBrand]: "ShellId";
@@ -50,9 +53,22 @@ export type SecretPromptId = string & {
   readonly [secretPromptIdBrand]: "SecretPromptId";
 };
 
+export type ShellDiagnosticId = string & {
+  readonly [shellDiagnosticIdBrand]: "ShellDiagnosticId";
+};
+
+export type ShellOutputId = string & {
+  readonly [shellOutputIdBrand]: "ShellOutputId";
+};
+
+export type ShellOutputPartId = string & {
+  readonly [shellOutputPartIdBrand]: "ShellOutputPartId";
+};
+
 export type ShellDiagnostic =
   | Readonly<{
       kind: "parse";
+      id: ShellDiagnosticId;
       code:
         | "parse.unterminated-single-quote"
         | "parse.unterminated-double-quote"
@@ -62,38 +78,67 @@ export type ShellDiagnostic =
     }>
   | Readonly<{
       kind: "command";
+      id: ShellDiagnosticId;
       code: "command.empty" | "command.not-found" | "command.rejected";
       message: string;
     }>
   | Readonly<{
       kind: "runtime";
+      id: ShellDiagnosticId;
       code: "runtime.execution-failed" | "runtime.cancelled";
       message: string;
     }>;
 
+export type ShellTableColumn = Readonly<{
+  id: ShellOutputPartId;
+  label: string;
+}>;
+
+export type ShellTableCell = Readonly<{
+  id: ShellOutputPartId;
+  columnId: ShellOutputPartId;
+  value: string;
+}>;
+
+export type ShellTableRow = Readonly<{
+  id: ShellOutputPartId;
+  cells: ReadonlyArray<ShellTableCell>;
+}>;
+
+export type ShellRichField = Readonly<{
+  id: ShellOutputPartId;
+  label: string;
+  value: string;
+}>;
+
 export type ShellOutput =
   | Readonly<{
       kind: "text";
+      id: ShellOutputId;
       text: string;
     }>
   | Readonly<{
       kind: "table";
-      columns: ReadonlyArray<string>;
-      rows: ReadonlyArray<ReadonlyArray<string>>;
+      id: ShellOutputId;
+      columns: ReadonlyArray<ShellTableColumn>;
+      rows: ReadonlyArray<ShellTableRow>;
     }>
   | Readonly<{
       kind: "diagnostic";
+      id: ShellOutputId;
       diagnostic: ShellDiagnostic;
     }>
   | Readonly<{
       kind: "prompt";
+      id: ShellOutputId;
       label: string;
       message: string;
     }>
   | Readonly<{
       kind: "rich";
+      id: ShellOutputId;
       title: string;
-      lines: ReadonlyArray<string>;
+      fields: ReadonlyArray<ShellRichField>;
     }>;
 
 export type SecretPromptRequest = Readonly<{
@@ -535,6 +580,21 @@ export function createShellSessionId(value: string): ShellSessionId {
 export function createSecretPromptId(value: string): SecretPromptId {
   assertStableIdentifier(value, "Secret prompt IDs");
   return value as SecretPromptId;
+}
+
+export function createShellDiagnosticId(value: string): ShellDiagnosticId {
+  assertStableIdentifier(value, "Shell diagnostic IDs");
+  return value as ShellDiagnosticId;
+}
+
+export function createShellOutputId(value: string): ShellOutputId {
+  assertStableIdentifier(value, "Shell output IDs");
+  return value as ShellOutputId;
+}
+
+export function createShellOutputPartId(value: string): ShellOutputPartId {
+  assertStableIdentifier(value, "Shell output part IDs");
+  return value as ShellOutputPartId;
 }
 
 export function createSecretPromptRequest(

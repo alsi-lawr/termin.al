@@ -1,11 +1,18 @@
-import { useLayoutEffect, useRef, useState, type ReactElement } from "react";
+import {
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactElement,
+  type UIEvent,
+} from "react";
 import type {
   ShellCompletion,
   ShellHistoryEntry,
   ShellStatus,
 } from "../../domain/terminal/Shell.ts";
-import { InputRow } from "./InputRow";
 import { TerminalHistoryRow } from "./TerminalHistoryRow";
+import { TerminalPrompt } from "./TerminalPrompt";
 
 type TerminalViewportProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
@@ -16,25 +23,21 @@ type TerminalViewportProps = Readonly<{
   completion: ShellCompletion;
 }>;
 
-function statusMessage(status: ShellStatus, completion: ShellCompletion): string {
-  if (completion.kind === "pending") {
-    return "COMPLETING";
-  }
+type ScrollMode =
+  | Readonly<{ kind: "following" }>
+  | Readonly<{ kind: "manual" }>;
 
-  if (completion.kind === "suggestions") {
-    return `${completion.candidates.length} COMPLETIONS`;
-  }
+const bottomThreshold = 8;
 
-  switch (status.kind) {
-    case "ready":
-      return status.mode.kind === "insert" ? "INSERT" : "NORMAL";
-    case "secret":
-      return status.mode.kind === "insert" ? "SECRET INSERT" : "SECRET NORMAL";
-    case "running":
-      return "RUNNING";
-    case "cancelling":
-      return "CANCELLING";
-  }
+function isAtLatestOutput(element: HTMLDivElement): boolean {
+  const remaining =
+    element.scrollHeight - element.clientHeight - element.scrollTop;
+
+  return remaining <= bottomThreshold;
+}
+
+function scrollToLatestOutput(element: HTMLDivElement): void {
+  element.scrollTop = element.scrollHeight;
 }
 
 export function TerminalViewport({
@@ -46,136 +49,108 @@ export function TerminalViewport({
   completion,
 }: TerminalViewportProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const inputMeasureRef = useRef<HTMLDivElement | null>(null);
-  const historyMeasureRefs = useRef<
-    Map<ShellHistoryEntry["id"], HTMLDivElement>
-  >(new Map());
-
-  const [startIndex, setStartIndex] = useState(0);
-
-  const activeLine = `${prompt} ${currentInput}`;
-  const safeCursorColumn = Math.max(
-    0,
-    Math.min(cursorColumn, currentInput.length),
-  );
-  const cursorIndex = `${prompt} `.length + safeCursorColumn;
-  const promptStatus = statusMessage(status, completion);
+  const scrollbackId = useId();
+  const [scrollMode, setScrollMode] = useState<ScrollMode>({
+    kind: "following",
+  });
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
-    const inputMeasure = inputMeasureRef.current;
 
-    if (!viewport || !inputMeasure) {
+    if (!viewport || scrollMode.kind !== "following") {
       return;
     }
 
-    const recalculate = () => {
-      const viewportHeight = viewport.clientHeight;
-      const inputHeight = inputMeasure.getBoundingClientRect().height;
+    scrollToLatestOutput(viewport);
+  }, [
+    completion,
+    currentInput,
+    cursorColumn,
+    prompt,
+    rows,
+    scrollMode,
+    status,
+  ]);
 
-      if (viewportHeight <= 0 || inputHeight <= 0) {
-        return;
-      }
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
 
-      let remaining = viewportHeight - inputHeight - 4;
-      let nextStartIndex = rows.length;
-
-      for (let i = rows.length - 1; i >= 0; i -= 1) {
-        const row = rows[i];
-
-        if (!row) {
-          continue;
-        }
-
-        const element = historyMeasureRefs.current.get(row.id);
-
-        if (!element) {
-          continue;
-        }
-
-        const height = element.getBoundingClientRect().height;
-
-        if (height > remaining) {
-          break;
-        }
-
-        remaining -= height;
-        nextStartIndex = i;
-      }
-
-      setStartIndex(nextStartIndex);
-    };
-
-    recalculate();
-
-    const observer = new ResizeObserver(recalculate);
-
-    observer.observe(viewport);
-    observer.observe(inputMeasure);
-
-    for (const element of historyMeasureRefs.current.values()) {
-      observer.observe(element);
+    if (!viewport) {
+      return;
     }
 
-    return () => observer.disconnect();
-  }, [rows, activeLine]);
+    const observer = new ResizeObserver(() => {
+      if (scrollMode.kind === "following") {
+        scrollToLatestOutput(viewport);
+      }
+    });
 
-  const visibleRows = rows.slice(startIndex);
+    observer.observe(viewport);
+
+    return () => observer.disconnect();
+  }, [scrollMode]);
+
+  const handleScroll = (event: UIEvent<HTMLDivElement>): void => {
+    const nextMode: ScrollMode = isAtLatestOutput(event.currentTarget)
+      ? { kind: "following" }
+      : { kind: "manual" };
+
+    setScrollMode((current) =>
+      current.kind === nextMode.kind ? current : nextMode,
+    );
+  };
+
+  const followLatest = (): void => {
+    const viewport = viewportRef.current;
+    setScrollMode({ kind: "following" });
+
+    if (viewport) {
+      scrollToLatestOutput(viewport);
+    }
+  };
 
   return (
-    <div
-      ref={viewportRef}
-      className="relative h-full min-h-0 overflow-hidden rounded-md bg-neutral-950 p-4 font-mono text-sm text-neutral-100"
-      role="log"
-      aria-live="polite"
-      aria-label="Terminal output"
-    >
-      <div className="h-full whitespace-pre-wrap wrap-break-words">
-        {visibleRows.map((row) => (
-          <TerminalHistoryRow key={row.id} entry={row} />
-        ))}
-
-        <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
-        <div className="mt-2 text-neutral-500" aria-live="polite">
-          <span>{promptStatus}</span>
-          {completion.kind === "suggestions" ? (
-            <span className="ml-2">
-              {completion.candidates.map((candidate) => (
-                <span key={`${candidate.kind}-${candidate.value}`} className="mr-2">
-                  {candidate.value}
-                </span>
-              ))}
-            </span>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="pointer-events-none absolute inset-0 invisible -z-10 p-4">
-        <div className="whitespace-pre-wrap wrap-break-words">
+    <div className="relative h-full min-h-0 rounded-md bg-neutral-950 font-mono text-sm text-neutral-100">
+      <div
+        id={scrollbackId}
+        ref={viewportRef}
+        className="h-full min-h-0 overflow-y-auto overscroll-contain p-4"
+        role="region"
+        aria-label="Terminal scrollback"
+        tabIndex={0}
+        onScroll={handleScroll}
+      >
+        <div
+          role="log"
+          aria-label="Terminal output"
+          aria-live="polite"
+          aria-relevant="additions text"
+          aria-atomic="false"
+        >
           {rows.map((row) => (
-            <div
-              key={row.id}
-              ref={(element) => {
-                if (element) {
-                  historyMeasureRefs.current.set(row.id, element);
-                } else {
-                  historyMeasureRefs.current.delete(row.id);
-                }
-              }}
-            >
-              <TerminalHistoryRow entry={row} />
-            </div>
+            <TerminalHistoryRow key={row.id} entry={row} />
           ))}
-
-          <div ref={inputMeasureRef}>
-            <InputRow
-              activeLine={activeLine || `${prompt} `}
-              cursorIndex={cursorIndex}
-            />
-            <div className="mt-2 text-neutral-500">{promptStatus}</div>
-          </div>
         </div>
+
+        <TerminalPrompt
+          prompt={prompt}
+          currentInput={currentInput}
+          cursorColumn={cursorColumn}
+          status={status}
+          completion={completion}
+        />
       </div>
+
+      {scrollMode.kind === "manual" ? (
+        <button
+          type="button"
+          className="absolute bottom-4 right-4 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1 text-neutral-100"
+          aria-controls={scrollbackId}
+          onClick={followLatest}
+        >
+          Latest output
+        </button>
+      ) : null}
     </div>
   );
 }

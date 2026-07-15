@@ -4,6 +4,7 @@ import {
 } from "../../domain/terminal/Completion.ts";
 import {
   getActiveShellPrompt,
+  createShellDiagnosticId,
   reduceShellState,
   type CommandId,
   type CommandOutcome,
@@ -40,6 +41,7 @@ function discardedCommandOutcome(commandName: string): CommandOutcome {
     diagnostics: [
       {
         kind: "runtime",
+        id: createShellDiagnosticId("discarded-command"),
         code: "runtime.execution-failed",
         message: "The command could not complete.",
       },

@@ -7,8 +7,8 @@
 @keyframes terminal-cursor {
   0%,
   49% {
-    background: rgb(245 245 245);
-    color: rgb(10 10 10);
+    background: var(--color-neutral-100);
+    color: var(--color-neutral-950);
   }
 
   50%,

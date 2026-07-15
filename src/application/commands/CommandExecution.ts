@@ -2,10 +2,11 @@ import {
   lexArguments,
   type ArgumentLexerError,
 } from "../../domain/terminal/ArgumentLexer.ts";
-import type {
-  CommandOutcome,
-  ShellDiagnostic,
-  ShellCommandRequest,
+import {
+  createShellDiagnosticId,
+  type CommandOutcome,
+  type ShellDiagnostic,
+  type ShellCommandRequest,
 } from "../../domain/terminal/Shell.ts";
 import {
   resolveCommand,
@@ -23,6 +24,7 @@ function cancelledOutcome(): CommandOutcome {
     kind: "cancelled",
     diagnostic: {
       kind: "runtime",
+      id: createShellDiagnosticId("command-cancelled"),
       code: "runtime.cancelled",
       message: "Command cancelled.",
     },
@@ -34,6 +36,7 @@ function parseDiagnostic(error: ArgumentLexerError): ShellDiagnostic {
     case "unterminated-single-quote":
       return {
         kind: "parse",
+        id: createShellDiagnosticId("unterminated-single-quote"),
         code: "parse.unterminated-single-quote",
         message: "A single-quoted argument was not closed.",
         position: error.position,
@@ -41,6 +44,7 @@ function parseDiagnostic(error: ArgumentLexerError): ShellDiagnostic {
     case "unterminated-double-quote":
       return {
         kind: "parse",
+        id: createShellDiagnosticId("unterminated-double-quote"),
         code: "parse.unterminated-double-quote",
         message: "A double-quoted argument was not closed.",
         position: error.position,
@@ -48,6 +52,7 @@ function parseDiagnostic(error: ArgumentLexerError): ShellDiagnostic {
     case "trailing-escape":
       return {
         kind: "parse",
+        id: createShellDiagnosticId("trailing-escape"),
         code: "parse.trailing-escape",
         message: "An escape character must be followed by a character.",
         position: error.position,
@@ -70,6 +75,7 @@ function emptyCommandOutcome(): CommandOutcome {
     diagnostics: [
       {
         kind: "command",
+        id: createShellDiagnosticId("empty-command"),
         code: "command.empty",
         message: "Enter a command before submitting.",
       },
@@ -84,6 +90,7 @@ function missingCommandOutcome(commandName: string): CommandOutcome {
     diagnostics: [
       {
         kind: "command",
+        id: createShellDiagnosticId("command-not-found"),
         code: "command.not-found",
         message: `Command not found: ${commandName}`,
       },
@@ -98,6 +105,7 @@ function executionFailureOutcome(commandName: string): CommandOutcome {
     diagnostics: [
       {
         kind: "runtime",
+        id: createShellDiagnosticId("execution-failed"),
         code: "runtime.execution-failed",
         message: "The command could not complete.",
       },

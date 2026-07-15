@@ -4,7 +4,9 @@ import { createCompletionRequest } from "./Completion.ts";
 import {
   createSecretPromptId,
   createSecretPromptRequest,
+  createShellDiagnosticId,
   createShellId,
+  createShellOutputId,
   createShellSessionId,
   createShellState,
   getActiveShellPrompt,
@@ -45,7 +47,13 @@ function runningCommandId(state: ShellState) {
 function succeededOutcome(message: string): CommandOutcome {
   return {
     kind: "succeeded",
-    outputs: [{ kind: "text", text: message }],
+    outputs: [
+      {
+        kind: "text",
+        id: createShellOutputId("command-output"),
+        text: message,
+      },
+    ],
     effects: [],
   };
 }
@@ -121,6 +129,7 @@ test("requests cancellation through the active command AbortSignal seam", () => 
       kind: "cancelled",
       diagnostic: {
         kind: "runtime",
+        id: createShellDiagnosticId("cancelled-command"),
         code: "runtime.cancelled",
         message: "Command cancelled.",
       },
@@ -203,7 +212,14 @@ test("opens a typed secret prompt requested by a command effect", () => {
     commandId,
     outcome: {
       kind: "succeeded",
-      outputs: [{ kind: "prompt", label: "login", message: "Authorise access" }],
+      outputs: [
+        {
+          kind: "prompt",
+          id: createShellOutputId("login-prompt"),
+          label: "login",
+          message: "Authorise access",
+        },
+      ],
       effects: [{ kind: "request-secret-prompt", request }],
     },
   });

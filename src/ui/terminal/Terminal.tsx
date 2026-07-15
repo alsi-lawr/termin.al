@@ -1,4 +1,10 @@
-import { useRef, useState, type ReactElement } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type ReactElement,
+} from "react";
 import {
   createShellId,
   createShellSessionId,
@@ -54,10 +60,28 @@ export function Terminal({ prompt = "$" }: TerminalProps): ReactElement {
       ? "•".repeat(editor.buffer.value.length)
       : editor.buffer.value;
 
+  useLayoutEffect(() => {
+    inputRef.current?.preserveFocus();
+  }, [shell.state.history]);
+
+  const focusInputFromTerminal = (event: MouseEvent<HTMLDivElement>): void => {
+    const target = event.target;
+
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    if (target.closest("button, a, input, textarea, select")) {
+      return;
+    }
+
+    inputRef.current?.focus();
+  };
+
   return (
     <div
       className="h-screen w-screen rounded-md border border-neutral-800 bg-neutral-950 text-neutral-100"
-      onClick={() => inputRef.current?.focus()}
+      onClick={focusInputFromTerminal}
     >
       <TerminalViewport
         rows={shell.state.history}

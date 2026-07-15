@@ -1,10 +1,12 @@
-type CursorProps = {
-  value?: string;
-};
+import type { ReactElement } from "react";
 
-export function Cursor({ value = " " }: CursorProps) {
+type CursorProps = Readonly<{
+  value: string;
+}>;
+
+export function Cursor({ value }: CursorProps): ReactElement {
   return (
-    <span className="inline-block w-[1ch] bg-neutral-100 text-neutral-950 animate-terminal-cursor">
+    <span className="inline-block animate-terminal-cursor bg-neutral-100 text-neutral-950 motion-reduce:animate-none">
       {value}
     </span>
   );
