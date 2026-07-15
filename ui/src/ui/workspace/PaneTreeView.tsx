@@ -1,4 +1,8 @@
 import type { ReactElement } from "react";
+import type {
+  VirtualDocumentSupplier,
+  VirtualFilesystem,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
 import type { ThemeController } from "../../theme/Theme.ts";
@@ -43,6 +47,8 @@ type PaneTreeViewProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
   themeController: ThemeController;
+  filesystem: VirtualFilesystem;
+  documents: VirtualDocumentSupplier;
 }>;
 
 const firstPaneBasisClass = {
@@ -109,6 +115,8 @@ function PaneLeaf({
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
   themeController,
+  filesystem,
+  documents,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -145,6 +153,8 @@ function PaneLeaf({
             resolveMobileCtrlInput={resolveMobileCtrlInput}
             paneCommandHandler={commandHandler}
             themeController={themeController}
+            filesystem={filesystem}
+            documents={documents}
           />
         </div>
       );
@@ -211,6 +221,8 @@ export function PaneTreeView({
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
   themeController,
+  filesystem,
+  documents,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -229,6 +241,8 @@ export function PaneTreeView({
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}
         themeController={themeController}
+        filesystem={filesystem}
+        documents={documents}
       />
     );
   }
@@ -275,6 +289,8 @@ export function PaneTreeView({
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}
           themeController={themeController}
+          filesystem={filesystem}
+          documents={documents}
         />
       </div>
       <div
@@ -301,6 +317,8 @@ export function PaneTreeView({
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}
           themeController={themeController}
+          filesystem={filesystem}
+          documents={documents}
         />
       </div>
     </div>

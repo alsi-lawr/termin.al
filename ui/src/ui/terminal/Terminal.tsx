@@ -12,7 +12,10 @@ import {
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import type {
+  VirtualDocumentSupplier,
+  VirtualFilesystem,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
 import type { ThemeController } from "../../theme/Theme.ts";
 import type {
@@ -78,6 +81,8 @@ type TerminalProps = Readonly<{
   paneCommandHandler: PaneCommandHandler;
   onCloseInlineViewer: (paneId: PaneId) => void;
   themeController: ThemeController;
+  filesystem: VirtualFilesystem;
+  documents: VirtualDocumentSupplier;
   prompt?: string;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
@@ -100,6 +105,8 @@ export function Terminal({
   paneCommandHandler,
   onCloseInlineViewer,
   themeController,
+  filesystem,
+  documents,
   prompt = "$",
   secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
@@ -118,13 +125,13 @@ export function Terminal({
     createCommandRegistry({
       commands: [
         ...createReadOnlyCommandDefinitions({
-          filesystem: developmentFixtureCorpus.filesystem,
-          documents: developmentFixtureCorpus.documents,
+          filesystem,
+          documents,
           recursiveEntryLimit: 100,
         }),
         ...createPortfolioCommandDefinitions({
-          filesystem: developmentFixtureCorpus.filesystem,
-          documents: developmentFixtureCorpus.documents,
+          filesystem,
+          documents,
           themes: themeController,
         }),
         createPaneCommandDefinition(paneId, paneCommandHandler),

@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import type { ContentCorpus } from "../../api/ContentClient.ts";
 import { paneLeaves } from "../../domain/workspace/PaneTree.ts";
 import { useTheme } from "../../theme/useTheme.ts";
 import { DirtyCloseConfirmation } from "./DirtyCloseConfirmation";
@@ -6,8 +7,12 @@ import { MobilePaneSwitcher } from "./MobilePaneSwitcher";
 import { PaneTreeView } from "./PaneTreeView";
 import { usePaneWorkspace } from "./usePaneWorkspace";
 
-export function Workspace(): ReactElement {
-  const controller = usePaneWorkspace();
+type WorkspaceProps = Readonly<{
+  corpus: ContentCorpus;
+}>;
+
+export function Workspace({ corpus }: WorkspaceProps): ReactElement {
+  const controller = usePaneWorkspace(corpus);
   const theme = useTheme();
   const panes = paneLeaves(controller.workspace.tree);
   const closeConfirmationOpen =
@@ -36,6 +41,8 @@ export function Workspace(): ReactElement {
             onConsumeMobileCtrl={controller.onConsumeMobileCtrl}
             resolveMobileCtrlInput={controller.resolveMobileCtrlInput}
             themeController={theme.controller}
+            filesystem={corpus.filesystem}
+            documents={corpus.documents}
           />
         </div>
         <MobilePaneSwitcher

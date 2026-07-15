@@ -519,6 +519,14 @@ function validateBody(value: string, field: string, required: boolean): ContentV
     : invalid(`${field} is invalid or exceeds the 1 MiB document limit.`);
 }
 
+function validateSummary(value: string, field: string): ContentValidation<string> {
+  return value.trim().length > 0 &&
+    value.length <= 500 &&
+    !value.includes("\u0000")
+    ? valid(value.trim())
+    : invalid(`${field} must be a non-empty summary within 500 characters.`);
+}
+
 function validateTags(
   value: ReadonlyArray<unknown>,
   field: string,
@@ -1032,7 +1040,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
   const id = validateContentId(idValue.value, "project.id");
   const slug = ContentSlug.tryCreate(slugValue.value, "project.slug");
   const name = validateSingleLine(nameValue.value, "project.name", 200);
-  const summary = validateBody(summaryValue.value, "project.summary", true);
+  const summary = validateSummary(summaryValue.value, "project.summary");
   const url = validateContentUrl(urlValue.value, "project.url");
   const repository = validateRepositoryName(
     repositoryValue.value,

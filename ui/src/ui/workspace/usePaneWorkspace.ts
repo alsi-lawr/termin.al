@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
@@ -65,14 +65,15 @@ export type PaneWorkspaceController = Readonly<{
   dismissClose: () => void;
 }>;
 
-export function usePaneWorkspace(): PaneWorkspaceController {
+export function usePaneWorkspace(corpus: ContentCorpus): PaneWorkspaceController {
+  const currentDirectory = corpus.filesystem.root.path;
   const [workspace, setWorkspace] = useState<PaneWorkspace>(() =>
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
   );
   const [shellRuntimes, setShellRuntimes] = useState<PaneShellRuntimes>(() =>
     createPaneShellRuntimes({
       workspace,
-      currentDirectory: developmentFixtureCorpus.filesystem.root.path,
+      currentDirectory,
     }),
   );
   const [focusVersion, setFocusVersion] = useState(0);
@@ -132,7 +133,7 @@ export function usePaneWorkspace(): PaneWorkspaceController {
         const nextShellRuntimes = reconcilePaneShellRuntimes({
           runtimes: currentShellRuntimes,
           workspace: result.workspace,
-          currentDirectory: developmentFixtureCorpus.filesystem.root.path,
+          currentDirectory,
         });
         workspaceRef.current = result.workspace;
         shellRuntimesRef.current = nextShellRuntimes;
@@ -156,7 +157,7 @@ export function usePaneWorkspace(): PaneWorkspaceController {
 
       return result;
     },
-    [onConsumeMobileCtrl],
+    [currentDirectory, onConsumeMobileCtrl],
   );
 
   const onShellAction = useCallback(
