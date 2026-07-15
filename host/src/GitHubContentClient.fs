@@ -129,6 +129,11 @@ module GitHubContentClient =
         { BoundaryRelease: ReleaseData
           BoundaryCommit: ContentDomain.CommitSha }
 
+    type private ReleaseHeadComparison =
+        { ComparisonBoundary: ReleaseBoundary
+          ComparisonAheadBy: int
+          ComparisonPayload: GitHubPayload }
+
     let private apiBase = Uri("https://api.github.com/")
     let private apiVersion = "2026-03-10"
     let private userAgent = "termin.al-content"
@@ -1111,20 +1116,6 @@ module GitHubContentClient =
 
                         parseEntries entries [])
 
-        let orderReleases (releases: ReleaseData list) =
-            releases
-            |> List.sortWith (fun left right ->
-                let publicationOrder = compare right.ReleasePublishedAt left.ReleasePublishedAt
-
-                if publicationOrder <> 0 then
-                    publicationOrder
-                else
-                    StringComparer.Ordinal.Compare(
-                        ContentDomain.ContentTag.value left.ReleaseTag,
-                        ContentDomain.ContentTag.value right.ReleaseTag
-                    ))
-            |> List.truncate ContentDomain.PageItemLimit
-
         let getPublishedReleases (repository: GitHubRepositoryData) cancellationToken =
             let firstPage =
                 apiUri
@@ -1161,7 +1152,7 @@ module GitHubContentClient =
                     | Ok firstReleases ->
                         let! releases = getPages firstResponse.PayloadNextPage 1 firstReleases
 
-                        return releases |> Result.map (fun values -> orderReleases values, firstResponse)
+                        return releases |> Result.map (fun values -> values, firstResponse)
             }
 
         let parseCommit (element: JsonElement) : Result<ContentDomain.Commit, string> =
@@ -1289,6 +1280,40 @@ module GitHubContentClient =
                     | Ok _ -> return Error(invalidProblem ())
             }
 
+        let parseComparisonMetadata (baseCommit: ContentDomain.CommitSha) (root: JsonElement) : Result<int, string> =
+            match
+                requiredString "status" root,
+                requiredInteger "ahead_by" root,
+                requiredInteger "behind_by" root,
+                parseCommitReference "base_commit" root,
+                parseCommitReference "merge_base_commit" root
+            with
+            | Ok status, Ok aheadBy, Ok behindBy, Ok responseBase, Ok mergeBase ->
+                if status <> "ahead" && status <> "identical" then
+                    Error "Comparison does not describe an ancestor range."
+                elif aheadBy < 0 || behindBy < 0 then
+                    Error "Comparison ancestry metadata cannot be negative."
+                elif behindBy <> 0 || responseBase <> baseCommit || mergeBase <> baseCommit then
+                    Error "Comparison boundaries do not match the requested ancestor range."
+                elif status = "identical" && aheadBy <> 0 then
+                    Error "An identical comparison cannot be ahead of its base."
+                elif status = "ahead" && aheadBy = 0 then
+                    Error "An ahead comparison must have commits after its base."
+                else
+                    Ok aheadBy
+            | Error message, _, _, _, _
+            | _, Error message, _, _, _
+            | _, _, Error message, _, _
+            | _, _, _, Error message, _
+            | _, _, _, _, Error message -> Error message
+
+        let parseComparisonAncestry (baseCommit: ContentDomain.CommitSha) (body: string) : Result<int, string> =
+            parseJson body (fun root ->
+                if root.ValueKind <> JsonValueKind.Object then
+                    Error "Comparison responses must be objects."
+                else
+                    parseComparisonMetadata baseCommit root)
+
         let parseComparison
             (baseCommit: ContentDomain.CommitSha)
             (body: string)
@@ -1303,20 +1328,9 @@ module GitHubContentClient =
                             Ok(value.EnumerateArray() |> Seq.toList)
                         | _ -> Error "Comparison commits must be an array."
 
-                    match
-                        requiredString "status" root,
-                        requiredInteger "behind_by" root,
-                        requiredInteger "total_commits" root,
-                        parseCommitReference "base_commit" root,
-                        parseCommitReference "merge_base_commit" root,
-                        commits
-                    with
-                    | Ok status, Ok behindBy, Ok totalCommits, Ok responseBase, Ok mergeBase, Ok entries ->
-                        if status <> "ahead" && status <> "identical" then
-                            Error "Comparison does not describe an ancestor range."
-                        elif behindBy <> 0 || responseBase <> baseCommit || mergeBase <> baseCommit then
-                            Error "Comparison boundaries do not match the requested ancestor range."
-                        elif
+                    match parseComparisonMetadata baseCommit root, requiredInteger "total_commits" root, commits with
+                    | Ok _, Ok totalCommits, Ok entries ->
+                        if
                             totalCommits < 0
                             || totalCommits > ContentDomain.PageItemLimit
                             || totalCommits <> List.length entries
@@ -1325,14 +1339,11 @@ module GitHubContentClient =
                             Error "Comparison exceeds the changelog commit bound."
                         else
                             parseCommitEntries entries
-                    | Error message, _, _, _, _, _
-                    | _, Error message, _, _, _, _
-                    | _, _, Error message, _, _, _
-                    | _, _, _, Error message, _, _
-                    | _, _, _, _, Error message, _
-                    | _, _, _, _, _, Error message -> Error message)
+                    | Error message, _, _
+                    | _, Error message, _
+                    | _, _, Error message -> Error message)
 
-        let getCommitRange
+        let getComparison
             (repository: GitHubRepositoryData)
             (baseCommit: ContentDomain.CommitSha)
             (headCommit: ContentDomain.CommitSha)
@@ -1349,11 +1360,29 @@ module GitHubContentClient =
 
                 match payload with
                 | Error failure -> return Error(mapFetchFailure failure)
-                | Ok response when response.PayloadNextPage.IsSome -> return Error(invalidProblem ())
-                | Ok response ->
-                    match parseComparison baseCommit response.PayloadBody with
-                    | Error _ -> return Error(invalidProblem ())
-                    | Ok commits -> return Ok(List.rev commits)
+                | Ok response -> return Ok response
+            }
+
+        let commitRangeFromComparison (baseCommit: ContentDomain.CommitSha) (response: GitHubPayload) =
+            match response.PayloadNextPage with
+            | Some _ -> Error(invalidProblem ())
+            | None ->
+                parseComparison baseCommit response.PayloadBody
+                |> Result.map List.rev
+                |> Result.mapError (fun _ -> invalidProblem ())
+
+        let getCommitRange
+            (repository: GitHubRepositoryData)
+            (baseCommit: ContentDomain.CommitSha)
+            (headCommit: ContentDomain.CommitSha)
+            cancellationToken
+            =
+            task {
+                let! payload = getComparison repository baseCommit headCommit cancellationToken
+
+                match payload with
+                | Error problem -> return Error problem
+                | Ok response -> return commitRangeFromComparison baseCommit response
             }
 
         let resolveReleaseBoundaries (repository: GitHubRepositoryData) (releases: ReleaseData list) cancellationToken =
@@ -1376,6 +1405,84 @@ module GitHubContentClient =
                 }
 
             resolve releases []
+
+        let getReleaseHeadComparison
+            (repository: GitHubRepositoryData)
+            (boundary: ReleaseBoundary)
+            (head: ContentDomain.CommitSha)
+            cancellationToken
+            =
+            task {
+                let! payload = getComparison repository boundary.BoundaryCommit head cancellationToken
+
+                match payload with
+                | Error problem -> return Error problem
+                | Ok response ->
+                    match parseComparisonAncestry boundary.BoundaryCommit response.PayloadBody with
+                    | Error _ -> return Error(invalidProblem ())
+                    | Ok aheadBy ->
+                        return
+                            Ok
+                                { ComparisonBoundary = boundary
+                                  ComparisonAheadBy = aheadBy
+                                  ComparisonPayload = response }
+            }
+
+        let orderReleaseHeadComparisons (comparisons: ReleaseHeadComparison list) =
+            let ordered =
+                comparisons
+                |> List.sortWith (fun left right ->
+                    let ancestryOrder = compare left.ComparisonAheadBy right.ComparisonAheadBy
+
+                    if ancestryOrder <> 0 then
+                        ancestryOrder
+                    else
+                        StringComparer.Ordinal.Compare(
+                            ContentDomain.ContentTag.value left.ComparisonBoundary.BoundaryRelease.ReleaseTag,
+                            ContentDomain.ContentTag.value right.ComparisonBoundary.BoundaryRelease.ReleaseTag
+                        ))
+
+            let rec hasAmbiguousPositions pendingComparisons =
+                match pendingComparisons with
+                | left :: right :: remaining ->
+                    if
+                        left.ComparisonAheadBy = right.ComparisonAheadBy
+                        && not (
+                            StringComparer.Ordinal.Equals(
+                                ContentDomain.CommitSha.value left.ComparisonBoundary.BoundaryCommit,
+                                ContentDomain.CommitSha.value right.ComparisonBoundary.BoundaryCommit
+                            )
+                        )
+                    then
+                        true
+                    else
+                        hasAmbiguousPositions (right :: remaining)
+                | _ -> false
+
+            if hasAmbiguousPositions ordered then
+                Error(invalidProblem ())
+            else
+                Ok ordered
+
+        let orderReleaseBoundariesByHeadAncestry
+            (repository: GitHubRepositoryData)
+            (head: ContentDomain.CommitSha)
+            (boundaries: ReleaseBoundary list)
+            cancellationToken
+            =
+            let rec compareToHead pending comparisons =
+                task {
+                    match pending with
+                    | [] -> return orderReleaseHeadComparisons comparisons
+                    | boundary :: remaining ->
+                        let! comparison = getReleaseHeadComparison repository boundary head cancellationToken
+
+                        match comparison with
+                        | Error problem -> return Error problem
+                        | Ok value -> return! compareToHead remaining (value :: comparisons)
+                }
+
+            compareToHead boundaries []
 
         let getReleaseRanges (repository: GitHubRepositoryData) (boundaries: ReleaseBoundary list) cancellationToken =
             let rec getRanges pending =
@@ -1466,33 +1573,44 @@ module GitHubContentClient =
                                     match defaultHead with
                                     | Error problem -> return Error problem
                                     | Ok head ->
-                                        let newest = List.head resolvedBoundaries
-
-                                        let! unreleased =
-                                            getCommitRange
+                                        let! orderedComparisons =
+                                            orderReleaseBoundariesByHeadAncestry
                                                 applicationRepositoryData
-                                                newest.BoundaryCommit
                                                 head
+                                                resolvedBoundaries
                                                 cancellationToken
 
-                                        match unreleased with
+                                        match orderedComparisons with
                                         | Error problem -> return Error problem
-                                        | Ok unreleasedCommits ->
-                                            let! releaseRanges =
-                                                getReleaseRanges
-                                                    applicationRepositoryData
-                                                    resolvedBoundaries
-                                                    cancellationToken
-
-                                            match releaseRanges with
+                                        | Ok [] -> return Error(invalidProblem ())
+                                        | Ok(newest :: remaining) ->
+                                            match
+                                                commitRangeFromComparison
+                                                    newest.ComparisonBoundary.BoundaryCommit
+                                                    newest.ComparisonPayload
+                                            with
                                             | Error problem -> return Error problem
-                                            | Ok ranges ->
-                                                return
-                                                    buildChangelog
+                                            | Ok unreleasedCommits ->
+                                                let boundaries =
+                                                    newest.ComparisonBoundary
+                                                    :: (remaining
+                                                        |> List.map (fun comparison -> comparison.ComparisonBoundary))
+
+                                                let! releaseRanges =
+                                                    getReleaseRanges
                                                         applicationRepositoryData
-                                                        ranges
-                                                        unreleasedCommits
-                                                        metadata
+                                                        boundaries
+                                                        cancellationToken
+
+                                                match releaseRanges with
+                                                | Error problem -> return Error problem
+                                                | Ok ranges ->
+                                                    return
+                                                        buildChangelog
+                                                            applicationRepositoryData
+                                                            ranges
+                                                            unreleasedCommits
+                                                            metadata
             }
 
         { new ContentClient with

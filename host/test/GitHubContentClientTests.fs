@@ -95,7 +95,7 @@ module GitHubContentClientTests =
     let private comparisonJson status behindBy totalCommits baseCommit mergeBase commits =
         let rows = String.concat "," commits
 
-        $"{{\"status\":\"{status}\",\"behind_by\":{behindBy},\"total_commits\":{totalCommits},\"base_commit\":{{\"sha\":\"{baseCommit}\"}},\"merge_base_commit\":{{\"sha\":\"{mergeBase}\"}},\"commits\":[{rows}]}}"
+        $"{{\"status\":\"{status}\",\"ahead_by\":{totalCommits},\"behind_by\":{behindBy},\"total_commits\":{totalCommits},\"base_commit\":{{\"sha\":\"{baseCommit}\"}},\"merge_base_commit\":{{\"sha\":\"{mergeBase}\"}},\"commits\":[{rows}]}}"
 
     let private commitShas (commits: ContentDomain.Commit list) =
         commits |> List.map (ContentDomain.Commit.sha >> ContentDomain.CommitSha.value)
@@ -362,8 +362,8 @@ module GitHubContentClientTests =
         let head = "ffffffffffffffffffffffffffffffffffffffff"
 
         let releases =
-            [ releaseJson "v1.0.0" "2026-07-01T00:00:00Z"
-              releaseJson "v3.0.0" "2026-07-20T00:00:00Z"
+            [ releaseJson "v1.0.0" "2026-07-20T00:00:00Z"
+              releaseJson "v3.0.0" "2026-07-01T00:00:00Z"
               releaseJson "v2.0.0" "2026-07-10T00:00:00Z" ]
             |> String.concat ","
             |> fun rows -> $"[{rows}]"
@@ -390,6 +390,20 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK (gitObjectJson "commit" v1) None
                 | "/repos/example-owner/application/git/ref/heads/main" ->
                     response HttpStatusCode.OK (gitObjectJson "commit" head) None
+                | path when path = $"/repos/example-owner/application/compare/{v1}...{head}?per_page=100" ->
+                    response
+                        HttpStatusCode.OK
+                        (comparisonJson
+                            "ahead"
+                            0
+                            4
+                            v1
+                            v1
+                            [ commitJson v2 "Release v2" "2026-07-01T00:00:00Z"
+                              commitJson betweenV2AndV3 "Prepare v3" "2026-07-12T00:00:00Z"
+                              commitJson v3 "Release v3" "2026-07-13T00:00:00Z"
+                              commitJson head "Work after the tag" "2026-07-15T00:00:00Z" ])
+                        None
                 | path when path = $"/repos/example-owner/application/compare/{v3}...{head}?per_page=100" ->
                     response
                         HttpStatusCode.OK
@@ -400,6 +414,19 @@ module GitHubContentClientTests =
                             v3
                             v3
                             [ commitJson head "Work after the tag" "2026-07-15T00:00:00Z" ])
+                        None
+                | path when path = $"/repos/example-owner/application/compare/{v2}...{head}?per_page=100" ->
+                    response
+                        HttpStatusCode.OK
+                        (comparisonJson
+                            "ahead"
+                            0
+                            3
+                            v2
+                            v2
+                            [ commitJson betweenV2AndV3 "Prepare v3" "2026-07-12T00:00:00Z"
+                              commitJson v3 "Release v3" "2026-07-13T00:00:00Z"
+                              commitJson head "Work after the tag" "2026-07-15T00:00:00Z" ])
                         None
                 | path when path = $"/repos/example-owner/application/compare/{v2}...{v3}?per_page=100" ->
                     response
@@ -437,7 +464,8 @@ module GitHubContentClientTests =
             failwith "A missing profile README must not prevent Now content."
 
         if ContentDomain.Changelog.unreleased changelog |> commitShas <> [ head ] then
-            failwith "Unreleased commits must come from the latest tag through the resolved default-branch head."
+            failwith
+                "Unreleased commits must come from the ancestry-newest tag through the resolved default-branch head."
 
         match ContentDomain.Changelog.releases changelog with
         | [ newest; middle; oldest ] ->
@@ -474,6 +502,21 @@ module GitHubContentClientTests =
                 || path = "/repos/example-owner/application/commits?per_page=100")
         then
             failwith "Changelog grouping must not fall back to tag listings or latest commits."
+
+        let comparisonPaths =
+            paths
+            |> List.filter (fun path -> path.Contains("/compare/", StringComparison.Ordinal))
+
+        let expectedComparisonPaths =
+            [ $"/repos/example-owner/application/compare/{v1}...{head}?per_page=100"
+              $"/repos/example-owner/application/compare/{v3}...{head}?per_page=100"
+              $"/repos/example-owner/application/compare/{v2}...{head}?per_page=100"
+              $"/repos/example-owner/application/compare/{v2}...{v3}?per_page=100"
+              $"/repos/example-owner/application/compare/{v1}...{v2}?per_page=100" ]
+
+        if comparisonPaths <> expectedComparisonPaths then
+            failwith
+                "Release boundaries must use one tag-to-head comparison each before ancestry-ordered adjacent ranges."
 
     let private testChangelogReleasePaginationBound () =
         let tag = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
