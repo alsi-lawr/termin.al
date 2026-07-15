@@ -140,6 +140,7 @@ module GitHubContentClient =
     let private jsonMediaType = "application/vnd.github+json"
     let private rawMediaType = "application/vnd.github.raw+json"
     let private maximumPaginationPages = 3
+    let private maximumPayloadCacheEntries = 512
 
     let private mapFetchFailure failure =
         match failure with
@@ -313,6 +314,49 @@ module GitHubContentClient =
         (clock: unit -> DateTimeOffset)
         : ContentClient =
         let cache = ConcurrentDictionary<string, CachedPayload>(StringComparer.Ordinal)
+        let cacheLock = obj ()
+
+        let staleDeadline (cached: CachedPayload) =
+            cached.CachedAt.AddMinutes(float (ContentDomain.FreshCacheMinutes + ContentDomain.StaleCacheMinutes))
+
+        let removeCachedPayload key =
+            let mutable ignored = Unchecked.defaultof<CachedPayload>
+            cache.TryRemove(key, &ignored) |> ignore
+
+        let removeExpiredCachedPayloads now =
+            cache
+            |> Seq.filter (fun entry -> now > staleDeadline entry.Value)
+            |> Seq.iter (fun entry -> removeCachedPayload entry.Key)
+
+        let removeOldestCachedPayloads count =
+            if count > 0 then
+                cache
+                |> Seq.sortWith (fun left right ->
+                    let cachedAtOrder = compare left.Value.CachedAt right.Value.CachedAt
+
+                    if cachedAtOrder <> 0 then
+                        cachedAtOrder
+                    else
+                        StringComparer.Ordinal.Compare(left.Key, right.Key))
+                |> Seq.truncate count
+                |> Seq.iter (fun entry -> removeCachedPayload entry.Key)
+
+        let findCachedPayload now cacheKey =
+            lock cacheLock (fun () ->
+                removeExpiredCachedPayloads now
+
+                match cache.TryGetValue(cacheKey) with
+                | true, value -> Some value
+                | false, _ -> None)
+
+        let storeCachedPayload now cacheKey payload =
+            lock cacheLock (fun () ->
+                removeExpiredCachedPayloads now
+
+                if not (cache.ContainsKey cacheKey) then
+                    removeOldestCachedPayloads (cache.Count - maximumPayloadCacheEntries + 1)
+
+                cache[cacheKey] <- payload)
 
         let cacheMetadata (payload: GitHubPayload) : Result<ContentDomain.CacheMetadata, ContentDomain.Problem> =
             let fetchedAt = ContentDomain.Timestamp.create payload.PayloadFetchedAt
@@ -333,10 +377,7 @@ module GitHubContentClient =
             |> Result.mapError mapValidationFailure
 
         let stale now (cached: CachedPayload) failure =
-            if
-                now
-                <= cached.CachedAt.AddMinutes(float (ContentDomain.FreshCacheMinutes + ContentDomain.StaleCacheMinutes))
-            then
+            if now <= staleDeadline cached then
                 Ok
                     { PayloadBody = cached.CachedBody
                       PayloadFetchedAt = cached.CachedAt
@@ -354,10 +395,7 @@ module GitHubContentClient =
                 let now = clock ()
                 let cacheKey = $"{accept}|{uri.AbsoluteUri}"
 
-                let cached =
-                    match cache.TryGetValue(cacheKey) with
-                    | true, value -> Some value
-                    | false, _ -> None
+                let cached = findCachedPayload now cacheKey
 
                 match cached with
                 | Some value when now <= value.CachedAt.AddMinutes(float ContentDomain.FreshCacheMinutes) ->
@@ -408,7 +446,7 @@ module GitHubContentClient =
                         | HttpStatusCode.NotModified, None, Some value ->
                             let refreshed = { value with CachedAt = now }
 
-                            cache[cacheKey] <- refreshed
+                            storeCachedPayload now cacheKey refreshed
 
                             return
                                 Ok
@@ -439,7 +477,7 @@ module GitHubContentClient =
                                       CachedAt = now
                                       CachedNextPage = nextPage response.Headers }
 
-                                cache[cacheKey] <- stored
+                                storeCachedPayload now cacheKey stored
 
                                 return
                                     Ok

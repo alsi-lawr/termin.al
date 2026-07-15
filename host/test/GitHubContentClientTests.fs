@@ -26,8 +26,9 @@ module GitHubContentClientTests =
         inherit HttpMessageHandler()
 
         let requests = ResizeArray<Request>()
+        let requestsLock = obj ()
 
-        member _.Requests = requests |> Seq.toList
+        member _.Requests = lock requestsLock (fun () -> requests |> Seq.toList)
 
         override _.SendAsync(request: HttpRequestMessage, _: CancellationToken) =
             let apiVersion =
@@ -40,14 +41,62 @@ module GitHubContentClientTests =
                 | true, values -> values |> Seq.tryHead
                 | false, _ -> None
 
-            requests.Add
+            let captured =
                 { PathAndQuery = request.RequestUri.PathAndQuery
                   Accept = request.Headers.Accept.ToString()
                   ApiVersion = apiVersion
                   UserAgent = request.Headers.UserAgent.ToString()
                   IfNoneMatch = ifNoneMatch }
 
-            Task.FromResult(respond requests[requests.Count - 1])
+            lock requestsLock (fun () -> requests.Add captured)
+            Task.FromResult(respond captured)
+
+    type private GatedHandler(expectedInitialRequests: int, respond: Request -> HttpResponseMessage) =
+        inherit HttpMessageHandler()
+
+        let requests = ResizeArray<Request>()
+        let requestsLock = obj ()
+
+        let initialRequests =
+            TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+        let release =
+            TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
+
+        member _.Requests = lock requestsLock (fun () -> requests |> Seq.toList)
+        member _.WaitForInitialRequests() = initialRequests.Task
+        member _.Release() = release.TrySetResult() |> ignore
+
+        override _.SendAsync(request: HttpRequestMessage, _: CancellationToken) =
+            let apiVersion =
+                match request.Headers.TryGetValues("X-GitHub-Api-Version") with
+                | true, values -> values |> Seq.tryHead
+                | false, _ -> None
+
+            let ifNoneMatch =
+                match request.Headers.TryGetValues("If-None-Match") with
+                | true, values -> values |> Seq.tryHead
+                | false, _ -> None
+
+            let captured =
+                { PathAndQuery = request.RequestUri.PathAndQuery
+                  Accept = request.Headers.Accept.ToString()
+                  ApiVersion = apiVersion
+                  UserAgent = request.Headers.UserAgent.ToString()
+                  IfNoneMatch = ifNoneMatch }
+
+            let requestCount =
+                lock requestsLock (fun () ->
+                    requests.Add captured
+                    requests.Count)
+
+            if requestCount >= expectedInitialRequests then
+                initialRequests.TrySetResult() |> ignore
+
+            task {
+                do! release.Task
+                return respond captured
+            }
 
     type private CancelledHandler() =
         inherit HttpMessageHandler()
@@ -234,6 +283,303 @@ module GitHubContentClientTests =
 
         if first |> ContentDomain.Catalog.entries |> List.length <> 2 then
             failwith "Catalog manifest entries were not supplied."
+
+        now <- now.AddMinutes(60.0)
+
+        match contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult() with
+        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+        | _ -> failwith "Expired cached payloads must not be retained for stale fallback."
+
+        match handler.Requests |> List.last with
+        | { PathAndQuery = "/repos/example-owner/content"
+            IfNoneMatch = None } -> ()
+        | _ -> failwith "Expired cached payloads must not retain conditional request validators."
+
+    let private testConcurrentCacheRequests () =
+        let handler =
+            new GatedHandler(
+                2,
+                fun request ->
+                    match request.PathAndQuery with
+                    | "/repos/example-owner/content" ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
+                        response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | _ -> response HttpStatusCode.NotFound "" None
+            )
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+
+        let first = contentClient.GetCatalog(CancellationToken.None)
+        let second = contentClient.GetCatalog(CancellationToken.None)
+
+        handler.WaitForInitialRequests().GetAwaiter().GetResult()
+        handler.Release()
+
+        Task.WhenAll([| first; second |]).GetAwaiter().GetResult()
+        |> Array.iter (fun result ->
+            match result with
+            | Ok _ -> ()
+            | Error problem ->
+                failwithf "Concurrent cache requests must succeed, but got %s." (ContentDomain.Problem.detail problem))
+
+        let requestCount = handler.Requests |> List.length
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
+
+        if handler.Requests |> List.length <> requestCount then
+            failwith "Concurrent cache writes must leave a reusable fresh payload."
+
+    let private testPayloadCacheRetention () =
+        let cacheDocumentId index = sprintf "cache-document-%03d" index
+
+        let cacheDocumentPath index =
+            sprintf "content/cache-document-%03d.md" index
+
+        let cacheSha (index: int) = index.ToString("x").PadLeft(40, '0')
+        let cacheReleaseTag index = sprintf "cache-release-%03d" index
+        let cacheHead = cacheSha 9_999
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let projectsPath =
+            "/repos/example-owner/content/contents/content/projects.json?ref=main"
+
+        let documents =
+            [ 1 .. ContentDomain.PageItemLimit - 1 ]
+            |> List.map (fun index ->
+                let id = cacheDocumentId index
+                let path = cacheDocumentPath index
+
+                let body =
+                    $"---\nid: {id}\ntitle: Cache document {index}\nupdatedAt: 2026-07-15T00:00:00.000Z\ntags: cache\n---\n# {id}\n"
+
+                id, path, body)
+
+        let cacheCatalogManifest =
+            documents
+            |> List.map (fun (id, path, _) ->
+                $"{{\"kind\":\"file\",\"id\":\"catalog-{id}\",\"path\":\"~/{id}.md\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":64,\"documentHandle\":\"{id}\",\"sourcePath\":\"{path}\"}}")
+            |> List.append
+                [ "{\"kind\":\"directory\",\"id\":\"home\",\"path\":\"~\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":0}" ]
+            |> String.concat ","
+            |> fun entries -> $"{{\"entries\":[{entries}]}}"
+
+        let documentResponses =
+            documents
+            |> List.map (fun (_, path, body) -> $"/repos/example-owner/content/contents/{path}?ref=main", body)
+            |> Map.ofList
+
+        let cacheReleaseResponses =
+            [ 1..99 ]
+            |> List.collect (fun index ->
+                let tag = cacheReleaseTag index
+                let tagObject = cacheSha (1_000 + index)
+                let commit = cacheSha (2_000 + index)
+
+                [ $"/repos/example-owner/application/git/ref/tags/{tag}", gitObjectJson "tag" tagObject
+                  $"/repos/example-owner/application/git/tags/{tagObject}", gitObjectJson "commit" commit ])
+            |> Map.ofList
+
+        let cacheReleasePositions =
+            [ 1..99 ]
+            |> List.map (fun index -> cacheSha (2_000 + index), index)
+            |> Map.ofList
+
+        let cacheReleases =
+            [ 1..99 ]
+            |> List.map (fun index -> releaseJson (cacheReleaseTag index) "2026-07-15T00:00:00Z")
+            |> releasePage
+
+        let cacheProjectRows =
+            [ 1..6 ]
+            |> List.map (fun index ->
+                repositoryJson $"example-owner/cache-project-{index}" "\"Cache project description\"")
+            |> String.concat ","
+            |> fun rows -> $"[{rows}]"
+
+        let releasesPath = "/repos/example-owner/application/releases?per_page=100"
+        let releasesPageTwo = "/repos/example-owner/application/releases?page=2"
+        let ownedRepositoriesPageTwo = "/users/example-owner/repos?page=2"
+        let comparisonPrefix = "/repos/example-owner/application/compare/"
+
+        let comparisonBody baseCommit aheadBy =
+            $"{{\"status\":\"ahead\",\"ahead_by\":{aheadBy},\"behind_by\":0,\"total_commits\":0,\"base_commit\":{{\"sha\":\"{baseCommit}\"}},\"merge_base_commit\":{{\"sha\":\"{baseCommit}\"}},\"commits\":[]}}"
+
+        let mutable stage = 0
+
+        let handler =
+            new FakeHandler(fun request ->
+                let path = request.PathAndQuery
+
+                if path = contentRepositoryPath && (stage = 1 || stage = 3) then
+                    response HttpStatusCode.ServiceUnavailable "" None
+                elif stage = 2 && path = releasesPath then
+                    linkResponse
+                        HttpStatusCode.OK
+                        cacheReleases
+                        (Some "\"cache-releases\"")
+                        $"https://api.github.com{releasesPageTwo}"
+                elif request.IfNoneMatch.IsSome then
+                    response HttpStatusCode.NotModified "" None
+                else
+                    match Map.tryFind path documentResponses, Map.tryFind path cacheReleaseResponses with
+                    | Some body, _ -> response HttpStatusCode.OK body (Some "\"cache-document\"")
+                    | None, Some body -> response HttpStatusCode.OK body (Some "\"cache-tag\"")
+                    | None, None ->
+                        match path with
+                        | "/repos/example-owner/content" ->
+                            response
+                                HttpStatusCode.OK
+                                (repositoryJson "example-owner/content" "\"Content repository\"")
+                                (Some "\"cache-content\"")
+                        | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
+                            response HttpStatusCode.OK cacheCatalogManifest (Some "\"cache-catalog\"")
+                        | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
+                            response HttpStatusCode.OK projectsManifest (Some "\"cache-projects\"")
+                        | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
+                            linkResponse
+                                HttpStatusCode.OK
+                                cacheProjectRows
+                                (Some "\"cache-owned\"")
+                                $"https://api.github.com{ownedRepositoriesPageTwo}"
+                        | "/users/example-owner/repos?page=2" ->
+                            response HttpStatusCode.OK "[]" (Some "\"cache-owned-page-two\"")
+                        | "/repos/example-owner/application" ->
+                            response
+                                HttpStatusCode.OK
+                                (repositoryJson "example-owner/application" "\"Application repository\"")
+                                (Some "\"cache-application\"")
+                        | "/repos/example-owner/profile" ->
+                            response
+                                HttpStatusCode.OK
+                                (repositoryJson "example-owner/profile" "\"Profile repository\"")
+                                (Some "\"cache-profile\"")
+                        | "/users/example-owner/events/public?per_page=100" ->
+                            response HttpStatusCode.OK "[]" (Some "\"cache-activity\"")
+                        | "/repos/example-owner/application/readme?ref=main" ->
+                            response HttpStatusCode.OK "# Application" (Some "\"cache-application-readme\"")
+                        | "/repos/example-owner/profile/readme?ref=main" ->
+                            response HttpStatusCode.OK "# Profile" (Some "\"cache-profile-readme\"")
+                        | "/repos/example-owner/application/releases?per_page=100" ->
+                            response HttpStatusCode.OK cacheReleases (Some "\"cache-releases\"")
+                        | "/repos/example-owner/application/releases?page=2" ->
+                            response HttpStatusCode.OK "[]" (Some "\"cache-releases-page-two\"")
+                        | "/repos/example-owner/application/git/ref/heads/main" ->
+                            response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-head\"")
+                        | projectReadme when
+                            projectReadme.StartsWith("/repos/example-owner/cache-project-", StringComparison.Ordinal)
+                            && projectReadme.EndsWith("/readme?ref=main", StringComparison.Ordinal)
+                            ->
+                            response HttpStatusCode.OK "# Cache project" (Some "\"cache-project-readme\"")
+                        | comparison when comparison.StartsWith(comparisonPrefix, StringComparison.Ordinal) ->
+                            let range =
+                                comparison
+                                    .Substring(comparisonPrefix.Length)
+                                    .Replace("?per_page=100", "", StringComparison.Ordinal)
+
+                            let commits = range.Split([| "..." |], StringSplitOptions.None)
+
+                            if commits.Length <> 2 then
+                                failwithf "Unexpected comparison request '%s'." comparison
+
+                            let aheadBy =
+                                if StringComparer.Ordinal.Equals(commits[1], cacheHead) then
+                                    match Map.tryFind commits[0] cacheReleasePositions with
+                                    | Some value -> value
+                                    | None -> failwithf "Unexpected release comparison '%s'." comparison
+                                else
+                                    1
+
+                            response
+                                HttpStatusCode.OK
+                                (comparisonBody commits[0] aheadBy)
+                                (Some "\"cache-comparison\"")
+                        | _ -> failwithf "Unexpected cache retention request '%s'." path)
+
+        let mutable now = DateTimeOffset.Parse("2026-07-15T00:00:00Z")
+        let createdHttpClient, contentClient = createClient handler (fun () -> now)
+        use httpClient = createdHttpClient
+
+        let expectCacheContent label result =
+            match result with
+            | Ok value -> value
+            | Error problem -> failwithf "%s: %s" label (ContentDomain.Problem.detail problem)
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Initial cache catalog"
+        |> ignore
+
+        now <- now.AddMinutes(1.0)
+
+        for (id, _, _) in documents do
+            let documentId =
+                match ContentDomain.ContentId.tryCreate "test.documentId" id with
+                | Ok value -> value
+                | Error failure -> failwithf "%s: %s" failure.Field failure.Message
+
+            contentClient.GetDocument(documentId, CancellationToken.None).GetAwaiter().GetResult()
+            |> expectCacheContent $"Initial cache document {id}"
+            |> ignore
+
+        contentClient.GetProjects(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Initial cache projects"
+        |> ignore
+
+        contentClient.GetNow(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Initial cache now"
+        |> ignore
+
+        contentClient.GetChangelog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Initial cache changelog"
+        |> ignore
+
+        if handler.Requests |> List.length <> 512 then
+            failwithf "Expected 512 retained payload requests, but received %d." (handler.Requests |> List.length)
+
+        stage <- 1
+        now <- now.AddMinutes(6.0)
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Retained stale cache catalog"
+        |> ignore
+
+        stage <- 2
+
+        contentClient.GetChangelog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Overflow cache changelog"
+        |> ignore
+
+        let requestsAfterOverflow = handler.Requests |> List.length
+        now <- now.AddMinutes(1.0)
+
+        contentClient.GetChangelog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectCacheContent "Refreshed cache changelog"
+        |> ignore
+
+        if handler.Requests |> List.length <> requestsAfterOverflow then
+            failwith "A refreshed payload must remain cached after the 513th payload is admitted."
+
+        stage <- 3
+
+        match contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult() with
+        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+        | _ -> failwith "The oldest cached payload must be evicted before the 513th payload is admitted."
+
+        match handler.Requests |> List.last with
+        | { PathAndQuery = "/repos/example-owner/content"
+            IfNoneMatch = None } -> ()
+        | _ -> failwith "Evicted payloads must not retain conditional request validators."
 
     let private testRateMalformedAndTimeoutFailures () =
         let rateHandler =
@@ -785,6 +1131,8 @@ module GitHubContentClientTests =
 
     let run () =
         testColdCache304AndStaleFallback ()
+        testConcurrentCacheRequests ()
+        testPayloadCacheRetention ()
         testRateMalformedAndTimeoutFailures ()
         testFractionalCatalogSize ()
         testProjectsPaginationAndReadmes ()
