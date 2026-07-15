@@ -18,10 +18,10 @@ import {
 } from "../../domain/terminal/PromptEditor.ts";
 import type { PromptMode } from "../../domain/terminal/PromptBuffer.ts";
 import {
-  nextUnicodeCursorOffset,
-  normalizeUnicodeCursorOffset,
-  previousUnicodeCursorOffset,
-} from "../../domain/terminal/UnicodeCursor.ts";
+  moveNativeInputSelectionLeft,
+  moveNativeInputSelectionRight,
+  normalizeNativeInputSelection,
+} from "./UnicodeUiBoundary.ts";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -43,7 +43,7 @@ type InputCaptureProps = Readonly<{
 }>;
 
 function selectionCursor(element: HTMLTextAreaElement): number {
-  return normalizeUnicodeCursorOffset(
+  return normalizeNativeInputSelection(
     element.value,
     element.selectionEnd ?? element.value.length,
   );
@@ -76,7 +76,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      const cursor = normalizeUnicodeCursorOffset(props.value, props.cursor);
+      const cursor = normalizeNativeInputSelection(props.value, props.cursor);
       input.setSelectionRange(cursor, cursor);
     }, [props.cursor, props.value]);
 
@@ -184,14 +184,16 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         props.onMoveCursor(
-          previousUnicodeCursorOffset(props.value, props.cursor),
+          moveNativeInputSelectionLeft(props.value, props.cursor),
         );
         return;
       }
 
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        props.onMoveCursor(nextUnicodeCursorOffset(props.value, props.cursor));
+        props.onMoveCursor(
+          moveNativeInputSelectionRight(props.value, props.cursor),
+        );
         return;
       }
 

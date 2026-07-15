@@ -1,9 +1,6 @@
 import { Cursor } from "./Cursor";
 import type { ReactElement } from "react";
-import {
-  nextUnicodeCursorOffset,
-  normalizeUnicodeCursorOffset,
-} from "../../domain/terminal/UnicodeCursor.ts";
+import { segmentVisibleInputRow } from "./UnicodeUiBoundary.ts";
 
 type InputRowProps = Readonly<{
   activeLine: string;
@@ -14,14 +11,14 @@ export function InputRow({
   activeLine,
   cursorIndex,
 }: InputRowProps): ReactElement {
-  const cursor = normalizeUnicodeCursorOffset(activeLine, cursorIndex);
-  const cursorEnd = nextUnicodeCursorOffset(activeLine, cursor);
+  const segments = segmentVisibleInputRow(activeLine, cursorIndex);
+  const cursor = segments.cursor === "" ? " " : segments.cursor;
 
   return (
     <div>
-      {activeLine.slice(0, cursor)}
-      <Cursor value={activeLine.slice(cursor, cursorEnd) || " "} />
-      {activeLine.slice(cursorEnd)}
+      {segments.beforeCursor}
+      <Cursor value={cursor} />
+      {segments.afterCursor}
     </div>
   );
 }
