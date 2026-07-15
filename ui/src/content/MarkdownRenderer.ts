@@ -54,6 +54,8 @@ type UrlDecision =
     }>
   | Readonly<{ kind: "rejected" }>;
 
+type MarkdownDestinationKind = "image" | "link";
+
 type LinkSyntax = Readonly<{
   label: string;
   destination: string;
@@ -69,7 +71,7 @@ const quotePattern = /^ {0,3}>\s?(.*)$/u;
 const listPattern = /^(\s*)([-+*]|\d+\.)\s+(.*)$/u;
 const thematicBreakPattern = /^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/u;
 const tableDividerPattern = /^:?-{3,}:?$/u;
-const protocolPattern = /^[A-Za-z][A-Za-z\d+.-]*:/u;
+const markdownUrlBase = new URL("https://markdown.invalid/");
 
 function lineAt(lines: ReadonlyArray<string>, index: number): string {
   return lines[index] ?? "";
@@ -396,30 +398,40 @@ function parseBlocks(markdown: string): ReadonlyArray<MarkdownBlock> {
   return blocks;
 }
 
-function urlDecision(value: string, allowMailto: boolean): UrlDecision {
+function urlDecision(
+  value: string,
+  destinationKind: MarkdownDestinationKind,
+): UrlDecision {
   const trimmed = value.trim();
 
   if (trimmed === "" || trimmed.startsWith("//")) {
     return { kind: "rejected" };
   }
 
-  const protocol = protocolPattern.exec(trimmed)?.[0]?.toLowerCase();
-
-  if (protocol === undefined) {
-    return { kind: "safe", value: trimmed, external: false };
-  }
-
-  if (protocol === "mailto:" && allowMailto) {
-    return { kind: "safe", value: trimmed, external: false };
-  }
-
-  if (protocol !== "http:" && protocol !== "https:") {
-    return { kind: "rejected" };
-  }
-
   try {
-    new URL(trimmed);
-    return { kind: "safe", value: trimmed, external: true };
+    const resolved = new URL(trimmed, markdownUrlBase);
+
+    if (resolved.username !== "" || resolved.password !== "") {
+      return { kind: "rejected" };
+    }
+
+    try {
+      const absolute = new URL(trimmed);
+
+      if (absolute.protocol === "http:" || absolute.protocol === "https:") {
+        return { kind: "safe", value: trimmed, external: true };
+      }
+
+      if (destinationKind === "link" && absolute.protocol === "mailto:") {
+        return { kind: "safe", value: trimmed, external: false };
+      }
+
+      return { kind: "rejected" };
+    } catch {
+      return resolved.origin === markdownUrlBase.origin
+        ? { kind: "safe", value: trimmed, external: false }
+        : { kind: "rejected" };
+    }
   } catch {
     return { kind: "rejected" };
   }
@@ -465,7 +477,7 @@ function inlineNodes(text: string, keyPrefix: string): ReadonlyArray<ReactNode> 
       : undefined;
 
     if (image !== undefined) {
-      const destination = urlDecision(image.destination, false);
+      const destination = urlDecision(image.destination, "image");
 
       if (destination.kind === "safe") {
         nodes.push(
@@ -497,7 +509,7 @@ function inlineNodes(text: string, keyPrefix: string): ReadonlyArray<ReactNode> 
       : undefined;
 
     if (link !== undefined) {
-      const destination = urlDecision(link.destination, true);
+      const destination = urlDecision(link.destination, "link");
 
       if (destination.kind === "safe") {
         const properties = destination.external
@@ -543,7 +555,7 @@ function inlineNodes(text: string, keyPrefix: string): ReadonlyArray<ReactNode> 
       const destination = autolink[1];
 
       if (destination !== undefined) {
-        const decision = urlDecision(destination, true);
+        const decision = urlDecision(destination, "link");
 
         if (decision.kind === "safe") {
           nodes.push(
@@ -578,7 +590,7 @@ function inlineNodes(text: string, keyPrefix: string): ReadonlyArray<ReactNode> 
         const resolved = destination.startsWith("www.")
           ? `https://${destination}`
           : destination;
-        const decision = urlDecision(resolved, false);
+        const decision = urlDecision(resolved, "link");
 
         if (decision.kind === "safe") {
           nodes.push(

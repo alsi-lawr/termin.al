@@ -86,6 +86,114 @@ test("renders themed safe GFM blocks and inline content", () => {
   assert.doesNotMatch(markup, /data:text/u);
 });
 
+test("preserves allowed Markdown URL destinations", () => {
+  const markup = render(
+    {
+      source: { path: "~/safe-destinations.md" },
+      text: `[Relative](/guide)
+
+[Fragment](#details)
+
+[Query](?tab=source)
+
+[HTTP](http://example.com/guide)
+
+[HTTPS](https://example.com/guide)
+
+[Email](mailto:reader@example.com)
+
+![Relative image](/images/guide.png)
+
+![Fragment image](#diagram)
+
+![Query image](?size=large)
+
+![HTTP image](http://images.example.com/guide.png)
+
+![HTTPS image](https://images.example.com/guide.png)
+
+![Email image](mailto:reader@example.com)`,
+    },
+    undefined,
+  );
+
+  for (const destination of [
+    "/guide",
+    "#details",
+    "?tab=source",
+    "http://example.com/guide",
+    "https://example.com/guide",
+    "mailto:reader@example.com",
+  ]) {
+    assert.ok(markup.includes(`href="${destination}"`));
+  }
+
+  for (const destination of [
+    "/images/guide.png",
+    "#diagram",
+    "?size=large",
+    "http://images.example.com/guide.png",
+    "https://images.example.com/guide.png",
+  ]) {
+    assert.ok(markup.includes(`src="${destination}"`));
+  }
+
+  assert.match(markup, /href="http:\/\/example\.com\/guide" target="_blank"/u);
+  assert.match(markup, /href="https:\/\/example\.com\/guide" target="_blank"/u);
+  assert.match(markup, /href="mailto:reader@example\.com" class=/u);
+  assert.match(markup, /loading="lazy"/u);
+  assert.match(markup, /referrer[Pp]olicy="no-referrer"/u);
+  assert.match(markup, /unsafe image blocked: Email image/u);
+  assert.doesNotMatch(markup, /src="mailto:/u);
+  assert.doesNotMatch(markup, /markdown\.invalid/u);
+});
+
+test("blocks control-obfuscated javascript Markdown links and images", () => {
+  for (const destination of [
+    "java\tscript:alert(1)",
+    "java\rscript:alert(1)",
+  ]) {
+    const markup = render(
+      {
+        source: { path: "~/obfuscated-destination.md" },
+        text: `[Unsafe link](${destination})
+
+![Unsafe image](${destination})`,
+      },
+      undefined,
+    );
+
+    assert.match(markup, /unsafe link blocked/u);
+    assert.match(markup, /unsafe image blocked: Unsafe image/u);
+    assert.doesNotMatch(markup, /<a\b/u);
+    assert.doesNotMatch(markup, /<img\b/u);
+  }
+});
+
+test("blocks protocol-relative, credentialed, malformed, and unsupported Markdown URLs", () => {
+  for (const destination of [
+    "//example.com/guide",
+    "https://reader:secret@example.com/guide",
+    "ftp://example.com/guide",
+    "http://[::1",
+  ]) {
+    const markup = render(
+      {
+        source: { path: "~/blocked-destination.md" },
+        text: `[Unsafe link](${destination})
+
+![Unsafe image](${destination})`,
+      },
+      undefined,
+    );
+
+    assert.match(markup, /unsafe link blocked/u);
+    assert.match(markup, /unsafe image blocked: Unsafe image/u);
+    assert.doesNotMatch(markup, /<a\b/u);
+    assert.doesNotMatch(markup, /<img\b/u);
+  }
+});
+
 test("renders direct and supplier Markdown strings identically", async () => {
   const supplied = await developmentFixtureCorpus.documents.read(
     createVirtualDocumentHandle("about"),
