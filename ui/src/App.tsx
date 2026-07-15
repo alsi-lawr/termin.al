@@ -1,13 +1,25 @@
 import type { ReactElement } from "react";
-import type { ContentClient } from "./api/ContentClient.ts";
+import type {
+  ApplicationClientComposition,
+  ApplicationMode,
+} from "./ApplicationComposition.ts";
 import { ContentCorpusGate } from "./content/ContentCorpusGate.tsx";
 
 type AppProps = Readonly<{
-  contentClient: ContentClient;
+  applicationClientComposition: ApplicationClientComposition;
+  applicationMode: ApplicationMode;
 }>;
 
-function App({ contentClient }: AppProps): ReactElement {
-  return <ContentCorpusGate contentClient={contentClient} />;
+function App({
+  applicationClientComposition,
+  applicationMode,
+}: AppProps): ReactElement {
+  return (
+    <ContentCorpusGate
+      applicationMode={applicationMode}
+      contentClient={applicationClientComposition.contentClient}
+    />
+  );
 }
 
 export default App;

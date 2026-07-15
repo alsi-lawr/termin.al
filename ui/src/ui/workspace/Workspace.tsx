@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import { paneLeaves } from "../../domain/workspace/PaneTree.ts";
 import { useTheme } from "../../theme/useTheme.ts";
@@ -8,10 +9,14 @@ import { PaneTreeView } from "./PaneTreeView";
 import { usePaneWorkspace } from "./usePaneWorkspace";
 
 type WorkspaceProps = Readonly<{
+  applicationMode: ApplicationMode;
   corpus: ContentCorpus;
 }>;
 
-export function Workspace({ corpus }: WorkspaceProps): ReactElement {
+export function Workspace({
+  applicationMode,
+  corpus,
+}: WorkspaceProps): ReactElement {
   const controller = usePaneWorkspace(corpus);
   const theme = useTheme();
   const panes = paneLeaves(controller.workspace.tree);
@@ -27,6 +32,7 @@ export function Workspace({ corpus }: WorkspaceProps): ReactElement {
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <PaneTreeView
             tree={controller.workspace.tree}
+            applicationMode={applicationMode}
             activePaneId={controller.workspace.activePaneId}
             zoom={controller.workspace.zoom}
             shellRuntimes={controller.shellRuntimes}

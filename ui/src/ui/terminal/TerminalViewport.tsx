@@ -6,6 +6,7 @@ import {
   type ReactElement,
   type UIEvent,
 } from "react";
+import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type {
   ShellCompletion,
   ShellHistoryEntry,
@@ -16,6 +17,7 @@ import { TerminalPrompt } from "./TerminalPrompt";
 
 type TerminalViewportProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
+  applicationMode: ApplicationMode;
   prompt: string;
   currentInput: string;
   cursorColumn: number;
@@ -43,6 +45,7 @@ function scrollToLatestOutput(element: HTMLDivElement): void {
 
 export function TerminalViewport({
   rows,
+  applicationMode,
   prompt,
   currentInput,
   cursorColumn,
@@ -65,6 +68,7 @@ export function TerminalViewport({
 
     scrollToLatestOutput(viewport);
   }, [
+    applicationMode,
     completion,
     currentInput,
     cursorColumn,
@@ -147,6 +151,7 @@ export function TerminalViewport({
 
         <TerminalPrompt
           prompt={prompt}
+          applicationMode={applicationMode}
           currentInput={currentInput}
           cursorColumn={cursorColumn}
           status={status}

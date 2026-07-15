@@ -30,6 +30,9 @@ module HostApplication =
         |> ignore
 
         Api.mapEndpoints application contentClient
+
+        application.MapFallbackToFile("/demo/{*path:nonfile}", "index.html") |> ignore
+
         application
 
     let private liveContentClient (configuration: IConfiguration) : ContentClient * HttpClient option =

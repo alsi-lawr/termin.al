@@ -1,9 +1,11 @@
 import type { ReactElement } from "react";
+import type { ApplicationMode } from "../ApplicationComposition.ts";
 import type { ContentClient } from "../api/ContentClient.ts";
 import { Workspace } from "../ui/workspace/Workspace.tsx";
 import { useContentCorpus } from "./useContentCorpus.ts";
 
 type ContentCorpusGateProps = Readonly<{
+  applicationMode: ApplicationMode;
   contentClient: ContentClient;
 }>;
 
@@ -30,6 +32,7 @@ function ContentStatus({
 }
 
 export function ContentCorpusGate({
+  applicationMode,
   contentClient,
 }: ContentCorpusGateProps): ReactElement {
   const state = useContentCorpus(contentClient);
@@ -56,14 +59,14 @@ export function ContentCorpusGate({
         <ContentStatus role="alert" title="Content unavailable" message={state.message} />
       );
     case "available":
-      return <Workspace corpus={state.corpus} />;
+      return <Workspace applicationMode={applicationMode} corpus={state.corpus} />;
     case "stale":
       return (
         <div className="min-h-dvh bg-surface-deepest">
           <p className="border-b border-ui-subtle bg-surface-raised px-4 py-2 text-center text-sm text-foreground-muted" role="status">
             Displaying recently cached content while GitHub is unavailable.
           </p>
-          <Workspace corpus={state.corpus} />
+          <Workspace applicationMode={applicationMode} corpus={state.corpus} />
         </div>
       );
   }

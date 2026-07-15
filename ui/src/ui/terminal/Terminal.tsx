@@ -6,6 +6,7 @@ import {
   type MouseEvent,
   type ReactElement,
 } from "react";
+import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import {
   getActiveShellPrompt,
   getShellStatus,
@@ -61,6 +62,7 @@ import { ViewerPane } from "../workspace/ViewerPane";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
+  applicationMode: ApplicationMode;
   state: ShellState;
   presentation: PaneShellPresentation;
   runtimeControl: PaneShellRuntimeControl;
@@ -89,6 +91,7 @@ type TerminalProps = Readonly<{
 
 export function Terminal({
   paneId,
+  applicationMode,
   state,
   presentation,
   runtimeControl,
@@ -276,6 +279,7 @@ export function Terminal({
       <div className="min-h-0 flex-1">
         <TerminalViewport
           rows={shell.state.history}
+          applicationMode={applicationMode}
           prompt={displayPrompt}
           currentInput={displayInput}
           cursorColumn={vimBufferCursorOffset(promptBuffer)}

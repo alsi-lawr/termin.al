@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
@@ -29,6 +30,7 @@ import { VimEditorPane } from "./VimEditorPane";
 
 type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
+  applicationMode: ApplicationMode;
   activePaneId: PaneId;
   zoom: PaneZoom;
   shellRuntimes: PaneShellRuntimes;
@@ -102,6 +104,7 @@ function branchClass(
 
 function PaneLeaf({
   tree,
+  applicationMode,
   activePaneId,
   shellRuntimes,
   focusVersion,
@@ -137,6 +140,7 @@ function PaneLeaf({
           <Terminal
             key={pane.id}
             paneId={pane.id}
+            applicationMode={applicationMode}
             state={runtime.state}
             presentation={runtime.presentation}
             runtimeControl={runtime.control}
@@ -207,6 +211,7 @@ function PaneLeaf({
 
 export function PaneTreeView({
   tree,
+  applicationMode,
   activePaneId,
   zoom,
   shellRuntimes,
@@ -228,6 +233,7 @@ export function PaneTreeView({
     return (
       <PaneLeaf
         tree={tree}
+        applicationMode={applicationMode}
         activePaneId={activePaneId}
         shellRuntimes={shellRuntimes}
         focusVersion={focusVersion}
@@ -275,6 +281,7 @@ export function PaneTreeView({
       >
         <PaneTreeView
           tree={tree.first}
+          applicationMode={applicationMode}
           activePaneId={activePaneId}
           zoom={zoom}
           shellRuntimes={shellRuntimes}
@@ -303,6 +310,7 @@ export function PaneTreeView({
       >
         <PaneTreeView
           tree={tree.second}
+          applicationMode={applicationMode}
           activePaneId={activePaneId}
           zoom={zoom}
           shellRuntimes={shellRuntimes}
