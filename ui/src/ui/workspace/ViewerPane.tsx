@@ -20,7 +20,7 @@ import {
 import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
 import { MobilePaneControls, type MobilePaneControl } from "./MobilePaneControls";
-import { viewerPaneKeyActionFromInput } from "./ViewerPaneKeyAction.ts";
+import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
 
 type ViewerPaneProps = Readonly<{
   viewer: ViewerContent;
@@ -69,48 +69,28 @@ export function ViewerPane({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
-    const result = onPaneKeyInput({
-      key: event.key,
-      ctrlKey: event.ctrlKey,
-      metaKey: event.metaKey,
+    handleViewerPaneKeyInput({
+      input: isRawPager
+        ? {
+            kind: "raw-pager",
+            key: event.key,
+            altKey: event.altKey,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+          }
+        : {
+            kind: "viewer",
+            key: event.key,
+            ctrlKey: event.ctrlKey,
+            metaKey: event.metaKey,
+          },
+      onPaneKeyInput,
+      onClose,
+      onPagerOperation: applyPagerOperation,
+      preventDefault: () => {
+        event.preventDefault();
+      },
     });
-
-    if (result.kind === "handled") {
-      event.preventDefault();
-      return;
-    }
-
-    const keyAction = isRawPager
-      ? viewerPaneKeyActionFromInput({
-          kind: "raw-pager",
-          key: event.key,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-        })
-      : viewerPaneKeyActionFromInput({
-          kind: "viewer",
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-        });
-
-    switch (keyAction.kind) {
-      case "pager-operation":
-        event.preventDefault();
-        applyPagerOperation(keyAction.operation);
-        return;
-      case "close":
-        if (!isRawPager && onClose === undefined) {
-          return;
-        }
-
-        event.preventDefault();
-        onClose?.();
-        return;
-      case "ignored":
-        return;
-    }
   };
 
   const handleClick = (event: MouseEvent<HTMLElement>): void => {
