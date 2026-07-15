@@ -8,6 +8,7 @@
     "react/exhaustive-deps": "error",
     "react/only-export-components": "error",
     "react/react-in-jsx-scope": "off",
-    "react/rules-of-hooks": "error"
+    "react/rules-of-hooks": "error",
+    "typescript/no-explicit-any": "error"
   }
 }
