@@ -9,7 +9,6 @@ import {
   createShellPaneContent,
   paneGeometries,
   paneLeaves,
-  visiblePaneGeometries,
   type PaneOperationResult,
   type PaneWorkspace,
 } from "./PaneTree.ts";
@@ -165,9 +164,7 @@ test("swaps, rotates, zooms, and reconstructs named layouts without viewport sta
     paneLeaves(rotated.tree).map((pane) => pane.id),
     ["pane-3", "pane-2", "pane-1"],
   );
-  assert.deepEqual(visiblePaneGeometries(zoomed), [
-    { paneId: "pane-3", x: 0, y: 0, width: 1, height: 1 },
-  ]);
+  assert.deepEqual(zoomed.zoom, { kind: "active", paneId: "pane-3" });
   assert.equal(tiled.layout, "tiled");
   assert.equal(main.layout, "main-vertical");
   assert.equal(main.zoom.kind, "none");

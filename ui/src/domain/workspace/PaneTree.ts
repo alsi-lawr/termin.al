@@ -831,24 +831,6 @@ export function paneGeometries(
   return geometries;
 }
 
-export function visiblePaneGeometries(
-  workspace: PaneWorkspace,
-): ReadonlyArray<PaneGeometry> {
-  if (workspace.zoom.kind === "none") {
-    return paneGeometries(workspace);
-  }
-
-  return [
-    {
-      paneId: workspace.zoom.paneId,
-      x: 0,
-      y: 0,
-      width: 1,
-      height: 1,
-    },
-  ];
-}
-
 export function applyPaneOperation(
   workspace: PaneWorkspace,
   operation: PaneOperation,
