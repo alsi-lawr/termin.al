@@ -10,10 +10,12 @@ import {
   createShellId,
   createShellSessionId,
 } from "../../domain/terminal/Shell.ts";
+import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createPaneCommandDefinition,
   parsePaneCommand,
 } from "./PaneCommand.ts";
+import { createCommandRegistry } from "./CommandRegistry.ts";
 
 test("parses the full pane-management command seam", () => {
   const split = parsePaneCommand(["split", "vertical", "editor"]);
@@ -50,6 +52,7 @@ test("executes parsed pane operations through the existing command registry cont
     received = operation;
     return applyPaneOperation(workspace, operation);
   });
+  const registry = createCommandRegistry({ commands: [command] });
   const outcome = await command.execute(
     {
       source: "pane split horizontal viewer",
@@ -60,6 +63,9 @@ test("executes parsed pane operations through the existing command registry cont
     {
       shellId: createShellId("shell"),
       sessionId: createShellSessionId("session"),
+      currentDirectory: virtualHomeDirectory(),
+      commandHistory: [],
+      registry,
       signal: new AbortController().signal,
     },
   );

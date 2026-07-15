@@ -25,6 +25,7 @@ import {
   createEmptyPathCompletionProvider,
   createRegistryCommandCompletionProvider,
 } from "../../application/commands/Completion.ts";
+import { createReadOnlyCommandDefinitions } from "../../application/commands/ReadOnlyCommands.ts";
 import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
 import {
   InputCapture,
@@ -80,7 +81,14 @@ export function Terminal({
   );
   const [registry] = useState(() =>
     createCommandRegistry({
-      commands: [createPaneCommandDefinition(paneCommandHandler)],
+      commands: [
+        ...createReadOnlyCommandDefinitions({
+          filesystem: developmentFixtureCorpus.filesystem,
+          documents: developmentFixtureCorpus.documents,
+          recursiveEntryLimit: 100,
+        }),
+        createPaneCommandDefinition(paneCommandHandler),
+      ],
     }),
   );
   const [completionService] = useState(() =>

@@ -19,6 +19,7 @@ import {
 } from "./Completion.ts";
 import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
 import type { VirtualDirectoryPath } from "../filesystem/VirtualFilesystem.ts";
+import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 
 declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
@@ -91,7 +92,11 @@ export type ShellDiagnostic =
   | Readonly<{
       kind: "runtime";
       id: ShellDiagnosticId;
-      code: "runtime.execution-failed" | "runtime.cancelled";
+      code:
+        | "runtime.execution-failed"
+        | "runtime.cancelled"
+        | "runtime.content-unavailable"
+        | "runtime.truncated";
       message: string;
     }>;
 
@@ -170,6 +175,11 @@ export type CommandEffect =
       directory: VirtualDirectoryPath;
     }>
   | Readonly<{
+      kind: "open-raw-pager";
+      title: string;
+      document: MarkdownDocument;
+    }>
+  | Readonly<{
       kind: "request-secret-prompt";
       request: SecretPromptRequest;
     }>;
@@ -218,6 +228,7 @@ export type ShellCommandRequest = Readonly<{
   sessionId: ShellSessionId;
   source: string;
   currentDirectory: VirtualDirectoryPath;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
 }>;
 
 export type CommandLifecycle =
@@ -837,30 +848,32 @@ export function reduceShellState(
         return state;
       }
 
-      const command: ShellCommandRequest = {
-        id: createCommandId(state.sessionId, state.nextCommandSequence),
-        shellId: state.id,
-        sessionId: state.sessionId,
-        source: state.input.buffer.value,
-        currentDirectory: state.currentDirectory,
-      };
       const commandHistoryEntry: CommandHistoryEntry = {
         id: createCommandHistoryEntryId(
           state.sessionId,
           state.nextCommandHistorySequence,
         ),
-        source: command.source,
+        source: state.input.buffer.value,
+      };
+      const commandHistory = appendBounded(
+        state.commandHistory,
+        state.commandHistoryLimit,
+        commandHistoryEntry,
+      );
+      const command: ShellCommandRequest = {
+        id: createCommandId(state.sessionId, state.nextCommandSequence),
+        shellId: state.id,
+        sessionId: state.sessionId,
+        source: commandHistoryEntry.source,
+        currentDirectory: state.currentDirectory,
+        commandHistory,
       };
 
       return {
         ...state,
         input: createEmptyPromptEditor(),
         lifecycle: { kind: "running", command },
-        commandHistory: appendBounded(
-          state.commandHistory,
-          state.commandHistoryLimit,
-          commandHistoryEntry,
-        ),
+        commandHistory,
         historyNavigation: { kind: "not-browsing" },
         completion: { kind: "idle" },
         nextCommandSequence: state.nextCommandSequence + 1,

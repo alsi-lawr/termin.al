@@ -1,15 +1,21 @@
 import type { OptionTerminator } from "../../domain/terminal/ArgumentLexer.ts";
 import type {
+  CommandHistoryEntry,
   CommandOutcome,
   ShellId,
   ShellSessionId,
 } from "../../domain/terminal/Shell.ts";
+import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
+
+export type CommandGroup = "gnu-like" | "application" | "navigation";
 
 export type CommandMetadata = Readonly<{
+  group: CommandGroup;
   name: string;
   aliases: ReadonlyArray<string>;
   summary: string;
   usage: string;
+  examples: ReadonlyArray<string>;
 }>;
 
 export type CommandInvocation = Readonly<{
@@ -22,6 +28,9 @@ export type CommandInvocation = Readonly<{
 export type CommandExecutionContext = Readonly<{
   shellId: ShellId;
   sessionId: ShellSessionId;
+  currentDirectory: VirtualDirectoryPath;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
+  registry: CommandRegistry;
   signal: AbortSignal;
 }>;
 

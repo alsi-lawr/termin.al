@@ -100,6 +100,12 @@ test("reduces command execution and bounds per-shell histories", () => {
       sessionId: "session",
       source: "first",
       currentDirectory: "~",
+      commandHistory: [
+        {
+          id: "session-command-history-1",
+          source: "first",
+        },
+      ],
     },
   });
 

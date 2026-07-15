@@ -19,10 +19,12 @@ test("completes registry command names and aliases", async () => {
     commands: [
       {
         metadata: {
+          group: "navigation",
           name: "open",
           aliases: ["o"],
           summary: "Open content",
           usage: "open <target>",
+          examples: ["open about"],
         },
         execute: async () => ({ kind: "succeeded", outputs: [], effects: [] }),
       },

@@ -126,12 +126,14 @@ test("lists and traverses immutable virtual directory data with bounds", () => {
     filesystem,
     directory: filesystem.root,
     limit: 10,
+    maximumDepth: 10,
     signal: new AbortController().signal,
   });
   const truncated = traverseVirtualDirectory({
     filesystem,
     directory: filesystem.root,
     limit: 2,
+    maximumDepth: 10,
     signal: new AbortController().signal,
   });
   const controller = new AbortController();
@@ -140,6 +142,7 @@ test("lists and traverses immutable virtual directory data with bounds", () => {
     filesystem,
     directory: filesystem.root,
     limit: 10,
+    maximumDepth: 10,
     signal: controller.signal,
   });
 

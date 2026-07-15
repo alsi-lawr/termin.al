@@ -347,10 +347,12 @@ export function createPaneCommandDefinition(
 ): CommandDefinition {
   return {
     metadata: {
+      group: "application",
       name: "pane",
       aliases: [],
       summary: "Manage terminal panes.",
       usage: "pane split|focus|select|resize|close|zoom|swap|rotate|layout",
+      examples: ["pane split horizontal viewer", "pane focus next"],
     },
     execute: (invocation) => Promise.resolve(executePaneCommand(invocation, handler)),
   };

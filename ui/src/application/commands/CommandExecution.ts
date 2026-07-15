@@ -151,6 +151,9 @@ export async function executeCommandLine({
       {
         shellId: request.shellId,
         sessionId: request.sessionId,
+        currentDirectory: request.currentDirectory,
+        commandHistory: request.commandHistory,
+        registry,
         signal,
       },
     );

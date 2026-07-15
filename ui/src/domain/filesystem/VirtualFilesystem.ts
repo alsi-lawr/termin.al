@@ -178,6 +178,7 @@ export type VirtualTraversalOptions = Readonly<{
   filesystem: VirtualFilesystem;
   directory: VirtualDirectoryNode;
   limit: number;
+  maximumDepth: number;
   signal: AbortSignal;
 }>;
 
@@ -568,10 +569,15 @@ export function traverseVirtualDirectory({
   filesystem,
   directory,
   limit,
+  maximumDepth,
   signal,
 }: VirtualTraversalOptions): VirtualTraversalResult {
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new Error("Virtual traversal limits must be positive safe integers.");
+  }
+
+  if (!Number.isSafeInteger(maximumDepth) || maximumDepth < 0) {
+    throw new Error("Virtual traversal depths must be non-negative safe integers.");
   }
 
   const children = filesystem.childrenByDirectoryPath.get(directory.path);
@@ -580,9 +586,12 @@ export function traverseVirtualDirectory({
     throw new Error("Virtual filesystem directories must have child collections.");
   }
 
-  const pending = [...children]
-    .reverse()
-    .map((node) => ({ node, depth: 1 }));
+  const pending =
+    maximumDepth === 0
+      ? []
+      : [...children]
+          .reverse()
+          .map((node) => ({ node, depth: 1 }));
   const entries: VirtualTraversalEntry[] = [];
 
   while (pending.length > 0) {
@@ -602,7 +611,7 @@ export function traverseVirtualDirectory({
 
     entries.push(entry);
 
-    if (entry.node.kind !== "directory") {
+    if (entry.node.kind !== "directory" || entry.depth >= maximumDepth) {
       continue;
     }
 
