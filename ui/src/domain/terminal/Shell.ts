@@ -226,7 +226,7 @@ export type CommandOutcome =
       diagnostic: Extract<ShellDiagnostic, { kind: "runtime" }>;
     }>;
 
-export type ShellHistoryFailure =
+type ShellHistoryFailure =
   | Exclude<CommandFailure, { kind: "execution-error" }>
   | Readonly<{
       kind: "execution-error";
