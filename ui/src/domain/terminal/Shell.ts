@@ -226,6 +226,21 @@ export type CommandOutcome =
       diagnostic: Extract<ShellDiagnostic, { kind: "runtime" }>;
     }>;
 
+export type ShellHistoryFailure =
+  | Exclude<CommandFailure, { kind: "execution-error" }>
+  | Readonly<{
+      kind: "execution-error";
+      commandName: string;
+    }>;
+
+export type ShellHistoryOutcome =
+  | Exclude<CommandOutcome, { kind: "failed" }>
+  | Readonly<{
+      kind: "failed";
+      failure: ShellHistoryFailure;
+      diagnostics: ReadonlyArray<ShellDiagnostic>;
+    }>;
+
 export type ShellCommandRequest = Readonly<{
   id: CommandId;
   shellId: ShellId;
@@ -249,7 +264,7 @@ export type CommandLifecycle =
 export type ShellHistoryEntry = Readonly<{
   id: ShellHistoryEntryId;
   command: ShellCommandRequest;
-  outcome: CommandOutcome;
+  outcome: ShellHistoryOutcome;
 }>;
 
 export type CommandHistoryEntry = Readonly<{
@@ -602,6 +617,25 @@ function browseNewerHistory(state: ShellState): ShellState {
 
 function commandEffects(outcome: CommandOutcome): ReadonlyArray<CommandEffect> {
   return outcome.kind === "succeeded" ? outcome.effects : [];
+}
+
+function historyOutcome(outcome: CommandOutcome): ShellHistoryOutcome {
+  if (outcome.kind !== "failed") {
+    return outcome;
+  }
+
+  const failure: ShellHistoryFailure = outcome.failure.kind === "execution-error"
+    ? {
+        kind: "execution-error",
+        commandName: outcome.failure.commandName,
+      }
+    : outcome.failure;
+
+  return {
+    kind: "failed",
+    failure,
+    diagnostics: outcome.diagnostics,
+  };
 }
 
 function requestedSecretPrompt(
@@ -999,6 +1033,7 @@ export function reduceShellState(
       const existingHistory = clearsScrollback(effects) ? [] : state.history;
       const secretPrompt = requestedSecretPrompt(effects);
       const currentDirectory = changedCurrentDirectory(effects);
+      const storedOutcome = historyOutcome(action.outcome);
 
       return {
         ...state,
@@ -1010,7 +1045,7 @@ export function reduceShellState(
             state.nextHistorySequence,
           ),
           command: state.lifecycle.command,
-          outcome: action.outcome,
+          outcome: storedOutcome,
         }),
         secretPrompt:
           secretPrompt === undefined

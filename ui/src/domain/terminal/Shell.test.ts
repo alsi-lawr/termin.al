@@ -195,6 +195,77 @@ test("requests cancellation through the active command AbortSignal seam", () => 
   assert.equal(settled.history[0]?.outcome.kind, "cancelled");
 });
 
+test("discards execution causes only when storing shell history", () => {
+  const messageSecret = "history-error-message-secret";
+  const stackSecret = "history-error-stack-secret";
+  const nestedCauseSecret = "history-error-cause-secret";
+  const fieldSecret = "history-error-field-secret";
+  const cause = new Error(messageSecret, {
+    cause: new Error(nestedCauseSecret),
+  });
+
+  cause.stack = stackSecret;
+  Object.assign(cause, { fieldSecret });
+
+  const submitted = submit(createState(), "cat about.md");
+  const commandId = runningCommandId(submitted);
+  const outcome: CommandOutcome = {
+    kind: "failed",
+    failure: {
+      kind: "execution-error",
+      commandName: "cat",
+      cause,
+    },
+    diagnostics: [
+      {
+        kind: "runtime",
+        id: createShellDiagnosticId("execution-failed"),
+        code: "runtime.execution-failed",
+        message: "The command could not complete.",
+      },
+    ],
+  };
+
+  assert.equal(outcome.kind, "failed");
+  if (outcome.kind !== "failed" || outcome.failure.kind !== "execution-error") {
+    assert.fail("Expected an execution-error outcome.");
+  }
+
+  assert.strictEqual(outcome.failure.cause, cause);
+
+  const settled = reduceShellState(submitted, {
+    kind: "command.settled",
+    commandId,
+    outcome,
+  });
+  const entry = settled.history[0];
+
+  if (
+    entry === undefined ||
+    entry.outcome.kind !== "failed" ||
+    entry.outcome.failure.kind !== "execution-error"
+  ) {
+    assert.fail("Expected a stored execution-error outcome.");
+  }
+
+  assert.deepEqual(entry.outcome.failure, {
+    kind: "execution-error",
+    commandName: "cat",
+  });
+  assert.equal("cause" in entry.outcome.failure, false);
+
+  const serializedState = JSON.stringify(settled);
+
+  for (const secret of [
+    messageSecret,
+    stackSecret,
+    nestedCauseSecret,
+    fieldSecret,
+  ]) {
+    assert.equal(serializedState.includes(secret), false);
+  }
+});
+
 test("navigates bounded command history with normal-mode k and j", () => {
   const first = settleSucceeded(submit(createState(), "first"), "one");
   const second = settleSucceeded(submit(first, "second"), "two");

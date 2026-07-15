@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import type {
-  CommandOutcome,
   ShellHistoryEntry,
+  ShellHistoryOutcome,
 } from "../../domain/terminal/Shell.ts";
 import {
   TerminalDiagnosticBlock,
@@ -17,7 +17,7 @@ const outcomeClassMap = {
   failed: "text-red-400",
   cancelled: "text-neutral-500",
 } as const satisfies Readonly<{
-  [Kind in CommandOutcome["kind"]]: string;
+  [Kind in ShellHistoryOutcome["kind"]]: string;
 }>;
 
 function TerminalHistoryOutcome({
@@ -25,7 +25,7 @@ function TerminalHistoryOutcome({
   outcome,
 }: Readonly<{
   historyEntryId: ShellHistoryEntry["id"];
-  outcome: CommandOutcome;
+  outcome: ShellHistoryOutcome;
 }>): ReactElement {
   switch (outcome.kind) {
     case "succeeded":
