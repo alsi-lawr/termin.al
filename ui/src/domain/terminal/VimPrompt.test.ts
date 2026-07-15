@@ -13,7 +13,9 @@ import {
 import {
   applyVimPromptKey,
   createVimPrompt,
+  insertVimPromptText,
   normalVimPromptKeyFromKeyboard,
+  replaceVimPromptText,
   vimPromptMode,
 } from "./VimPrompt.ts";
 
@@ -105,4 +107,36 @@ test("filters terminal prompt keys and bounds shared Vim history", () => {
   assert.deepEqual(normalVimPromptKeyFromKeyboard("y", false, false), {
     kind: "unrecognized",
   });
+});
+
+test("constructs and updates terminal prompts as one canonical line", () => {
+  const source = "before😀\r\nafter\rmiddle\nend";
+  const expected = "before😀 after middle end";
+  const constructed = createVimPrompt({
+    text: source,
+    mode: VimMode.Normal,
+    register: { kind: "empty" },
+  });
+  const replaced = replaceVimPromptText(
+    createVimPrompt({
+      text: "",
+      mode: VimMode.Insert,
+      register: { kind: "empty" },
+    }),
+    source,
+    source.length,
+  );
+  const pasted = insertVimPromptText(
+    createVimPrompt({
+      text: "prefix ",
+      mode: VimMode.Insert,
+      register: { kind: "empty" },
+    }),
+    source,
+  );
+
+  assert.deepEqual(constructed.lines, [expected]);
+  assert.deepEqual(replaced.lines, [expected]);
+  assert.equal(vimBufferCursorOffset(replaced), expected.length);
+  assert.deepEqual(pasted.lines, ["prefix before😀 after middle end"]);
 });

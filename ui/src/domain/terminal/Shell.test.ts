@@ -336,6 +336,38 @@ test("routes terminal normal prompt editing through the shared Vim buffer", () =
   assert.equal(undone.input.mode.kind, "normal");
 });
 
+test("canonicalizes native replacement into one line before Vim operators", () => {
+  const source = "first😀\r\nsecond\rthird\nfourth";
+  const expected = "first😀 second third fourth";
+  const replaced = reduceShellState(createState(), {
+    kind: "input.replace",
+    value: source,
+    cursor: source.length,
+  });
+  const normal = reduceShellState(replaced, {
+    kind: "prompt.normal-key",
+    key: { kind: "escape" },
+  });
+  const deleting = reduceShellState(normal, {
+    kind: "prompt.normal-key",
+    key: { kind: "operator", operator: "delete" },
+  });
+  const deleted = reduceShellState(deleting, {
+    kind: "prompt.normal-key",
+    key: { kind: "operator", operator: "delete" },
+  });
+
+  assert.deepEqual(replaced.input.lines, [expected]);
+  assert.equal(vimBufferText(replaced.input), expected);
+  assert.equal(vimBufferCursorOffset(replaced.input), expected.length);
+  assert.deepEqual(deleted.input.lines, [""]);
+  assert.equal(vimBufferText(deleted.input), "");
+  assert.deepEqual(deleted.input.register, {
+    kind: "character",
+    text: expected,
+  });
+});
+
 test("bounds terminal prompt undo snapshots through the shared Vim core", () => {
   let state = createState();
 
@@ -391,6 +423,40 @@ test("keeps secret prompts separate from command input and all histories", () =>
   assert.deepEqual(repeated.pendingEffect, { kind: "none" });
   assert.deepEqual(repeated.history, []);
   assert.deepEqual(repeated.commandHistory, []);
+});
+
+test("canonicalizes native composition replacement for secret prompts", () => {
+  const request = createSecretPromptRequest(
+    createSecretPromptId("secret-composition"),
+    "Secret value",
+  );
+  const source = "秘密\r\n値\r確認\n完了";
+  const expected = "秘密 値 確認 完了";
+  const active = reduceShellState(createState(), {
+    kind: "secret.begin",
+    request,
+  });
+  const composed = reduceShellState(active, {
+    kind: "input.replace",
+    value: source,
+    cursor: source.length,
+  });
+  const prompt = getActiveShellPrompt(composed);
+
+  if (prompt.kind !== "secret") {
+    assert.fail("Expected a secret prompt.");
+  }
+
+  assert.deepEqual(prompt.prompt.buffer.lines, [expected]);
+  assert.equal(vimBufferCursorOffset(prompt.prompt.buffer), expected.length);
+
+  const submitted = reduceShellState(composed, { kind: "prompt.submit" });
+
+  assert.deepEqual(submitted.pendingEffect, {
+    kind: "secret-submitted",
+    requestId: request.id,
+    value: expected,
+  });
 });
 
 test("emits one correlated secret cancellation without retaining the typed value", () => {
@@ -508,6 +574,63 @@ test("applies current single completions and exposes multiple matches", () => {
   });
 
   assert.equal(suggestions.completion.kind, "suggestions");
+
+  const unsafeRequest = createCompletionRequest(
+    withInput.id,
+    withInput.sessionId,
+    "op",
+    2,
+  );
+  const unsafePending = reduceShellState(withInput, {
+    kind: "completion.request",
+    request: unsafeRequest,
+  });
+  const canonicalCompleted = reduceShellState(unsafePending, {
+    kind: "completion.resolved",
+    request: unsafeRequest,
+    result: {
+      kind: "single",
+      candidate: {
+        kind: "command",
+        value: "open\r\nnotes",
+        label: "Open notes",
+      },
+    },
+  });
+
+  assert.deepEqual(canonicalCompleted.input.lines, ["open notes"]);
+  assert.equal(vimBufferCursorOffset(canonicalCompleted.input), 10);
+});
+
+test("canonicalizes pasted text before command submission and history navigation", () => {
+  const source = "echo 😀\r\nnext\rthen\nlast";
+  const expected = "echo 😀 next then last";
+  const pasted = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: source,
+  });
+  const submitted = reduceShellState(pasted, { kind: "prompt.submit" });
+  const settled = settleSucceeded(submitted, "done");
+  const normal = reduceShellState(settled, {
+    kind: "prompt.normal-key",
+    key: { kind: "escape" },
+  });
+  const recalled = reduceShellState(normal, {
+    kind: "prompt.normal-key",
+    key: { kind: "history-older" },
+  });
+
+  assert.deepEqual(pasted.input.lines, [expected]);
+  assert.equal(vimBufferText(pasted.input), expected);
+
+  if (submitted.lifecycle.kind !== "running") {
+    assert.fail("Expected pasted input to submit a command.");
+  }
+
+  assert.equal(submitted.lifecycle.command.source, expected);
+  assert.equal(submitted.commandHistory[0]?.source, expected);
+  assert.deepEqual(recalled.input.lines, [expected]);
+  assert.equal(vimBufferText(recalled.input), expected);
 });
 
 test("preserves astral input through cursor editing and command submission", () => {
@@ -533,6 +656,7 @@ test("preserves astral input through cursor editing and command submission", () 
   );
 
   assert.equal(vimBufferCursorOffset(normalized.input), 0);
+  assert.deepEqual(normalized.input.lines, ["😀"]);
   assert.equal(vimBufferText(backspaced.input), "");
   assert.equal(vimBufferText(deleted.input), "");
 

@@ -2,9 +2,7 @@ import {
   VimMode,
   backspaceVimInsertText,
   deleteVimInsertText,
-  insertVimText,
   moveVimInsertCursorToTextOffset,
-  replaceVimInsertText,
   vimBufferCursorOffset,
   vimBufferText,
   type VimBuffer,
@@ -13,6 +11,8 @@ import {
   applyVimPromptKey,
   createEmptyVimPrompt,
   createVimPrompt,
+  insertVimPromptText,
+  replaceVimPromptText,
   vimPromptMode,
   type VimPromptKey,
   type VimPromptMode,
@@ -785,7 +785,10 @@ export function reduceShellState(
         const prompt = activePrompt(state);
         const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-        return updateActivePromptBuffer(state, insertVimText(buffer, action.text));
+        return updateActivePromptBuffer(
+          state,
+          insertVimPromptText(buffer, action.text),
+        );
       }
     case "input.replace": {
       if (!canEditPrompt(state)) {
@@ -801,7 +804,7 @@ export function reduceShellState(
 
       return updateActivePromptBuffer(
         state,
-        replaceVimInsertText(buffer, action.value, action.cursor),
+        replaceVimPromptText(buffer, action.value, action.cursor),
       );
     }
     case "input.move-cursor": {
@@ -1003,7 +1006,7 @@ export function reduceShellState(
 
         return updateActivePromptBuffer(
           state,
-          replaceVimInsertText(state.input, edit.value, edit.cursor),
+          replaceVimPromptText(state.input, edit.value, edit.cursor),
         );
       }
 

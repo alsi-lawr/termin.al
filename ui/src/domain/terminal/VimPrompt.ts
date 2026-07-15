@@ -2,13 +2,16 @@ import {
   VimMode,
   applyNormalVimKey,
   createVimBuffer,
+  insertVimText,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
+  replaceVimInsertText,
   type VimBuffer,
   type VimDigit,
   type VimNormalKey,
   type VimRegister,
 } from "../vim/VimBuffer.ts";
+import { normalizeUnicodeCursorOffset } from "./UnicodeCursor.ts";
 
 export type VimPromptMode = Extract<
   VimMode,
@@ -61,6 +64,27 @@ export type CreateVimPromptOptions = Readonly<{
   register: VimRegister;
 }>;
 
+type CanonicalVimPromptReplacement = Readonly<{
+  text: string;
+  cursor: number;
+}>;
+
+function canonicaliseVimPromptText(text: string): string {
+  return text.replace(/\r\n|\r|\n/gu, " ");
+}
+
+function canonicaliseVimPromptReplacement(
+  text: string,
+  cursor: number,
+): CanonicalVimPromptReplacement {
+  const sourceCursor = normalizeUnicodeCursorOffset(text, cursor);
+
+  return {
+    text: canonicaliseVimPromptText(text),
+    cursor: canonicaliseVimPromptText(text.slice(0, sourceCursor)).length,
+  };
+}
+
 function projectPromptRegister(register: VimRegister): VimRegister {
   if (register.kind !== "line") {
     return register;
@@ -74,9 +98,10 @@ export function createVimPrompt({
   mode,
   register,
 }: CreateVimPromptOptions): VimBuffer {
+  const canonicalText = canonicaliseVimPromptText(text);
   const insertBuffer = moveVimInsertCursorToTextOffset(
-    createVimBuffer({ text, mode: VimMode.Insert }),
-    text.length,
+    createVimBuffer({ text: canonicalText, mode: VimMode.Insert }),
+    canonicalText.length,
   );
   const buffer =
     mode.kind === "normal"
@@ -95,6 +120,27 @@ export function createEmptyVimPrompt(): VimBuffer {
     mode: VimMode.Insert,
     register: { kind: "empty" },
   });
+}
+
+export function insertVimPromptText(
+  buffer: VimBuffer,
+  text: string,
+): VimBuffer {
+  return insertVimText(buffer, canonicaliseVimPromptText(text));
+}
+
+export function replaceVimPromptText(
+  buffer: VimBuffer,
+  text: string,
+  cursor: number,
+): VimBuffer {
+  if (buffer.mode.kind !== "insert") {
+    return buffer;
+  }
+
+  const replacement = canonicaliseVimPromptReplacement(text, cursor);
+
+  return replaceVimInsertText(buffer, replacement.text, replacement.cursor);
 }
 
 export function vimPromptMode(buffer: VimBuffer): VimPromptMode {
