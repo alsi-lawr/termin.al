@@ -177,10 +177,12 @@ module ContentContractsTests =
         |> ContentWire.serialize
         |> assertFixture "document-about.json"
 
-        ContentWire.projects
-            (projects ())
+        ContentDomain.Projects.tryCreate
             (source "content/projects.json" "https://github.com/example-owner/content/blob/main/content/projects.json")
             cache
+            (projects ())
+        |> requireValid
+        |> ContentWire.projects
         |> ContentWire.ProjectsResponse
         |> ContentWire.serialize
         |> assertFixture "projects.json"

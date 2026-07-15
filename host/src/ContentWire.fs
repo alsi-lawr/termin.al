@@ -173,10 +173,10 @@ module ContentWire =
           UpdatedAt = project |> ContentDomain.Project.updatedAt |> ContentDomain.Timestamp.value
           Tags = project |> ContentDomain.Project.tags |> List.map ContentDomain.ContentTag.value }
 
-    let projects projects sourceValue cacheValue : ProjectsDto =
-        { Projects = projects |> List.map project
-          Source = source sourceValue
-          Cache = cache cacheValue }
+    let projects (projects: ContentDomain.Projects) : ProjectsDto =
+        { Projects = projects |> ContentDomain.Projects.entries |> List.map project
+          Source = projects |> ContentDomain.Projects.source |> source
+          Cache = projects |> ContentDomain.Projects.cache |> cache }
 
     let now (value: ContentDomain.Now) : NowDto =
         { Title = value |> ContentDomain.Now.title |> ContentDomain.ContentTitle.value

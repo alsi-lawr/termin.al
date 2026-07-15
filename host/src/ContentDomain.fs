@@ -671,6 +671,35 @@ module ContentDomain =
         let updatedAt project = project.UpdatedAt
         let tags project = project.Tags
 
+    type Projects =
+        private
+            { Entries: Project list
+              Source: ContentSource
+              Cache: CacheMetadata }
+
+    [<RequireQualifiedAccess>]
+    module Projects =
+        let tryCreate source cache entries : ValidationResult<Projects> =
+            if List.length entries > PageItemLimit then
+                invalid "projects" "A project collection cannot contain more than 100 projects."
+            else
+                let ids = entries |> List.map (Project.id >> ContentId.value)
+                let slugs = entries |> List.map (Project.slug >> ContentSlug.value)
+
+                if ids |> Set.ofList |> Set.count <> List.length ids then
+                    invalid "projects" "Project identifiers must not be duplicated."
+                elif slugs |> Set.ofList |> Set.count <> List.length slugs then
+                    invalid "projects" "Project slugs must not be duplicated."
+                else
+                    Ok
+                        { Entries = entries
+                          Source = source
+                          Cache = cache }
+
+        let entries projects = projects.Entries
+        let source projects = projects.Source
+        let cache projects = projects.Cache
+
     [<RequireQualifiedAccess>]
     module ProjectManifest =
         let private tryProperty (name: string) (element: JsonElement) =
