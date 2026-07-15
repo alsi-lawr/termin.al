@@ -313,6 +313,7 @@ export type ContentProject = Readonly<{
   repository: RepositoryName;
   updatedAt: ContentTimestamp;
   tags: ReadonlyArray<ContentTag>;
+  readme: string;
 }>;
 
 export type ContentProjects = Readonly<{
@@ -988,7 +989,7 @@ export function validateContentDocument(
 function validateContentProject(value: unknown): ContentValidation<ContentProject> {
   const object = requireObject(
     value,
-    ["id", "slug", "name", "summary", "url", "repository", "updatedAt", "tags"],
+    ["id", "slug", "name", "summary", "url", "repository", "updatedAt", "tags", "readme"],
     "project",
   );
 
@@ -1004,6 +1005,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
   const repositoryValue = requireString(object.value, "repository");
   const updatedAtValue = requireString(object.value, "updatedAt");
   const tagsValue = requireArray(object.value, "tags");
+  const readmeValue = requireString(object.value, "readme");
 
   if (idValue.kind === "invalid") {
     return idValue;
@@ -1037,6 +1039,10 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     return tagsValue;
   }
 
+  if (readmeValue.kind === "invalid") {
+    return readmeValue;
+  }
+
   const id = validateContentId(idValue.value, "project.id");
   const slug = ContentSlug.tryCreate(slugValue.value, "project.slug");
   const name = validateSingleLine(nameValue.value, "project.name", 200);
@@ -1048,6 +1054,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
   );
   const updatedAt = validateContentTimestamp(updatedAtValue.value, "project.updatedAt");
   const tags = validateTags(tagsValue.value, "project.tags");
+  const readme = validateBody(readmeValue.value, "project.readme", true);
 
   if (id.kind === "invalid") {
     return id;
@@ -1081,6 +1088,10 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     return tags;
   }
 
+  if (readme.kind === "invalid") {
+    return readme;
+  }
+
   return valid({
     id: id.value,
     slug: slug.value,
@@ -1090,6 +1101,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     repository: repository.value,
     updatedAt: updatedAt.value,
     tags: tags.value,
+    readme: readme.value,
   });
 }
 

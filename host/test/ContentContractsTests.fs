@@ -2,7 +2,6 @@ namespace Termin.Al.Host.Tests
 
 open System
 open System.IO
-open System.Text.Json
 open Termin.Al.Host
 
 [<RequireQualifiedAccess>]
@@ -66,11 +65,6 @@ module ContentContractsTests =
                 expected
                 actual
 
-    let private projectManifest name =
-        use document = JsonDocument.Parse(readFixture name)
-        let projects = document.RootElement.GetProperty("projects").GetRawText()
-        "{\"projects\":" + projects + "}"
-
     let private catalog () =
         ContentDomain.Catalog.tryCreate
             (source "content/catalog.json" "https://github.com/example-owner/content/blob/main/content/catalog.json")
@@ -114,9 +108,23 @@ module ContentContractsTests =
         |> requireValid
 
     let private projects () =
-        projectManifest "projects.json"
-        |> ContentDomain.ProjectManifest.tryParse
-        |> requireValid
+        let manifest =
+            "{\"projects\":[{\"id\":\"sample-project\",\"slug\":\"sample-project\",\"name\":\"Sample Project\",\"summary\":\"A validated project fixture.\",\"url\":\"https://github.com/example-owner/sample-project\",\"repository\":\"example-owner/sample-project\",\"updatedAt\":\"2026-07-15T00:00:03.000Z\",\"tags\":[\"fsharp\",\"typescript\"]},{\"id\":\"second-project\",\"slug\":\"second-project\",\"name\":\"Second Project\",\"summary\":\"A second validated project fixture.\",\"url\":\"https://github.com/example-owner/second-project\",\"repository\":\"example-owner/second-project\",\"updatedAt\":\"2026-07-15T00:00:04.000Z\",\"tags\":[\"typescript\"]}]}"
+
+        let readmes =
+            [ "# Sample Project README\n\nThis is the supplied README body, not the project summary."
+              "# Second Project README\n\nThis is a second supplied README body." ]
+
+        let projectEntries =
+            manifest |> ContentDomain.ProjectManifest.tryParse |> requireValid
+
+        List.map2
+            (fun project readme ->
+                ContentDomain.ProjectReadme.create
+                    project
+                    (ContentDomain.MarkdownBody.tryCreate "test.projectReadme" readme |> requireValid))
+            projectEntries
+            readmes
 
     let private now () =
         ContentDomain.Now.create
@@ -234,17 +242,17 @@ module ContentContractsTests =
         | Ok _ -> failwith "Duplicate project slugs should not validate."
         | Error _ -> ()
 
-        match
-            projectManifest "projects-duplicate-repository-exact.json"
-            |> ContentDomain.ProjectManifest.tryParse
-        with
+        let exactDuplicateRepositoryManifest =
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
+
+        match ContentDomain.ProjectManifest.tryParse exactDuplicateRepositoryManifest with
         | Ok _ -> failwith "Exact duplicate project repositories should not validate."
         | Error _ -> ()
 
-        match
-            projectManifest "projects-duplicate-repository-case.json"
-            |> ContentDomain.ProjectManifest.tryParse
-        with
+        let caseDuplicateRepositoryManifest =
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"Example/One\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
+
+        match ContentDomain.ProjectManifest.tryParse caseDuplicateRepositoryManifest with
         | Ok _ -> failwith "Case-only duplicate project repositories should not validate."
         | Error _ -> ()
 

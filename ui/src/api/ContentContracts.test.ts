@@ -88,6 +88,7 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
         repository: "example-owner/sample-project",
         updatedAt: "2026-07-15T00:00:03.000Z",
         tags: ["fsharp"],
+        readme: "# Sample Project README\n\nThis is the supplied README body.",
       },
       {
         id: "second-project",
@@ -98,6 +99,7 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
         repository: "example-owner/second-project",
         updatedAt: "2026-07-15T00:00:03.000Z",
         tags: ["typescript"],
+        readme: "# Second Project README\n\nThis is another supplied README body.",
       },
     ],
     source: {

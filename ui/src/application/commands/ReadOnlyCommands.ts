@@ -874,7 +874,7 @@ function createCatCommand(
       aliases: [],
       summary: "Print raw virtual document content.",
       usage: "cat <path> [path ...]",
-      examples: ["cat about.md", "cat projects/sample-project.md"],
+      examples: ["cat about.md"],
     },
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "cat <path> [path ...]", 1, 32);

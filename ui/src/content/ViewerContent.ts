@@ -13,7 +13,7 @@ export type ViewerDirectoryEntry = Readonly<{
 }>;
 
 export type ViewerProjectCard = Readonly<{
-  id: VirtualNodeId;
+  id: string;
   name: string;
   summary: string;
   repository: string;

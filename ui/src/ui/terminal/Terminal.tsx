@@ -14,6 +14,7 @@ import {
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
+import type { ProjectReadme } from "../../api/ContentClient.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
@@ -76,6 +77,7 @@ type TerminalProps = Readonly<{
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  projectReadmes: ReadonlyArray<ProjectReadme>;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
 
@@ -99,6 +101,7 @@ export function Terminal({
   themeController,
   filesystem,
   documents,
+  projectReadmes,
   secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
@@ -123,6 +126,7 @@ export function Terminal({
         ...createPortfolioCommandDefinitions({
           filesystem,
           documents,
+          projectReadmes,
           themes: themeController,
         }),
         createPaneCommandDefinition(paneId, paneCommandHandler),

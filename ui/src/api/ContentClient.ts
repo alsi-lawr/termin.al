@@ -25,9 +25,20 @@ import {
   validateContentProjects,
 } from "./ContentContracts.ts";
 
+export type ProjectReadme = Readonly<{
+  id: string;
+  name: string;
+  summary: string;
+  repository: string;
+  repositoryUrl: string;
+  tags: ReadonlyArray<string>;
+  document: MarkdownDocument;
+}>;
+
 export type ContentCorpus = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  projectReadmes: ReadonlyArray<ProjectReadme>;
 }>;
 
 export type ContentCorpusLoadResult =
@@ -131,22 +142,6 @@ function byteSize(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-function projectDocumentText(project: ContentProjects["projects"][number]): string {
-  const tags = project.tags.map((tag) => `#${tag.value}`).join(" ");
-
-  return [
-    `# ${project.name}`,
-    "",
-    project.summary,
-    "",
-    `Repository: ${project.repository.value}`,
-    `Repository URL: ${project.url.value}`,
-    tags.length === 0 ? "" : `Tags: ${tags}`,
-  ]
-    .filter((line) => line.length > 0)
-    .join("\n");
-}
-
 function changelogDocumentText(changelog: ContentChangelog): string {
   const lines = ["# Changelog", "", "## Unreleased"];
 
@@ -170,7 +165,6 @@ function changelogDocumentText(changelog: ContentChangelog): string {
 }
 
 function derivedDocuments(
-  projects: ContentProjects,
   now: ContentNow,
   changelog: ContentChangelog,
 ): ReadonlyArray<DerivedDocument> {
@@ -189,21 +183,30 @@ function derivedDocuments(
     },
   ];
 
-  for (const project of projects.projects) {
-    documents.push({
-      handle: `project-${project.slug.value}`,
-      path: `~/projects/${project.slug.value}.md`,
-      updatedAt: project.updatedAt.value,
-      text: projectDocumentText(project),
-    });
-  }
-
   return documents;
+}
+
+function createProjectReadmes(
+  projects: ContentProjects,
+): ReadonlyArray<ProjectReadme> {
+  return projects.projects.map((project) => ({
+    id: project.id.value,
+    name: project.name,
+    summary: project.summary,
+    repository: project.repository.value,
+    repositoryUrl: project.url.value,
+    tags: project.tags.map((tag) => tag.value),
+    document: {
+      text: project.readme,
+      source: { path: project.url.value },
+    },
+  }));
 }
 
 function virtualCatalog(
   catalog: ContentCatalog,
   documents: ReadonlyArray<DerivedDocument>,
+  projectReadmes: ReadonlyArray<ProjectReadme>,
 ): Readonly<{
   catalog: VirtualCorpusCatalog;
   documentsByHandle: ReadonlyMap<string, MarkdownDocument>;
@@ -218,11 +221,7 @@ function virtualCatalog(
   );
   const documentsByHandle = new Map<string, MarkdownDocument>();
 
-  const projectsDocument = documents.some((document) =>
-    document.path.startsWith("~/projects/"),
-  );
-
-  if (projectsDocument && !paths.has("~/projects")) {
+  if (projectReadmes.length > 0 && !paths.has("~/projects")) {
     entries.push({
       kind: "directory",
       id: "projects-api-directory",
@@ -427,15 +426,12 @@ export class HttpContentClient implements ContentClient {
     }
 
     try {
-      const derived = derivedDocuments(
-        projects.value,
-        now.value,
-        changelog.value,
-      );
-      const virtual = virtualCatalog(catalog.value, derived);
+      const projectReadmes = createProjectReadmes(projects.value);
+      const derived = derivedDocuments(now.value, changelog.value);
+      const virtual = virtualCatalog(catalog.value, derived, projectReadmes);
       const filesystem = createVirtualFilesystem(virtual.catalog);
       const documents = this.documentSupplier(virtual.documentsByHandle);
-      const corpus = { filesystem, documents };
+      const corpus = { filesystem, documents, projectReadmes };
 
       if (virtual.catalog.entries.length === 1) {
         return { kind: "empty" };

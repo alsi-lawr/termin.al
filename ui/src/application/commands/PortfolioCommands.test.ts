@@ -55,6 +55,7 @@ function createRegistry(
   documents: VirtualDocumentSupplier = demoContentCorpus.documents,
   themes: ThemeController = createThemeController(),
   filesystem: VirtualFilesystem = demoContentCorpus.filesystem,
+  projectReadmes = demoContentCorpus.projectReadmes,
 ): CommandRegistry {
   return createCommandRegistry({
     commands: [
@@ -66,6 +67,7 @@ function createRegistry(
       ...createPortfolioCommandDefinitions({
         filesystem,
         documents,
+        projectReadmes,
         themes,
       }),
       createPaneCommandDefinition(createPaneId("pane-1"), () => ({
@@ -173,15 +175,22 @@ test("opens fixture documents inline and directory targets in requested split ef
   });
   assert.equal(splitEffect.viewer.kind, "project-gallery");
   if (splitEffect.viewer.kind === "project-gallery") {
-    assert.equal(splitEffect.viewer.projects[0]?.name, "Sample Project");
+    const project = splitEffect.viewer.projects[0];
+
+    assert.equal(project?.name, "Sample Project");
     assert.equal(
-      splitEffect.viewer.projects[0]?.repository,
+      project?.repository,
       "demo/sample-project",
     );
-    assert.deepEqual(splitEffect.viewer.projects[0]?.tags, [
+    assert.deepEqual(project?.tags, [
       "typescript",
       "fsharp",
     ]);
+    assert.equal(
+      project?.document.text,
+      "# Sample Project README\n\nThis independently supplied README documents the deterministic demo project.",
+    );
+    assert.notEqual(project?.document.text, project?.summary);
   }
 });
 

@@ -165,6 +165,8 @@ module GitHubContentClientTests =
     let private projectsManifest =
         "{\"projects\":[{\"id\":\"curated-project\",\"slug\":\"curated-project\",\"name\":\"Curated Project\",\"summary\":\"Curated project summary.\",\"url\":\"https://github.com/example-owner/curated-project\",\"repository\":\"example-owner/curated-project\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"fsharp\"]}]}"
 
+    let private emptyProjectsManifest = "{\"projects\":[]}"
+
     let private githubConfiguration () =
         let values = Dictionary<string, string>()
         values.Add("GitHub:Owner", "example-owner")
@@ -601,7 +603,7 @@ module GitHubContentClientTests =
                             "---\nid: about\ntitle: About\nupdatedAt: 2026-07-15T00:00:00.000Z\ntags: about\n---\n# About\n"
                             (Some "\"about-v1\"")
                     | path when path = projectsPath ->
-                        response HttpStatusCode.OK projectsManifest (Some "\"projects-v1\"")
+                        response HttpStatusCode.OK emptyProjectsManifest (Some "\"projects-v1\"")
                     | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                         response HttpStatusCode.OK "[]" (Some "\"owned-v1\"")
                     | _ -> response HttpStatusCode.NotFound "" None
@@ -758,7 +760,7 @@ module GitHubContentClientTests =
                         | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
                             response HttpStatusCode.OK cacheCatalogManifest (Some "\"cache-catalog\"")
                         | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
-                            response HttpStatusCode.OK projectsManifest (Some "\"cache-projects\"")
+                            response HttpStatusCode.OK emptyProjectsManifest (Some "\"cache-projects\"")
                         | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                             linkResponse
                                 HttpStatusCode.OK
@@ -1005,6 +1007,13 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
                 | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
                     response HttpStatusCode.OK projectsManifest None
+                | "/repos/example-owner/curated-project" ->
+                    response
+                        HttpStatusCode.OK
+                        (repositoryJson "example-owner/curated-project" "\"Curated project summary\"")
+                        None
+                | "/repos/example-owner/curated-project/readme?ref=main" ->
+                    response HttpStatusCode.OK "# Curated Project README\n\nThis is the supplied curated README." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     linkResponse
                         HttpStatusCode.OK
@@ -1017,7 +1026,10 @@ module GitHubContentClientTests =
                     path.StartsWith("/repos/example-owner/recent-", StringComparison.Ordinal)
                     && path.EndsWith("/readme?ref=main", StringComparison.Ordinal)
                     ->
-                    response HttpStatusCode.NotFound "" None
+                    response
+                        HttpStatusCode.OK
+                        "# Generated Project README\n\nThis is the supplied generated README."
+                        None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -1037,6 +1049,13 @@ module GitHubContentClientTests =
         if ContentDomain.Projects.entries projects |> List.length <> 7 then
             failwith "Projects must combine curated projects with six recent public owned repositories."
 
+        match ContentDomain.Projects.entries projects with
+        | curated :: _ when
+            curated |> ContentDomain.ProjectReadme.body |> ContentDomain.MarkdownBody.value = "# Curated Project README\n\nThis is the supplied curated README."
+            ->
+            ()
+        | _ -> failwith "Curated projects must retain their supplied repository README bodies."
+
         if
             handler.Requests
             |> List.exists (fun request -> request.PathAndQuery = "/users/example-owner/repos?page=2")
@@ -1055,6 +1074,13 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
                 | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
                     response HttpStatusCode.OK projectsManifest None
+                | "/repos/example-owner/curated-project" ->
+                    response
+                        HttpStatusCode.OK
+                        (repositoryJson "example-owner/curated-project" "\"Curated project summary\"")
+                        None
+                | "/repos/example-owner/curated-project/readme?ref=main" ->
+                    response HttpStatusCode.OK "# Curated Project README\n\nThis is the supplied curated README." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     response HttpStatusCode.OK $"[{caseOnlyCandidate}]" None
                 | _ -> response HttpStatusCode.NotFound "" None)
@@ -1074,7 +1100,10 @@ module GitHubContentClientTests =
 
         match ContentDomain.Projects.entries projects with
         | [ project ] when
-            ContentDomain.Project.repository project |> ContentDomain.RepositoryName.value = "example-owner/curated-project"
+            project
+            |> ContentDomain.ProjectReadme.project
+            |> ContentDomain.Project.repository
+            |> ContentDomain.RepositoryName.value = "example-owner/curated-project"
             ->
             ()
         | _ -> failwith "Case-only repository identities must retain only the curated project."
@@ -1085,10 +1114,12 @@ module GitHubContentClientTests =
         let expectedPaths =
             [ "/repos/example-owner/content"
               "/repos/example-owner/content/contents/content/projects.json?ref=main"
+              "/repos/example-owner/curated-project"
+              "/repos/example-owner/curated-project/readme?ref=main"
               "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ]
 
         if requestedPaths <> expectedPaths then
-            failwithf "Case-only curated candidates must be excluded before README requests: %A." requestedPaths
+            failwithf "Case-only generated candidates must be excluded before README requests: %A." requestedPaths
 
     let private testMissingProfileAndReleaseTagChangelog () =
         let v1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

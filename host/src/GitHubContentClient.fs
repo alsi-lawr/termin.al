@@ -873,6 +873,11 @@ module GitHubContentClient =
                 | Error failure -> return Error(mapFetchFailure failure)
             }
 
+        let missingProjectReadmeProblem (repository: GitHubRepositoryData) =
+            ContentDomain.Problem.create
+                ContentDomain.NotFound
+                $"The public README for {repositoryName repository.RepositoryFullName} was not found."
+
         let getProfileReadme cancellationToken =
             task {
                 let profileRepository = GitHubContentConfiguration.profileRepository configuration
@@ -950,14 +955,14 @@ module GitHubContentClient =
 
             getPages (Some firstPage) 0 []
 
-        let projectFromRepository (repository: GitHubRepositoryData) (readme: string option) =
+        let projectFromRepository (repository: GitHubRepositoryData) (readme: string) =
             let fullName = repositoryName repository.RepositoryFullName
             let repositoryShortName = fullName.Substring(fullName.IndexOf('/') + 1)
             let slugValue = normalizeSlug repositoryShortName
 
             let summary =
                 readme
-                |> Option.bind summaryFromMarkdown
+                |> summaryFromMarkdown
                 |> Option.orElse repository.RepositoryDescription
                 |> Option.defaultValue $"Public repository {repositoryShortName}."
 
@@ -966,29 +971,33 @@ module GitHubContentClient =
                 toDomainResult (ContentDomain.ContentId.tryCreate "project.id" slugValue),
                 toDomainResult (ContentDomain.ContentTitle.tryCreate "project.name" repositoryShortName),
                 toDomainResult (ContentDomain.ContentSummary.tryCreate "project.summary" summary),
-                toDomainResult (ContentDomain.ContentTag.tryCreate "project.tag" "github")
+                toDomainResult (ContentDomain.ContentTag.tryCreate "project.tag" "github"),
+                toDomainResult (ContentDomain.MarkdownBody.tryCreate "project.readme" readme)
             with
-            | Ok slug, Ok id, Ok title, Ok projectSummary, Ok tag ->
+            | Ok slug, Ok id, Ok title, Ok projectSummary, Ok tag, Ok projectReadme ->
                 Ok(
-                    ContentDomain.Project.create
-                        id
-                        slug
-                        title
-                        projectSummary
-                        repository.RepositoryUrl
-                        repository.RepositoryFullName
-                        repository.RepositoryUpdatedAt
-                        [ tag ]
+                    ContentDomain.ProjectReadme.create
+                        (ContentDomain.Project.create
+                            id
+                            slug
+                            title
+                            projectSummary
+                            repository.RepositoryUrl
+                            repository.RepositoryFullName
+                            repository.RepositoryUpdatedAt
+                            [ tag ])
+                        projectReadme
                 )
-            | Error message, _, _, _, _
-            | _, Error message, _, _, _
-            | _, _, Error message, _, _
-            | _, _, _, Error message, _
-            | _, _, _, _, Error message -> Error message
+            | Error message, _, _, _, _, _
+            | _, Error message, _, _, _, _
+            | _, _, Error message, _, _, _
+            | _, _, _, Error message, _, _
+            | _, _, _, _, Error message, _
+            | _, _, _, _, _, Error message -> Error message
 
         let getProjectReadmes (repositories: GitHubRepositoryData list) cancellationToken =
             task {
-                let mutable collected: (GitHubRepositoryData * string option) list = []
+                let mutable collected: (GitHubRepositoryData * string) list = []
                 let mutable failure: ContentDomain.Problem option = None
 
                 for repository in repositories do
@@ -997,7 +1006,37 @@ module GitHubContentClient =
 
                         match readme with
                         | Error problem -> failure <- Some problem
-                        | Ok value -> collected <- (repository, value |> Option.map fst) :: collected
+                        | Ok(Some(body, _)) -> collected <- (repository, body) :: collected
+                        | Ok None -> failure <- Some(missingProjectReadmeProblem repository)
+
+                match failure with
+                | Some problem -> return Error problem
+                | None -> return Ok(List.rev collected)
+            }
+
+        let getCuratedProjectReadmes (projects: ContentDomain.Project list) cancellationToken =
+            task {
+                let mutable collected: ContentDomain.ProjectReadme list = []
+                let mutable failure: ContentDomain.Problem option = None
+
+                for project in projects do
+                    if failure.IsNone then
+                        let repositoryName = project |> ContentDomain.Project.repository
+                        let! repository = getRepository repositoryName cancellationToken
+
+                        match repository with
+                        | Error problem -> failure <- Some problem
+                        | Ok repository ->
+                            let! readme = getOptionalReadme repository cancellationToken
+
+                            match readme with
+                            | Error problem -> failure <- Some problem
+                            | Ok None -> failure <- Some(missingProjectReadmeProblem repository)
+                            | Ok(Some(body, _)) ->
+                                match ContentDomain.MarkdownBody.tryCreate "project.readme" body with
+                                | Error validationFailure -> failure <- Some(mapValidationFailure validationFailure)
+                                | Ok markdown ->
+                                    collected <- ContentDomain.ProjectReadme.create project markdown :: collected
 
                 match failure with
                 | Some problem -> return Error problem
@@ -1026,50 +1065,57 @@ module GitHubContentClient =
                                 cacheMetadata manifestPayload
                             with
                             | Ok curated, Ok sourceUrl, Ok metadata ->
-                                let! ownedRepositories = getOwnedRepositories cancellationToken
+                                let! curatedReadmes = getCuratedProjectReadmes curated cancellationToken
 
-                                match ownedRepositories with
+                                match curatedReadmes with
                                 | Error problem -> return Error problem
-                                | Ok owned ->
-                                    let curatedRepositories =
-                                        HashSet<string>(
-                                            (curated
-                                             |> List.map (
-                                                 ContentDomain.Project.repository >> ContentDomain.RepositoryName.value
-                                             )),
-                                            StringComparer.OrdinalIgnoreCase
-                                        )
+                                | Ok curatedProjects ->
+                                    let! ownedRepositories = getOwnedRepositories cancellationToken
 
-                                    let remainingCapacity = max 0 (ContentDomain.PageItemLimit - List.length curated)
-
-                                    let candidates =
-                                        owned
-                                        |> List.filter (fun repository ->
-                                            not (
-                                                curatedRepositories.Contains(
-                                                    repositoryName repository.RepositoryFullName
-                                                )
-                                            ))
-                                        |> List.truncate (min 6 remainingCapacity)
-
-                                    let! readmes = getProjectReadmes candidates cancellationToken
-
-                                    match readmes with
+                                    match ownedRepositories with
                                     | Error problem -> return Error problem
-                                    | Ok fetchedReadmes ->
-                                        let generated =
-                                            fetchedReadmes
-                                            |> List.choose (fun (repository, readme) ->
-                                                match projectFromRepository repository readme with
-                                                | Ok project -> Some project
-                                                | Error _ -> None)
+                                    | Ok owned ->
+                                        let curatedRepositories =
+                                            HashSet<string>(
+                                                (curated
+                                                 |> List.map (
+                                                     ContentDomain.Project.repository
+                                                     >> ContentDomain.RepositoryName.value
+                                                 )),
+                                                StringComparer.OrdinalIgnoreCase
+                                            )
 
-                                        return
-                                            ContentDomain.Projects.tryCreate
-                                                (repositorySource contentRepositoryData manifestPath sourceUrl)
-                                                metadata
-                                                (curated @ generated)
-                                            |> Result.mapError mapValidationFailure
+                                        let remainingCapacity =
+                                            max 0 (ContentDomain.PageItemLimit - List.length curated)
+
+                                        let candidates =
+                                            owned
+                                            |> List.filter (fun repository ->
+                                                not (
+                                                    curatedRepositories.Contains(
+                                                        repositoryName repository.RepositoryFullName
+                                                    )
+                                                ))
+                                            |> List.truncate (min 6 remainingCapacity)
+
+                                        let! readmes = getProjectReadmes candidates cancellationToken
+
+                                        match readmes with
+                                        | Error problem -> return Error problem
+                                        | Ok fetchedReadmes ->
+                                            let generated =
+                                                fetchedReadmes
+                                                |> List.choose (fun (repository, readme) ->
+                                                    match projectFromRepository repository readme with
+                                                    | Ok project -> Some project
+                                                    | Error _ -> None)
+
+                                            return
+                                                ContentDomain.Projects.tryCreate
+                                                    (repositorySource contentRepositoryData manifestPath sourceUrl)
+                                                    metadata
+                                                    (curatedProjects @ generated)
+                                                |> Result.mapError mapValidationFailure
                             | Error _, _, _
                             | _, Error _, _
                             | _, _, Error _ -> return Error(invalidProblem ())

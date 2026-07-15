@@ -673,6 +673,18 @@ module ContentDomain =
         let updatedAt project = project.UpdatedAt
         let tags project = project.Tags
 
+    type ProjectReadme =
+        private
+            { Project: Project
+              Body: MarkdownBody }
+
+    [<RequireQualifiedAccess>]
+    module ProjectReadme =
+        let create project body = { Project = project; Body = body }
+
+        let project readme = readme.Project
+        let body readme = readme.Body
+
     let private hasDuplicateProjectRepositoryIdentity (entries: Project list) =
         let repositories = HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
@@ -681,9 +693,19 @@ module ContentDomain =
             let repository = project |> Project.repository |> RepositoryName.value
             not (repositories.Add repository))
 
+    let private hasDuplicateProjectReadmeRepositoryIdentity (entries: ProjectReadme list) =
+        let repositories = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+
+        entries
+        |> List.exists (fun project ->
+            let repository =
+                project |> ProjectReadme.project |> Project.repository |> RepositoryName.value
+
+            not (repositories.Add repository))
+
     type Projects =
         private
-            { Entries: Project list
+            { Entries: ProjectReadme list
               Source: ContentSource
               Cache: CacheMetadata }
 
@@ -693,14 +715,17 @@ module ContentDomain =
             if List.length entries > PageItemLimit then
                 invalid "projects" "A project collection cannot contain more than 100 projects."
             else
-                let ids = entries |> List.map (Project.id >> ContentId.value)
-                let slugs = entries |> List.map (Project.slug >> ContentSlug.value)
+                let ids =
+                    entries |> List.map (ProjectReadme.project >> Project.id >> ContentId.value)
+
+                let slugs =
+                    entries |> List.map (ProjectReadme.project >> Project.slug >> ContentSlug.value)
 
                 if ids |> Set.ofList |> Set.count <> List.length ids then
                     invalid "projects" "Project identifiers must not be duplicated."
                 elif slugs |> Set.ofList |> Set.count <> List.length slugs then
                     invalid "projects" "Project slugs must not be duplicated."
-                elif hasDuplicateProjectRepositoryIdentity entries then
+                elif hasDuplicateProjectReadmeRepositoryIdentity entries then
                     invalid "projects" "Project repositories must not be duplicated."
                 else
                     Ok

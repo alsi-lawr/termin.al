@@ -8,6 +8,7 @@ import {
   type ViewerProjectCard,
   type ViewerPublicationEntry,
 } from "../../content/ViewerContent.ts";
+import type { ProjectReadme } from "../../api/ContentClient.ts";
 import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   listVirtualDirectory,
@@ -38,6 +39,7 @@ import type {
 export type CreatePortfolioCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  projectReadmes: ReadonlyArray<ProjectReadme>;
   themes: ThemeController;
 }>;
 
@@ -273,74 +275,20 @@ function markdownSummary(document: MarkdownDocument): string {
   const summary = document.text
     .split(/\r?\n\s*\r?\n/u)
     .map((paragraph) => paragraph.trim())
-    .find(
-      (paragraph) =>
-        paragraph.length > 0 &&
-        !paragraph.startsWith("#") &&
-        !paragraph.startsWith("Repository:") &&
-        !paragraph.startsWith("Repository URL:") &&
-        !paragraph.startsWith("Tags:"),
-    );
+    .find((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#"));
 
   return summary ?? "No summary is available.";
 }
 
-function projectRepository(document: MarkdownDocument): Readonly<{
-  repository: string;
-  repositoryUrl?: string;
-}> {
-  const lines = document.text.split(/\r?\n/u);
-  const repository = lines
-    .find((line) => line.startsWith("Repository:"))
-    ?.slice("Repository:".length)
-    .trim();
-  const repositoryUrl = lines
-    .find((line) => line.startsWith("Repository URL:"))
-    ?.slice("Repository URL:".length)
-    .trim();
-
+function projectCard(project: ProjectReadme): ViewerProjectCard {
   return {
-    repository:
-      repository === undefined || repository.length === 0
-        ? "Repository unavailable"
-        : repository,
-    ...(repositoryUrl === undefined || repositoryUrl.length === 0
-      ? {}
-      : { repositoryUrl }),
-  };
-}
-
-function projectTags(document: MarkdownDocument): ReadonlyArray<string> {
-  const tags = document.text
-    .split(/\r?\n/u)
-    .find((line) => line.startsWith("Tags:"))
-    ?.slice("Tags:".length)
-    .trim();
-
-  return tags === undefined || tags.length === 0
-    ? []
-    : tags
-        .split(/\s+/u)
-        .filter((tag) => tag.startsWith("#") && tag.length > 1)
-        .map((tag) => tag.slice(1));
-}
-
-function projectCard({
-  node,
-  document,
-}: LoadedDirectoryDocument): ViewerProjectCard {
-  const repository = projectRepository(document);
-
-  return {
-    id: node.id,
-    name: markdownTitle(document, node.name),
-    summary: markdownSummary(document),
-    repository: repository.repository,
-    ...(repository.repositoryUrl === undefined
-      ? {}
-      : { repositoryUrl: repository.repositoryUrl }),
-    tags: projectTags(document),
-    document,
+    id: project.id,
+    name: project.name,
+    summary: project.summary,
+    repository: project.repository,
+    repositoryUrl: project.repositoryUrl,
+    tags: project.tags,
+    document: project.document,
   };
 }
 
@@ -392,6 +340,7 @@ async function openTarget(
   commandName: string,
   filesystem: VirtualFilesystem,
   documents: VirtualDocumentSupplier,
+  projectReadmes: ReadonlyArray<ProjectReadme>,
   context: CommandExecutionContext,
   path: string,
 ): Promise<OpenTargetResult> {
@@ -420,11 +369,17 @@ async function openTarget(
       return { kind: "failed", outcome: failureOutcome(commandName, listing) };
     }
 
-    if (
-      resolution.node.path === "~/projects" ||
-      resolution.node.path === "~/blog" ||
-      resolution.node.path === "~/notes"
-    ) {
+    if (resolution.node.path === "~/projects") {
+      return {
+        kind: "viewer",
+        viewer: createProjectGalleryViewerContent({
+          title: "Projects",
+          projects: projectReadmes.map(projectCard),
+        }),
+      };
+    }
+
+    if (resolution.node.path === "~/blog" || resolution.node.path === "~/notes") {
       const files = listing.entries.filter(
         (entry): entry is VirtualFileNode => entry.kind === "file",
       );
@@ -442,16 +397,6 @@ async function openTarget(
         return {
           kind: "failed",
           outcome: unavailableContentOutcome(commandName),
-        };
-      }
-
-      if (resolution.node.path === "~/projects") {
-        return {
-          kind: "viewer",
-          viewer: createProjectGalleryViewerContent({
-            title: "Projects",
-            projects: loaded.documents.map(projectCard),
-          }),
         };
       }
 
@@ -544,6 +489,7 @@ function createHelpCommand(): CommandDefinition {
 function createOpenCommand(
   filesystem: VirtualFilesystem,
   documents: VirtualDocumentSupplier,
+  projectReadmes: ReadonlyArray<ProjectReadme>,
 ): CommandDefinition {
   return {
     metadata: {
@@ -565,6 +511,7 @@ function createOpenCommand(
         "open",
         filesystem,
         documents,
+        projectReadmes,
         context,
         parsed.path,
       );
@@ -696,6 +643,7 @@ function createNavigationCommand(
   targetPath: string,
   filesystem: VirtualFilesystem,
   documents: VirtualDocumentSupplier,
+  projectReadmes: ReadonlyArray<ProjectReadme>,
 ): CommandDefinition {
   return {
     metadata: {
@@ -717,6 +665,7 @@ function createNavigationCommand(
         name,
         filesystem,
         documents,
+        projectReadmes,
         context,
         targetPath,
       );
@@ -743,11 +692,12 @@ function createNavigationCommand(
 export function createPortfolioCommandDefinitions({
   filesystem,
   documents,
+  projectReadmes,
   themes,
 }: CreatePortfolioCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   return [
     createHelpCommand(),
-    createOpenCommand(filesystem, documents),
+    createOpenCommand(filesystem, documents, projectReadmes),
     createThemeCommand(themes),
     createUnavailableCommand(
       "stats",
@@ -777,14 +727,14 @@ export function createPortfolioCommandDefinitions({
       "edit notes/sample-note.md",
       "Published-content editing is unavailable until authoring work is implemented.",
     ),
-    createNavigationCommand("about", "~/about.md", filesystem, documents),
-    createNavigationCommand("skills", "~/skills.md", filesystem, documents),
-    createNavigationCommand("tools", "~/tools.md", filesystem, documents),
-    createNavigationCommand("now", "~/now.md", filesystem, documents),
-    createNavigationCommand("projects", "~/projects", filesystem, documents),
-    createNavigationCommand("blog", "~/blog", filesystem, documents),
-    createNavigationCommand("notes", "~/notes", filesystem, documents),
-    createNavigationCommand("changelog", "~/changelog.md", filesystem, documents),
-    createNavigationCommand("cv", "~/cv.md", filesystem, documents),
+    createNavigationCommand("about", "~/about.md", filesystem, documents, projectReadmes),
+    createNavigationCommand("skills", "~/skills.md", filesystem, documents, projectReadmes),
+    createNavigationCommand("tools", "~/tools.md", filesystem, documents, projectReadmes),
+    createNavigationCommand("now", "~/now.md", filesystem, documents, projectReadmes),
+    createNavigationCommand("projects", "~/projects", filesystem, documents, projectReadmes),
+    createNavigationCommand("blog", "~/blog", filesystem, documents, projectReadmes),
+    createNavigationCommand("notes", "~/notes", filesystem, documents, projectReadmes),
+    createNavigationCommand("changelog", "~/changelog.md", filesystem, documents, projectReadmes),
+    createNavigationCommand("cv", "~/cv.md", filesystem, documents, projectReadmes),
   ];
 }

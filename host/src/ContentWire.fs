@@ -44,7 +44,8 @@ module ContentWire =
           Url: string
           Repository: string
           UpdatedAt: string
-          Tags: string list }
+          Tags: string list
+          Readme: string }
 
     type ProjectsDto =
         { Projects: ProjectDto list
@@ -160,7 +161,9 @@ module ContentWire =
           Source = document |> ContentDomain.ContentDocument.source |> source
           Cache = document |> ContentDomain.ContentDocument.cache |> cache }
 
-    let project (project: ContentDomain.Project) : ProjectDto =
+    let project (readme: ContentDomain.ProjectReadme) : ProjectDto =
+        let project = readme |> ContentDomain.ProjectReadme.project
+
         { Id = project |> ContentDomain.Project.id |> ContentDomain.ContentId.value
           Slug = project |> ContentDomain.Project.slug |> ContentDomain.ContentSlug.value
           Name = project |> ContentDomain.Project.name |> ContentDomain.ContentTitle.value
@@ -171,7 +174,8 @@ module ContentWire =
             |> ContentDomain.Project.repository
             |> ContentDomain.RepositoryName.value
           UpdatedAt = project |> ContentDomain.Project.updatedAt |> ContentDomain.Timestamp.value
-          Tags = project |> ContentDomain.Project.tags |> List.map ContentDomain.ContentTag.value }
+          Tags = project |> ContentDomain.Project.tags |> List.map ContentDomain.ContentTag.value
+          Readme = readme |> ContentDomain.ProjectReadme.body |> ContentDomain.MarkdownBody.value }
 
     let projects (projects: ContentDomain.Projects) : ProjectsDto =
         { Projects = projects |> ContentDomain.Projects.entries |> List.map project
@@ -301,7 +305,8 @@ module ContentWire =
               "url", text value.Url
               "repository", text value.Repository
               "updatedAt", text value.UpdatedAt
-              "tags", value.Tags |> List.map text |> arrayOf ]
+              "tags", value.Tags |> List.map text |> arrayOf
+              "readme", text value.Readme ]
 
     let private projectsNode (value: ProjectsDto) =
         objectOf

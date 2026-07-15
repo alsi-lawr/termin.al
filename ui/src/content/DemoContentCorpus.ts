@@ -1,4 +1,7 @@
-import type { ContentCorpus } from "../api/ContentClient.ts";
+import type {
+  ContentCorpus,
+  ProjectReadme,
+} from "../api/ContentClient.ts";
 import {
   createVirtualDocumentHandle,
   createVirtualFilesystem,
@@ -65,8 +68,8 @@ const skillsText =
 const toolsText =
   "# Tools\n\n- TypeScript\n- React\n- F#\n- Markdown";
 const nowText = "# Now\n\nThis demonstration has no live activity.";
-const projectText =
-  "# Sample Project\n\nA fictional workspace used to demonstrate local Markdown documents.\n\nRepository: demo/sample-project\nRepository URL: https://example.com/demo/sample-project\nTags: #typescript #fsharp";
+const projectReadmeText =
+  "# Sample Project README\n\nThis independently supplied README documents the deterministic demo project.";
 const blogText =
   "# Stable Interfaces\n\nA synthetic post about typed outcomes and explicit dependencies.";
 const noteText =
@@ -79,11 +82,25 @@ const documents = [
   { handle: "skills", path: "~/skills.md", text: skillsText },
   { handle: "tools", path: "~/tools.md", text: toolsText },
   { handle: "now", path: "~/now.md", text: nowText },
-  { handle: "project", path: "~/projects/sample-project.md", text: projectText },
   { handle: "blog", path: "~/blog/sample-post.md", text: blogText },
   { handle: "note", path: "~/notes/sample-note.md", text: noteText },
   { handle: "changelog", path: "~/changelog.md", text: changelogText },
 ] satisfies ReadonlyArray<DemoContentDocument>;
+
+const projectReadmes = [
+  {
+    id: "sample-project",
+    name: "Sample Project",
+    summary: "A deterministic project card with external repository metadata.",
+    repository: "demo/sample-project",
+    repositoryUrl: "https://example.com/demo/sample-project",
+    tags: ["typescript", "fsharp"],
+    document: {
+      text: projectReadmeText,
+      source: { path: "https://example.com/demo/sample-project" },
+    },
+  },
+] satisfies ReadonlyArray<ProjectReadme>;
 
 const catalog: VirtualCorpusCatalog = {
   entries: [
@@ -149,14 +166,6 @@ const catalog: VirtualCorpusCatalog = {
     },
     {
       kind: "file",
-      id: "project-document",
-      path: "~/projects/sample-project.md",
-      updatedAt: "2026-01-09T00:00:00.000Z",
-      size: utf8ByteSize(projectText),
-      documentHandle: "project",
-    },
-    {
-      kind: "file",
       id: "blog-document",
       path: "~/blog/sample-post.md",
       updatedAt: "2026-01-10T00:00:00.000Z",
@@ -192,4 +201,5 @@ const catalog: VirtualCorpusCatalog = {
 export const demoContentCorpus: ContentCorpus = {
   filesystem: createVirtualFilesystem(catalog),
   documents: createDemoDocumentSupplier(documents),
+  projectReadmes,
 };

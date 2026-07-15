@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import type { ProjectReadme } from "../../api/ContentClient.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
@@ -49,6 +50,7 @@ type PaneTreeViewProps = Readonly<{
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  projectReadmes: ReadonlyArray<ProjectReadme>;
 }>;
 
 const firstPaneBasisClass = {
@@ -117,6 +119,7 @@ function PaneLeaf({
   themeController,
   filesystem,
   documents,
+  projectReadmes,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -155,6 +158,7 @@ function PaneLeaf({
             themeController={themeController}
             filesystem={filesystem}
             documents={documents}
+            projectReadmes={projectReadmes}
           />
         </div>
       );
@@ -223,6 +227,7 @@ export function PaneTreeView({
   themeController,
   filesystem,
   documents,
+  projectReadmes,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -243,6 +248,7 @@ export function PaneTreeView({
         themeController={themeController}
         filesystem={filesystem}
         documents={documents}
+        projectReadmes={projectReadmes}
       />
     );
   }
@@ -291,6 +297,7 @@ export function PaneTreeView({
           themeController={themeController}
           filesystem={filesystem}
           documents={documents}
+          projectReadmes={projectReadmes}
         />
       </div>
       <div
@@ -319,6 +326,7 @@ export function PaneTreeView({
           themeController={themeController}
           filesystem={filesystem}
           documents={documents}
+          projectReadmes={projectReadmes}
         />
       </div>
     </div>

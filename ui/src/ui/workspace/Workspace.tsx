@@ -50,6 +50,7 @@ export function Workspace({
             themeController={theme.controller}
             filesystem={corpus.filesystem}
             documents={corpus.documents}
+            projectReadmes={corpus.projectReadmes}
           />
         </div>
         <MobilePaneSwitcher

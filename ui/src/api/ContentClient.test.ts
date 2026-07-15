@@ -93,6 +93,15 @@ test("loads the same-origin content corpus and forwards cancellation", async () 
 
     assert.equal(document.document.text, "# About\n\nA validated shared content fixture.");
     assert.equal(paths.at(-1), "/api/content/document/about");
+
+    const project = result.corpus.projectReadmes[0];
+
+    assert.equal(project?.name, "Sample Project");
+    assert.equal(
+      project?.document.text,
+      "# Sample Project README\n\nThis is the supplied README body, not the project summary.",
+    );
+    assert.notEqual(project?.document.text, project?.summary);
   } finally {
     globalThis.fetch = originalFetch;
   }
