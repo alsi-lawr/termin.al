@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   type ChangeEvent,
@@ -38,6 +39,7 @@ import {
   type MobilePaneControl,
 } from "./MobilePaneControls";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
+import { vimEditorModeStatus } from "./VimEditorModeStatus.ts";
 
 type VimEditorPaneProps = Readonly<{
   title: string;
@@ -56,19 +58,6 @@ type VimEditorPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
 }>;
-
-function modeLabel(buffer: VimBuffer): string {
-  switch (buffer.mode.kind) {
-    case "normal":
-      return "NORMAL";
-    case "insert":
-      return "INSERT";
-    case "visual":
-      return "VISUAL LINE";
-    case "command":
-      return buffer.mode.prompt === ":" ? "COMMAND" : "SEARCH";
-  }
-}
 
 function commandEffectLabel(buffer: VimBuffer): string | undefined {
   switch (buffer.commandEffect.kind) {
@@ -153,6 +142,8 @@ export function VimEditorPane({
 }: VimEditorPaneProps): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composing = useRef(false);
+  const modeStatusId = useId();
+  const modeStatus = vimEditorModeStatus(buffer.mode);
   const commandEffect = commandEffectLabel(buffer);
 
   useEffect(() => {
@@ -395,13 +386,21 @@ export function VimEditorPane({
       <div className="flex min-h-0 flex-1 flex-col p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h2 className="font-semibold text-green-400">{title}</h2>
-          <span className="text-neutral-500">{modeLabel(buffer)}</span>
+          <span
+            id={modeStatusId}
+            className="text-neutral-500"
+            role="status"
+            aria-live="polite"
+          >
+            {modeStatus}
+          </span>
         </div>
         <textarea
           ref={inputRef}
           className="min-h-0 flex-1 resize-none rounded border border-neutral-800 bg-neutral-950 p-2 text-neutral-100 outline-none focus:border-green-500"
           value={vimBufferText(buffer)}
           aria-label={title + " editor text"}
+          aria-describedby={modeStatusId}
           autoCapitalize="off"
           autoCorrect="off"
           spellCheck={false}
