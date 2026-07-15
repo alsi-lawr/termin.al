@@ -125,9 +125,9 @@ module GitHubContentClient =
           ReleaseBody: string
           ReleaseUrl: ContentDomain.ContentUrl }
 
-    type private CommitData =
-        { CommitDomain: ContentDomain.Commit
-          CommitAuthoredAt: DateTimeOffset }
+    type private ReleaseBoundary =
+        { BoundaryRelease: ReleaseData
+          BoundaryCommit: ContentDomain.CommitSha }
 
     let private apiBase = Uri("https://api.github.com/")
     let private apiVersion = "2026-03-10"
@@ -1089,156 +1089,342 @@ module GitHubContentClient =
             | Error message, _
             | _, Error message -> Error message
 
-        let parseReleases (body: string) : Result<ReleaseData list, string> =
+        let parseReleasePage (body: string) : Result<ReleaseData list, string> =
             parseJson body (fun root ->
                 if root.ValueKind <> JsonValueKind.Array then
                     Error "Release responses must be arrays."
                 else
-                    let rec parseEntries pending releases =
-                        match pending with
-                        | [] -> Ok(List.rev releases)
-                        | entry :: remaining ->
-                            parseRelease entry
-                            |> Result.bind (fun release ->
-                                match release with
-                                | Some value -> parseEntries remaining (value :: releases)
-                                | None -> parseEntries remaining releases)
+                    let entries = root.EnumerateArray() |> Seq.toList
 
-                    parseEntries (root.EnumerateArray() |> Seq.toList) []
-                    |> Result.map (
-                        List.sortByDescending (fun release -> release.ReleasePublishedAt)
-                        >> List.truncate ContentDomain.PageItemLimit
-                    ))
+                    if List.length entries > ContentDomain.PageItemLimit then
+                        Error "Release responses cannot contain more than 100 entries."
+                    else
+                        let rec parseEntries pending releases =
+                            match pending with
+                            | [] -> Ok(List.rev releases)
+                            | entry :: remaining ->
+                                parseRelease entry
+                                |> Result.bind (fun release ->
+                                    match release with
+                                    | Some value -> parseEntries remaining (value :: releases)
+                                    | None -> parseEntries remaining releases)
 
-        let parseTags (body: string) : Result<Set<string>, string> =
-            parseJson body (fun root ->
-                if root.ValueKind <> JsonValueKind.Array then
-                    Error "Tag responses must be arrays."
+                        parseEntries entries [])
+
+        let orderReleases (releases: ReleaseData list) =
+            releases
+            |> List.sortWith (fun left right ->
+                let publicationOrder = compare right.ReleasePublishedAt left.ReleasePublishedAt
+
+                if publicationOrder <> 0 then
+                    publicationOrder
                 else
-                    let rec parseEntries pending tags =
-                        match pending with
-                        | [] -> Ok tags
-                        | entry :: remaining ->
-                            requiredString "name" entry
-                            |> Result.bind (fun name ->
-                                toDomainResult (ContentDomain.ContentTag.tryCreate "tag.name" name)
-                                |> Result.bind (fun tag ->
-                                    parseEntries remaining (Set.add (ContentDomain.ContentTag.value tag) tags)))
+                    StringComparer.Ordinal.Compare(
+                        ContentDomain.ContentTag.value left.ReleaseTag,
+                        ContentDomain.ContentTag.value right.ReleaseTag
+                    ))
+            |> List.truncate ContentDomain.PageItemLimit
 
-                    parseEntries (root.EnumerateArray() |> Seq.toList) Set.empty)
+        let getPublishedReleases (repository: GitHubRepositoryData) cancellationToken =
+            let firstPage =
+                apiUri
+                    $"repos/{repositoryName repository.RepositoryFullName}/releases?per_page={ContentDomain.PageItemLimit}"
 
-        let parseCommit (element: JsonElement) : Result<CommitData, string> =
-            let commitPayload =
-                match property "commit" element with
-                | Some value when value.ValueKind = JsonValueKind.Object -> Ok value
-                | _ -> Error "Commit payload must be an object."
+            let rec getPages next pageCount collected =
+                task {
+                    if List.length collected >= ContentDomain.PageItemLimit then
+                        return Ok(List.truncate ContentDomain.PageItemLimit collected)
+                    else
+                        match next with
+                        | None -> return Ok collected
+                        | Some _ when pageCount = maximumPaginationPages -> return Ok collected
+                        | Some uri ->
+                            let! payload = getJson uri cancellationToken
 
-            match requiredString "sha" element, requiredString "html_url" element, commitPayload with
-            | Ok sha, Ok url, Ok commit ->
-                let authorPayload =
-                    match property "author" commit with
+                            match payload with
+                            | Error failure -> return Error(mapFetchFailure failure)
+                            | Ok response ->
+                                match parseReleasePage response.PayloadBody with
+                                | Error _ -> return Error(invalidProblem ())
+                                | Ok releases ->
+                                    return! getPages response.PayloadNextPage (pageCount + 1) (collected @ releases)
+                }
+
+            task {
+                let! firstPayload = getJson firstPage cancellationToken
+
+                match firstPayload with
+                | Error failure -> return Error(mapFetchFailure failure)
+                | Ok firstResponse ->
+                    match parseReleasePage firstResponse.PayloadBody with
+                    | Error _ -> return Error(invalidProblem ())
+                    | Ok firstReleases ->
+                        let! releases = getPages firstResponse.PayloadNextPage 1 firstReleases
+
+                        return releases |> Result.map (fun values -> orderReleases values, firstResponse)
+            }
+
+        let parseCommit (element: JsonElement) : Result<ContentDomain.Commit, string> =
+            if element.ValueKind <> JsonValueKind.Object then
+                Error "Commit payload must be an object."
+            else
+                let commitPayload =
+                    match property "commit" element with
                     | Some value when value.ValueKind = JsonValueKind.Object -> Ok value
-                    | _ -> Error "Commit author must be an object."
+                    | _ -> Error "Commit payload must be an object."
 
-                match requiredString "message" commit, authorPayload with
-                | Ok message, Ok author ->
-                    match requiredString "date" author with
-                    | Ok authoredAt ->
-                        match
-                            toDomainResult (ContentDomain.CommitSha.tryCreate "commit.sha" sha),
-                            toDomainResult (ContentDomain.CommitSummary.tryCreate "commit.summary" (firstLine message)),
-                            toDomainResult (ContentDomain.ContentUrl.tryCreate "commit.url" url),
-                            toDateTimeOffset "commit.authored_at" authoredAt
-                        with
-                        | Ok parsedSha, Ok parsedSummary, Ok parsedUrl, Ok parsedAuthoredAt ->
-                            Ok
-                                { CommitDomain =
+                match requiredString "sha" element, requiredString "html_url" element, commitPayload with
+                | Ok sha, Ok url, Ok commit ->
+                    let authorPayload =
+                        match property "author" commit with
+                        | Some value when value.ValueKind = JsonValueKind.Object -> Ok value
+                        | _ -> Error "Commit author must be an object."
+
+                    match requiredString "message" commit, authorPayload with
+                    | Ok message, Ok author ->
+                        match requiredString "date" author with
+                        | Ok authoredAt ->
+                            match
+                                toDomainResult (ContentDomain.CommitSha.tryCreate "commit.sha" sha),
+                                toDomainResult (
+                                    ContentDomain.CommitSummary.tryCreate "commit.summary" (firstLine message)
+                                ),
+                                toDomainResult (ContentDomain.ContentUrl.tryCreate "commit.url" url),
+                                toDateTimeOffset "commit.authored_at" authoredAt
+                            with
+                            | Ok parsedSha, Ok parsedSummary, Ok parsedUrl, Ok parsedAuthoredAt ->
+                                Ok(
                                     ContentDomain.Commit.create
                                         parsedSha
                                         parsedSummary
                                         (ContentDomain.Timestamp.create parsedAuthoredAt)
                                         parsedUrl
-                                  CommitAuthoredAt = parsedAuthoredAt }
-                        | Error message, _, _, _
-                        | _, Error message, _, _
-                        | _, _, Error message, _
-                        | _, _, _, Error message -> Error message
-                    | Error message -> Error message
-                | Error message, _
-                | _, Error message -> Error message
-            | Error message, _, _
-            | _, Error message, _
-            | _, _, Error message -> Error message
+                                )
+                            | Error message, _, _, _
+                            | _, Error message, _, _
+                            | _, _, Error message, _
+                            | _, _, _, Error message -> Error message
+                        | Error message -> Error message
+                    | Error message, _
+                    | _, Error message -> Error message
+                | Error message, _, _
+                | _, Error message, _
+                | _, _, Error message -> Error message
 
-        let parseCommits (body: string) : Result<CommitData list, string> =
+        let parseCommitEntries (entries: JsonElement list) : Result<ContentDomain.Commit list, string> =
+            let rec parseEntries pending commits =
+                match pending with
+                | [] -> Ok(List.rev commits)
+                | entry :: remaining ->
+                    parseCommit entry
+                    |> Result.bind (fun commit -> parseEntries remaining (commit :: commits))
+
+            parseEntries entries []
+
+        let parseGitObjectReference (body: string) : Result<string * ContentDomain.CommitSha, string> =
             parseJson body (fun root ->
-                if root.ValueKind <> JsonValueKind.Array then
-                    Error "Commit responses must be arrays."
+                if root.ValueKind <> JsonValueKind.Object then
+                    Error "Git reference responses must be objects."
                 else
-                    let rec parseEntries pending commits =
-                        match pending with
-                        | [] -> Ok(List.rev commits)
-                        | entry :: remaining ->
-                            parseCommit entry
-                            |> Result.bind (fun commit -> parseEntries remaining (commit :: commits))
+                    match property "object" root with
+                    | Some reference when reference.ValueKind = JsonValueKind.Object ->
+                        match requiredString "type" reference, requiredString "sha" reference with
+                        | Ok objectType, Ok sha ->
+                            toDomainResult (ContentDomain.CommitSha.tryCreate "git.object.sha" sha)
+                            |> Result.map (fun parsedSha -> objectType, parsedSha)
+                        | Error message, _
+                        | _, Error message -> Error message
+                    | _ -> Error "Git reference object must be an object.")
 
-                    parseEntries (root.EnumerateArray() |> Seq.toList) []
-                    |> Result.map (List.truncate ContentDomain.PageItemLimit))
+        let parseCommitReference (field: string) (element: JsonElement) : Result<ContentDomain.CommitSha, string> =
+            match property field element with
+            | Some reference when reference.ValueKind = JsonValueKind.Object ->
+                requiredString "sha" reference
+                |> Result.bind (fun sha -> toDomainResult (ContentDomain.CommitSha.tryCreate $"{field}.sha" sha))
+            | _ -> Error $"{field} must be an object."
+
+        let getTagCommit (repository: GitHubRepositoryData) (tag: ContentDomain.ContentTag) cancellationToken =
+            task {
+                let fullName = repositoryName repository.RepositoryFullName
+                let tagName = Uri.EscapeDataString(ContentDomain.ContentTag.value tag)
+                let! reference = getJson (apiUri $"repos/{fullName}/git/ref/tags/{tagName}") cancellationToken
+
+                match reference with
+                | Error failure -> return Error(mapFetchFailure failure)
+                | Ok response ->
+                    match parseGitObjectReference response.PayloadBody with
+                    | Error _ -> return Error(invalidProblem ())
+                    | Ok("commit", commit) -> return Ok commit
+                    | Ok("tag", tagObject) ->
+                        let! objectPayload =
+                            getJson
+                                (apiUri $"repos/{fullName}/git/tags/{ContentDomain.CommitSha.value tagObject}")
+                                cancellationToken
+
+                        match objectPayload with
+                        | Error failure -> return Error(mapFetchFailure failure)
+                        | Ok tagPayload ->
+                            match parseGitObjectReference tagPayload.PayloadBody with
+                            | Ok("commit", commit) -> return Ok commit
+                            | Error _
+                            | Ok _ -> return Error(invalidProblem ())
+                    | Ok _ -> return Error(invalidProblem ())
+            }
+
+        let getDefaultBranchHead (repository: GitHubRepositoryData) cancellationToken =
+            task {
+                let fullName = repositoryName repository.RepositoryFullName
+
+                let branch =
+                    Uri.EscapeDataString(ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+
+                let! reference = getJson (apiUri $"repos/{fullName}/git/ref/heads/{branch}") cancellationToken
+
+                match reference with
+                | Error failure -> return Error(mapFetchFailure failure)
+                | Ok response ->
+                    match parseGitObjectReference response.PayloadBody with
+                    | Ok("commit", commit) -> return Ok commit
+                    | Error _
+                    | Ok _ -> return Error(invalidProblem ())
+            }
+
+        let parseComparison
+            (baseCommit: ContentDomain.CommitSha)
+            (body: string)
+            : Result<ContentDomain.Commit list, string> =
+            parseJson body (fun root ->
+                if root.ValueKind <> JsonValueKind.Object then
+                    Error "Comparison responses must be objects."
+                else
+                    let commits =
+                        match property "commits" root with
+                        | Some value when value.ValueKind = JsonValueKind.Array ->
+                            Ok(value.EnumerateArray() |> Seq.toList)
+                        | _ -> Error "Comparison commits must be an array."
+
+                    match
+                        requiredString "status" root,
+                        requiredInteger "behind_by" root,
+                        requiredInteger "total_commits" root,
+                        parseCommitReference "base_commit" root,
+                        parseCommitReference "merge_base_commit" root,
+                        commits
+                    with
+                    | Ok status, Ok behindBy, Ok totalCommits, Ok responseBase, Ok mergeBase, Ok entries ->
+                        if status <> "ahead" && status <> "identical" then
+                            Error "Comparison does not describe an ancestor range."
+                        elif behindBy <> 0 || responseBase <> baseCommit || mergeBase <> baseCommit then
+                            Error "Comparison boundaries do not match the requested ancestor range."
+                        elif
+                            totalCommits < 0
+                            || totalCommits > ContentDomain.PageItemLimit
+                            || totalCommits <> List.length entries
+                            || List.length entries > ContentDomain.PageItemLimit
+                        then
+                            Error "Comparison exceeds the changelog commit bound."
+                        else
+                            parseCommitEntries entries
+                    | Error message, _, _, _, _, _
+                    | _, Error message, _, _, _, _
+                    | _, _, Error message, _, _, _
+                    | _, _, _, Error message, _, _
+                    | _, _, _, _, Error message, _
+                    | _, _, _, _, _, Error message -> Error message)
+
+        let getCommitRange
+            (repository: GitHubRepositoryData)
+            (baseCommit: ContentDomain.CommitSha)
+            (headCommit: ContentDomain.CommitSha)
+            cancellationToken
+            =
+            task {
+                let fullName = repositoryName repository.RepositoryFullName
+
+                let comparison =
+                    apiUri
+                        $"repos/{fullName}/compare/{ContentDomain.CommitSha.value baseCommit}...{ContentDomain.CommitSha.value headCommit}?per_page={ContentDomain.PageItemLimit}"
+
+                let! payload = getJson comparison cancellationToken
+
+                match payload with
+                | Error failure -> return Error(mapFetchFailure failure)
+                | Ok response when response.PayloadNextPage.IsSome -> return Error(invalidProblem ())
+                | Ok response ->
+                    match parseComparison baseCommit response.PayloadBody with
+                    | Error _ -> return Error(invalidProblem ())
+                    | Ok commits -> return Ok(List.rev commits)
+            }
+
+        let resolveReleaseBoundaries (repository: GitHubRepositoryData) (releases: ReleaseData list) cancellationToken =
+            let rec resolve pending collected =
+                task {
+                    match pending with
+                    | [] -> return Ok(List.rev collected)
+                    | release :: remaining ->
+                        let! commit = getTagCommit repository release.ReleaseTag cancellationToken
+
+                        match commit with
+                        | Error problem -> return Error problem
+                        | Ok boundary ->
+                            return!
+                                resolve
+                                    remaining
+                                    ({ BoundaryRelease = release
+                                       BoundaryCommit = boundary }
+                                     :: collected)
+                }
+
+            resolve releases []
+
+        let getReleaseRanges (repository: GitHubRepositoryData) (boundaries: ReleaseBoundary list) cancellationToken =
+            let rec getRanges pending =
+                task {
+                    match pending with
+                    | [] -> return Ok []
+                    | [ oldest ] -> return Ok [ (oldest.BoundaryRelease, []) ]
+                    | newer :: older :: remaining ->
+                        let! commits =
+                            getCommitRange repository older.BoundaryCommit newer.BoundaryCommit cancellationToken
+
+                        match commits with
+                        | Error problem -> return Error problem
+                        | Ok range ->
+                            let! olderRanges = getRanges (older :: remaining)
+
+                            match olderRanges with
+                            | Error problem -> return Error problem
+                            | Ok ranges -> return Ok((newer.BoundaryRelease, range) :: ranges)
+                }
+
+            getRanges boundaries
 
         let buildChangelog
             (repository: GitHubRepositoryData)
-            (releases: ReleaseData list)
-            (knownTags: Set<string>)
-            (commits: CommitData list)
+            (releaseRanges: (ReleaseData * ContentDomain.Commit list) list)
+            (unreleased: ContentDomain.Commit list)
             (metadata: ContentDomain.CacheMetadata)
             =
-            let publishedReleases =
-                releases
-                |> List.filter (fun release -> knownTags.Contains(ContentDomain.ContentTag.value release.ReleaseTag))
-
-            let unreleased =
-                match publishedReleases with
-                | newest :: _ ->
-                    commits
-                    |> List.filter (fun commit -> commit.CommitAuthoredAt > newest.ReleasePublishedAt)
-                    |> List.map (fun commit -> commit.CommitDomain)
-                | [] -> commits |> List.map (fun commit -> commit.CommitDomain)
-
-            let createRelease index (release: ReleaseData) =
-                let olderBoundary =
-                    publishedReleases
-                    |> List.tryItem (index + 1)
-                    |> Option.map (fun older -> older.ReleasePublishedAt)
-
-                let releaseCommits =
-                    commits
-                    |> List.filter (fun commit ->
-                        commit.CommitAuthoredAt <= release.ReleasePublishedAt
-                        && (match olderBoundary with
-                            | Some older -> commit.CommitAuthoredAt > older
-                            | None -> true))
-                    |> List.map (fun commit -> commit.CommitDomain)
-
+            let createRelease (release: ReleaseData, commits: ContentDomain.Commit list) =
                 ContentDomain.Release.tryCreate
                     release.ReleaseTag
                     release.ReleaseName
                     (ContentDomain.Timestamp.create release.ReleasePublishedAt)
                     release.ReleaseBody
                     release.ReleaseUrl
-                    releaseCommits
+                    commits
 
-            let rec createReleases index pending collected =
+            let rec createReleases pending collected =
                 match pending with
                 | [] -> Ok(List.rev collected)
                 | release :: remaining ->
-                    createRelease index release
-                    |> Result.bind (fun validRelease ->
-                        createReleases (index + 1) remaining (validRelease :: collected))
+                    createRelease release
+                    |> Result.bind (fun validRelease -> createReleases remaining (validRelease :: collected))
 
             match ContentDomain.RepositoryPath.tryCreate "changelog.path" "releases" with
             | Error failure -> Error(mapValidationFailure failure)
             | Ok sourcePath ->
-                createReleases 0 publishedReleases []
+                createReleases releaseRanges []
                 |> Result.mapError mapValidationFailure
                 |> Result.bind (fun releaseGroups ->
                     ContentDomain.Changelog.tryCreate
@@ -1258,46 +1444,55 @@ module GitHubContentClient =
                 match repository with
                 | Error problem -> return Error problem
                 | Ok applicationRepositoryData ->
-                    let fullName = repositoryName applicationRepositoryData.RepositoryFullName
+                    let! releases = getPublishedReleases applicationRepositoryData cancellationToken
 
-                    let! releasePayload =
-                        getJson
-                            (apiUri $"repos/{fullName}/releases?per_page={ContentDomain.PageItemLimit}")
-                            cancellationToken
+                    match releases with
+                    | Error problem -> return Error problem
+                    | Ok(parsedReleases, releasePayload) ->
+                        match cacheMetadata releasePayload with
+                        | Error problem -> return Error problem
+                        | Ok metadata ->
+                            match parsedReleases with
+                            | [] -> return buildChangelog applicationRepositoryData [] [] metadata
+                            | _ ->
+                                let! boundaries =
+                                    resolveReleaseBoundaries applicationRepositoryData parsedReleases cancellationToken
 
-                    let! tagPayload =
-                        getJson
-                            (apiUri $"repos/{fullName}/tags?per_page={ContentDomain.PageItemLimit}")
-                            cancellationToken
+                                match boundaries with
+                                | Error problem -> return Error problem
+                                | Ok resolvedBoundaries ->
+                                    let! defaultHead = getDefaultBranchHead applicationRepositoryData cancellationToken
 
-                    let! commitPayload =
-                        getJson
-                            (apiUri $"repos/{fullName}/commits?per_page={ContentDomain.PageItemLimit}")
-                            cancellationToken
+                                    match defaultHead with
+                                    | Error problem -> return Error problem
+                                    | Ok head ->
+                                        let newest = List.head resolvedBoundaries
 
-                    match releasePayload, tagPayload, commitPayload with
-                    | Error failure, _, _
-                    | _, Error failure, _
-                    | _, _, Error failure -> return Error(mapFetchFailure failure)
-                    | Ok releases, Ok tags, Ok commits ->
-                        match
-                            parseReleases releases.PayloadBody,
-                            parseTags tags.PayloadBody,
-                            parseCommits commits.PayloadBody,
-                            cacheMetadata releases
-                        with
-                        | Ok parsedReleases, Ok parsedTags, Ok parsedCommits, Ok metadata ->
-                            return
-                                buildChangelog
-                                    applicationRepositoryData
-                                    parsedReleases
-                                    parsedTags
-                                    parsedCommits
-                                    metadata
-                        | Error _, _, _, _
-                        | _, Error _, _, _
-                        | _, _, Error _, _
-                        | _, _, _, Error _ -> return Error(invalidProblem ())
+                                        let! unreleased =
+                                            getCommitRange
+                                                applicationRepositoryData
+                                                newest.BoundaryCommit
+                                                head
+                                                cancellationToken
+
+                                        match unreleased with
+                                        | Error problem -> return Error problem
+                                        | Ok unreleasedCommits ->
+                                            let! releaseRanges =
+                                                getReleaseRanges
+                                                    applicationRepositoryData
+                                                    resolvedBoundaries
+                                                    cancellationToken
+
+                                            match releaseRanges with
+                                            | Error problem -> return Error problem
+                                            | Ok ranges ->
+                                                return
+                                                    buildChangelog
+                                                        applicationRepositoryData
+                                                        ranges
+                                                        unreleasedCommits
+                                                        metadata
             }
 
         { new ContentClient with
