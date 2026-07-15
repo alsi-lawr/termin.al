@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type {
   ShellCompletion,
   ShellStatus,
@@ -10,7 +9,6 @@ import { TerminalStatus } from "./TerminalStatus";
 
 type TerminalPromptProps = Readonly<{
   prompt: string;
-  applicationMode: ApplicationMode;
   currentInput: string;
   cursorColumn: number;
   status: ShellStatus;
@@ -19,7 +17,6 @@ type TerminalPromptProps = Readonly<{
 
 export function TerminalPrompt({
   prompt,
-  applicationMode,
   currentInput,
   cursorColumn,
   status,
@@ -38,7 +35,6 @@ export function TerminalPrompt({
         <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
       </div>
       <TerminalStatus
-        applicationMode={applicationMode}
         status={status}
         completion={completion}
       />

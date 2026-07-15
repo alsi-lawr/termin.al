@@ -28,11 +28,19 @@ export function Workspace({
       className="flex min-h-dvh w-full flex-col bg-surface-deepest"
       data-theme={theme.status.theme}
     >
+      {applicationMode === "demo" ? (
+        <span
+          className="ml-2 rounded-sm border border-ui-accent bg-surface-raised px-1 text-text-bright"
+          role="status"
+          aria-label="Demo mode"
+        >
+          DEMO
+        </span>
+      ) : null}
       <div className="flex min-h-0 flex-1 flex-col" inert={closeConfirmationOpen}>
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <PaneTreeView
             tree={controller.workspace.tree}
-            applicationMode={applicationMode}
             activePaneId={controller.workspace.activePaneId}
             zoom={controller.workspace.zoom}
             shellRuntimes={controller.shellRuntimes}
