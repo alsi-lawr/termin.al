@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   virtualHomeDirectory,
   type VirtualDocumentSupplier,
@@ -50,18 +50,18 @@ function createThemeController(): ThemeController {
 }
 
 function createRegistry(
-  documents: VirtualDocumentSupplier = developmentFixtureCorpus.documents,
+  documents: VirtualDocumentSupplier = demoContentCorpus.documents,
   themes: ThemeController = createThemeController(),
 ): CommandRegistry {
   return createCommandRegistry({
     commands: [
       ...createReadOnlyCommandDefinitions({
-        filesystem: developmentFixtureCorpus.filesystem,
+        filesystem: demoContentCorpus.filesystem,
         documents,
         recursiveEntryLimit: 100,
       }),
       ...createPortfolioCommandDefinitions({
-        filesystem: developmentFixtureCorpus.filesystem,
+        filesystem: demoContentCorpus.filesystem,
         documents,
         themes,
       }),
@@ -200,7 +200,7 @@ test("routes portfolio supplier failures through the execution boundary", async 
 
 test("lists, selects, and clears terminal theme selections", async () => {
   const themes = createThemeController();
-  const registry = createRegistry(developmentFixtureCorpus.documents, themes);
+  const registry = createRegistry(demoContentCorpus.documents, themes);
   const current = succeeded(await execute("theme", registry));
   const list = succeeded(await execute("theme list", registry));
   const set = succeeded(await execute("theme set gruber-lighter", registry));

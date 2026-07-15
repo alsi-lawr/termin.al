@@ -1,44 +1,35 @@
+import type { ContentCorpus } from "../api/ContentClient.ts";
 import {
   createVirtualDocumentHandle,
   createVirtualFilesystem,
   type VirtualCorpusCatalog,
   type VirtualDocumentReadResult,
   type VirtualDocumentSupplier,
-  type VirtualFilesystem,
 } from "../domain/filesystem/VirtualFilesystem.ts";
 
-export type DevelopmentFixtureDocument = Readonly<{
+type DemoContentDocument = Readonly<{
   handle: string;
   path: string;
   text: string;
-}>;
-
-export type DevelopmentFixtureCorpus = Readonly<{
-  filesystem: VirtualFilesystem;
-  documents: VirtualDocumentSupplier;
-}>;
-
-export type CreateDevelopmentFixtureDocumentSupplierOptions = Readonly<{
-  documents: ReadonlyArray<DevelopmentFixtureDocument>;
 }>;
 
 function utf8ByteSize(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-export function createDevelopmentFixtureDocumentSupplier({
-  documents,
-}: CreateDevelopmentFixtureDocumentSupplierOptions): VirtualDocumentSupplier {
+function createDemoDocumentSupplier(
+  documents: ReadonlyArray<DemoContentDocument>,
+): VirtualDocumentSupplier {
   const documentsByHandle = new Map<
     ReturnType<typeof createVirtualDocumentHandle>,
-    DevelopmentFixtureDocument
+    DemoContentDocument
   >();
 
   for (const document of documents) {
     const handle = createVirtualDocumentHandle(document.handle);
 
     if (documentsByHandle.has(handle)) {
-      throw new Error(`Development fixture handle '${handle}' is duplicated.`);
+      throw new Error(`Demo document handle '${handle}' is duplicated.`);
     }
 
     documentsByHandle.set(handle, document);
@@ -67,14 +58,21 @@ export function createDevelopmentFixtureDocumentSupplier({
   };
 }
 
-const aboutText = "# About\n\nDeterministic development fixture content.";
-const skillsText = "# Skills\n\nTyped modelling and accessible interaction.";
-const toolsText = "# Tools\n\nTerminal, TypeScript, and F# development tools.";
-const nowText = "# Now\n\nNo current activity is configured for this fixture.";
-const projectText = "# Sample Project\n\nA non-personal project fixture for navigation tests.";
-const blogText = "# Sample Post\n\nA deterministic blog fixture about typed outcomes.";
-const noteText = "# Sample Note\n\nA deterministic note fixture about virtual paths.";
-const changelogText = "# Changelog\n\nNo released changes are configured for this fixture.";
+const aboutText =
+  "# About\n\nThis is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.";
+const skillsText =
+  "# Skills\n\nTyped domain modelling and accessible keyboard interaction.";
+const toolsText =
+  "# Tools\n\n- TypeScript\n- React\n- F#\n- Markdown";
+const nowText = "# Now\n\nThis demonstration has no live activity.";
+const projectText =
+  "# Sample Project README\n\nA fictional workspace used to demonstrate local Markdown documents.";
+const blogText =
+  "# Stable Interfaces\n\nA synthetic post about typed outcomes and explicit dependencies.";
+const noteText =
+  "# Local Paths\n\nA synthetic note about deterministic virtual filesystems.";
+const changelogText =
+  "# Changelog\n\n## Unreleased\n\n- Keep the offline demo deterministic.\n\n## 0.1.0 — 2026-01-12\n\n- Added synthetic demonstration content.";
 
 const documents = [
   { handle: "about", path: "~/about.md", text: aboutText },
@@ -85,7 +83,7 @@ const documents = [
   { handle: "blog", path: "~/blog/sample-post.md", text: blogText },
   { handle: "note", path: "~/notes/sample-note.md", text: noteText },
   { handle: "changelog", path: "~/changelog.md", text: changelogText },
-] satisfies ReadonlyArray<DevelopmentFixtureDocument>;
+] satisfies ReadonlyArray<DemoContentDocument>;
 
 const catalog: VirtualCorpusCatalog = {
   entries: [
@@ -191,7 +189,7 @@ const catalog: VirtualCorpusCatalog = {
   ],
 };
 
-export const developmentFixtureCorpus: DevelopmentFixtureCorpus = {
+export const demoContentCorpus: ContentCorpus = {
   filesystem: createVirtualFilesystem(catalog),
-  documents: createDevelopmentFixtureDocumentSupplier({ documents }),
+  documents: createDemoDocumentSupplier(documents),
 };

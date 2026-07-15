@@ -5,7 +5,7 @@ import {
   createPlaceholderViewerContent,
   type ViewerContent,
 } from "../../content/ViewerContent.ts";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   resolveVirtualDirectory,
   virtualHomeDirectory,
@@ -68,7 +68,7 @@ function stateFor(runtimes: PaneShellRuntimes, paneId: PaneId): ShellState {
 
 function projectsDirectoryPath() {
   const resolution = resolveVirtualDirectory(
-    developmentFixtureCorpus.filesystem,
+    demoContentCorpus.filesystem,
     virtualHomeDirectory(),
     "projects",
   );

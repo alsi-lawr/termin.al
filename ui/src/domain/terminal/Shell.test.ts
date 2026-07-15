@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import { createCompletionRequest } from "./Completion.ts";
 import {
   resolveVirtualDirectory,
@@ -80,7 +80,7 @@ function settleSucceeded(state: ShellState, message: string): ShellState {
 
 function projectsDirectory() {
   const resolution = resolveVirtualDirectory(
-    developmentFixtureCorpus.filesystem,
+    demoContentCorpus.filesystem,
     virtualHomeDirectory(),
     "projects",
   );

@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createVirtualDocumentHandle } from "../domain/filesystem/VirtualFilesystem.ts";
-import { developmentFixtureCorpus } from "./DevelopmentFixtureCorpus.ts";
+import { demoContentCorpus } from "./DemoContentCorpus.ts";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
 import {
   MarkdownRenderer,
@@ -195,7 +195,7 @@ test("blocks protocol-relative, credentialed, malformed, and unsupported Markdow
 });
 
 test("renders direct and supplier Markdown strings identically", async () => {
-  const supplied = await developmentFixtureCorpus.documents.read(
+  const supplied = await demoContentCorpus.documents.read(
     createVirtualDocumentHandle("about"),
     new AbortController().signal,
   );

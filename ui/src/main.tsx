@@ -16,13 +16,9 @@ async function createApplicationClientComposition(
 ): Promise<ApplicationClientComposition> {
   switch (applicationMode) {
     case "demo": {
-      const { createDevelopmentFixtureContentClient } = await import(
-        "./content/DevelopmentFixtureContentClient.ts"
-      );
+      const { DemoContentClient } = await import("./content/DemoContentClient.ts");
 
-      return Object.freeze({
-        contentClient: createDevelopmentFixtureContentClient(),
-      });
+      return Object.freeze({ contentClient: new DemoContentClient() });
     }
     case "live": {
       const { HttpContentClient } = await import("./api/ContentClient.ts");

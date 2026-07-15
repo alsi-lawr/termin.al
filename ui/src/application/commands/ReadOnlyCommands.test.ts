@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { developmentFixtureCorpus } from "../../content/DevelopmentFixtureCorpus.ts";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   virtualHomeDirectory,
   type VirtualDirectoryPath,
@@ -24,11 +24,11 @@ import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
 
 function createRegistry(
   recursiveEntryLimit = 100,
-  documents: VirtualDocumentSupplier = developmentFixtureCorpus.documents,
+  documents: VirtualDocumentSupplier = demoContentCorpus.documents,
 ): CommandRegistry {
   return createCommandRegistry({
     commands: createReadOnlyCommandDefinitions({
-      filesystem: developmentFixtureCorpus.filesystem,
+      filesystem: demoContentCorpus.filesystem,
       documents,
       recursiveEntryLimit,
     }),
@@ -142,7 +142,10 @@ test("executes virtual readers for quoted, relative, and current-directory paths
     table.rows.slice(0, 2).map((row) => row.cells[0]?.value),
     [".", ".."],
   );
-  assert.equal(quoted, "# About\n\nDeterministic development fixture content.");
+  assert.equal(
+    quoted,
+    "# About\n\nThis is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.",
+  );
   assert.equal(relative, quoted);
   assert.equal(pwd, "~/projects");
   assert.equal(projects, "~");
@@ -160,7 +163,10 @@ test("implements line readers, utility commands, history, manual metadata, and p
   const clear = succeeded(await execute("clear", registry));
 
   assert.equal(head, "# About");
-  assert.equal(tail, "Deterministic development fixture content.");
+  assert.equal(
+    tail,
+    "This is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.",
+  );
   assert.equal(echo, "hello terminal");
   assert.equal(whoami, "anonymous");
 
@@ -210,7 +216,7 @@ test("searches with documented flags and marks bounded recursive results", async
 
   assert.match(findText.text, /about\.md/u);
   assert.equal(truncation.diagnostic.code, "runtime.truncated");
-  assert.match(outputText(grep), /:3:Typed modelling/u);
+  assert.match(outputText(grep), /:3:Typed domain modelling/u);
   assert.equal(shallowTree, "~");
 });
 
@@ -225,7 +231,7 @@ test("reports empty, missing, unsupported-option, and cancelled command outcomes
   const missing = await execute("cat missing.md", registry);
   const option = await execute("ls -z", registry);
   const cancelled = await execute(
-    "grep fixture about.md",
+    "grep demo about.md",
     createRegistry(100, {
       read: () => Promise.resolve({ kind: "cancelled" }),
     }),
