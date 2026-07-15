@@ -51,21 +51,25 @@ module GitHubContentClientTests =
             lock requestsLock (fun () -> requests.Add captured)
             Task.FromResult(respond captured)
 
-    type private GatedHandler(expectedInitialRequests: int, respond: Request -> HttpResponseMessage) =
-        inherit HttpMessageHandler()
-
-        let requests = ResizeArray<Request>()
-        let requestsLock = obj ()
-
-        let initialRequests =
+    type private RequestGate() =
+        let requestEntered =
             TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
 
         let release =
             TaskCompletionSource<unit>(TaskCreationOptions.RunContinuationsAsynchronously)
 
-        member _.Requests = lock requestsLock (fun () -> requests |> Seq.toList)
-        member _.WaitForInitialRequests() = initialRequests.Task
+        member _.Enter() = requestEntered.TrySetResult() |> ignore
+        member _.WaitForRequest() = requestEntered.Task
         member _.Release() = release.TrySetResult() |> ignore
+        member _.WaitForRelease() = release.Task
+
+    type private GatedHandler(gateForRequest: Request -> RequestGate option, respond: Request -> HttpResponseMessage) =
+        inherit HttpMessageHandler()
+
+        let requests = ResizeArray<Request>()
+        let requestsLock = obj ()
+
+        member _.Requests = lock requestsLock (fun () -> requests |> Seq.toList)
 
         override _.SendAsync(request: HttpRequestMessage, _: CancellationToken) =
             let apiVersion =
@@ -85,18 +89,16 @@ module GitHubContentClientTests =
                   UserAgent = request.Headers.UserAgent.ToString()
                   IfNoneMatch = ifNoneMatch }
 
-            let requestCount =
-                lock requestsLock (fun () ->
-                    requests.Add captured
-                    requests.Count)
+            lock requestsLock (fun () -> requests.Add captured)
 
-            if requestCount >= expectedInitialRequests then
-                initialRequests.TrySetResult() |> ignore
-
-            task {
-                do! release.Task
-                return respond captured
-            }
+            match gateForRequest captured with
+            | Some gate ->
+                task {
+                    gate.Enter()
+                    do! gate.WaitForRelease()
+                    return respond captured
+                }
+            | None -> Task.FromResult(respond captured)
 
     type private CancelledHandler() =
         inherit HttpMessageHandler()
@@ -188,6 +190,11 @@ module GitHubContentClientTests =
         match result with
         | Ok value -> value
         | Error problem -> failwithf "Expected content, but got %s." (ContentDomain.Problem.detail problem)
+
+    let private countRequests path (requests: Request list) =
+        requests
+        |> List.filter (fun request -> request.PathAndQuery = path)
+        |> List.length
 
     let private testColdCache304AndStaleFallback () =
         let mutable now = DateTimeOffset.Parse("2026-07-15T00:00:00Z")
@@ -295,18 +302,231 @@ module GitHubContentClientTests =
             IfNoneMatch = None } -> ()
         | _ -> failwith "Expired cached payloads must not retain conditional request validators."
 
-    let private testConcurrentCacheRequests () =
+    let private testSameKeyColdRequests () =
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let contentRepositoryGate = new RequestGate()
+        let catalogGate = new RequestGate()
+
+        let gates =
+            [ contentRepositoryPath, contentRepositoryGate; catalogPath, catalogGate ]
+            |> Map.ofList
+
         let handler =
             new GatedHandler(
-                2,
+                (fun request -> Map.tryFind request.PathAndQuery gates),
                 fun request ->
                     match request.PathAndQuery with
-                    | "/repos/example-owner/content" ->
+                    | path when path = contentRepositoryPath ->
                         response
                             HttpStatusCode.OK
                             (repositoryJson "example-owner/content" "\"Content repository\"")
                             (Some "\"content-v1\"")
-                    | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
+                    | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | _ -> response HttpStatusCode.NotFound "" None
+            )
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+
+        let first = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.WaitForRequest().GetAwaiter().GetResult()
+
+        let second = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.Release()
+        catalogGate.WaitForRequest().GetAwaiter().GetResult()
+        catalogGate.Release()
+
+        Task.WhenAll([| first; second |]).GetAwaiter().GetResult()
+        |> Array.iter (fun result -> expectOk result |> ignore)
+
+        let requests = handler.Requests
+
+        if
+            countRequests contentRepositoryPath requests <> 1
+            || countRequests catalogPath requests <> 1
+        then
+            failwith "Same-key cold callers must share one upstream request for each payload key."
+
+        let requestCount = List.length requests
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
+
+        if handler.Requests |> List.length <> requestCount then
+            failwith "Completed cold fetches must leave reusable fresh cache payloads."
+
+    let private testSameKeyStaleRequests () =
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let contentRepositoryGate = new RequestGate()
+        let catalogGate = new RequestGate()
+
+        let gates =
+            [ contentRepositoryPath, contentRepositoryGate; catalogPath, catalogGate ]
+            |> Map.ofList
+
+        let mutable now = DateTimeOffset.Parse("2026-07-15T00:00:00Z")
+        let mutable isRefresh = false
+
+        let handler =
+            new GatedHandler(
+                (fun request ->
+                    if isRefresh then
+                        Map.tryFind request.PathAndQuery gates
+                    else
+                        None),
+                fun request ->
+                    match request.PathAndQuery, isRefresh with
+                    | path, false when path = contentRepositoryPath ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | path, false when path = catalogPath ->
+                        response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | path, true when path = contentRepositoryPath || path = catalogPath ->
+                        response HttpStatusCode.NotModified "" None
+                    | _ -> response HttpStatusCode.NotFound "" None
+            )
+
+        let createdHttpClient, contentClient = createClient handler (fun () -> now)
+        use httpClient = createdHttpClient
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
+
+        let initialRequestCount = handler.Requests |> List.length
+        now <- now.AddMinutes(6.0)
+        isRefresh <- true
+
+        let first = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.WaitForRequest().GetAwaiter().GetResult()
+
+        let second = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.Release()
+        catalogGate.WaitForRequest().GetAwaiter().GetResult()
+        catalogGate.Release()
+
+        Task.WhenAll([| first; second |]).GetAwaiter().GetResult()
+        |> Array.iter (fun result ->
+            let catalog = expectOk result
+
+            if
+                ContentDomain.Catalog.cache catalog |> ContentDomain.CacheMetadata.state
+                <> ContentDomain.Fresh
+            then
+                failwith "A coalesced stale refresh must return fresh content after a 304 response.")
+
+        let refreshRequests = handler.Requests |> List.skip initialRequestCount
+
+        if
+            countRequests contentRepositoryPath refreshRequests <> 1
+            || countRequests catalogPath refreshRequests <> 1
+        then
+            failwith "Same-key stale callers must share one conditional refresh per payload key."
+
+        if
+            refreshRequests
+            |> List.exists (fun request -> request.IfNoneMatch = Some "\"catalog-v1\"")
+            |> not
+        then
+            failwith "Coalesced stale refreshes must retain ETag validation."
+
+    let private testCallerCancellationDoesNotCancelSharedFetch () =
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let contentRepositoryGate = new RequestGate()
+        let catalogGate = new RequestGate()
+
+        let gates =
+            [ contentRepositoryPath, contentRepositoryGate; catalogPath, catalogGate ]
+            |> Map.ofList
+
+        let handler =
+            new GatedHandler(
+                (fun request -> Map.tryFind request.PathAndQuery gates),
+                fun request ->
+                    match request.PathAndQuery with
+                    | path when path = contentRepositoryPath ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | _ -> response HttpStatusCode.NotFound "" None
+            )
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+        use cancelledCaller = new CancellationTokenSource()
+
+        let cancelled = contentClient.GetCatalog(cancelledCaller.Token)
+        contentRepositoryGate.WaitForRequest().GetAwaiter().GetResult()
+
+        let retained = contentClient.GetCatalog(CancellationToken.None)
+        cancelledCaller.Cancel()
+
+        try
+            cancelled.GetAwaiter().GetResult() |> ignore
+            failwith "Cancelling one caller must cancel that caller's wait."
+        with :? OperationCanceledException ->
+            ()
+
+        contentRepositoryGate.Release()
+        catalogGate.WaitForRequest().GetAwaiter().GetResult()
+        catalogGate.Release()
+
+        retained.GetAwaiter().GetResult() |> expectOk |> ignore
+
+        let requests = handler.Requests
+
+        if
+            countRequests contentRepositoryPath requests <> 1
+            || countRequests catalogPath requests <> 1
+        then
+            failwith "Cancelling one caller must not start a duplicate or cancel the shared fetch."
+
+    let private testFailedSharedFetchCanRetry () =
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let contentRepositoryGate = new RequestGate()
+        let mutable failFetch = true
+
+        let handler =
+            new GatedHandler(
+                (fun request ->
+                    if failFetch && request.PathAndQuery = contentRepositoryPath then
+                        Some contentRepositoryGate
+                    else
+                        None),
+                fun request ->
+                    match request.PathAndQuery, failFetch with
+                    | path, true when path = contentRepositoryPath -> response HttpStatusCode.ServiceUnavailable "" None
+                    | path, false when path = contentRepositoryPath ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | path, false when path = catalogPath ->
                         response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
                     | _ -> response HttpStatusCode.NotFound "" None
             )
@@ -317,26 +537,107 @@ module GitHubContentClientTests =
         use httpClient = createdHttpClient
 
         let first = contentClient.GetCatalog(CancellationToken.None)
-        let second = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.WaitForRequest().GetAwaiter().GetResult()
 
-        handler.WaitForInitialRequests().GetAwaiter().GetResult()
-        handler.Release()
+        let second = contentClient.GetCatalog(CancellationToken.None)
+        contentRepositoryGate.Release()
 
         Task.WhenAll([| first; second |]).GetAwaiter().GetResult()
         |> Array.iter (fun result ->
             match result with
-            | Ok _ -> ()
-            | Error problem ->
-                failwithf "Concurrent cache requests must succeed, but got %s." (ContentDomain.Problem.detail problem))
+            | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+            | _ -> failwith "Concurrent failed callers must receive the typed upstream failure.")
 
-        let requestCount = handler.Requests |> List.length
+        if countRequests contentRepositoryPath handler.Requests <> 1 then
+            failwith "Concurrent failed callers must share one upstream request."
+
+        failFetch <- false
 
         contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
         |> expectOk
         |> ignore
 
-        if handler.Requests |> List.length <> requestCount then
-            failwith "Concurrent cache writes must leave a reusable fresh payload."
+        let requests = handler.Requests
+
+        if
+            countRequests contentRepositoryPath requests <> 2
+            || countRequests catalogPath requests <> 1
+        then
+            failwith "A completed failed fetch must be removed so a later request can retry."
+
+    let private testDifferentKeysRemainParallel () =
+        let contentRepositoryPath = "/repos/example-owner/content"
+
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let documentPath = "/repos/example-owner/content/contents/content/about.md?ref=main"
+
+        let projectsPath =
+            "/repos/example-owner/content/contents/content/projects.json?ref=main"
+
+        let documentGate = new RequestGate()
+        let projectsGate = new RequestGate()
+
+        let gates = [ documentPath, documentGate; projectsPath, projectsGate ] |> Map.ofList
+
+        let handler =
+            new GatedHandler(
+                (fun request -> Map.tryFind request.PathAndQuery gates),
+                fun request ->
+                    match request.PathAndQuery with
+                    | path when path = contentRepositoryPath ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | path when path = documentPath ->
+                        response
+                            HttpStatusCode.OK
+                            "---\nid: about\ntitle: About\nupdatedAt: 2026-07-15T00:00:00.000Z\ntags: about\n---\n# About\n"
+                            (Some "\"about-v1\"")
+                    | path when path = projectsPath ->
+                        response HttpStatusCode.OK projectsManifest (Some "\"projects-v1\"")
+                    | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
+                        response HttpStatusCode.OK "[]" (Some "\"owned-v1\"")
+                    | _ -> response HttpStatusCode.NotFound "" None
+            )
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
+
+        let aboutId =
+            match ContentDomain.ContentId.tryCreate "test.documentId" "about" with
+            | Ok value -> value
+            | Error failure -> failwithf "%s: %s" failure.Field failure.Message
+
+        let document = contentClient.GetDocument(aboutId, CancellationToken.None)
+        documentGate.WaitForRequest().GetAwaiter().GetResult()
+
+        let projects = contentClient.GetProjects(CancellationToken.None)
+        projectsGate.WaitForRequest().GetAwaiter().GetResult()
+
+        documentGate.Release()
+        projectsGate.Release()
+
+        document.GetAwaiter().GetResult() |> expectOk |> ignore
+
+        projects.GetAwaiter().GetResult() |> expectOk |> ignore
+
+        let requests = handler.Requests
+
+        if
+            countRequests documentPath requests <> 1
+            || countRequests projectsPath requests <> 1
+        then
+            failwith "Different cache keys must retain independent parallel upstream requests."
 
     let private testPayloadCacheRetention () =
         let cacheDocumentId index = sprintf "cache-document-%03d" index
@@ -1131,7 +1432,11 @@ module GitHubContentClientTests =
 
     let run () =
         testColdCache304AndStaleFallback ()
-        testConcurrentCacheRequests ()
+        testSameKeyColdRequests ()
+        testSameKeyStaleRequests ()
+        testCallerCancellationDoesNotCancelSharedFetch ()
+        testFailedSharedFetchCanRetry ()
+        testDifferentKeysRemainParallel ()
         testPayloadCacheRetention ()
         testRateMalformedAndTimeoutFailures ()
         testFractionalCatalogSize ()

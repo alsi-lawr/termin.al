@@ -316,6 +316,9 @@ module GitHubContentClient =
         let cache = ConcurrentDictionary<string, CachedPayload>(StringComparer.Ordinal)
         let cacheLock = obj ()
 
+        let inFlightFetches =
+            Dictionary<string, TaskCompletionSource<Result<GitHubPayload, FetchFailure>>>(StringComparer.Ordinal)
+
         let staleDeadline (cached: CachedPayload) =
             cached.CachedAt.AddMinutes(float (ContentDomain.FreshCacheMinutes + ContentDomain.StaleCacheMinutes))
 
@@ -341,13 +344,32 @@ module GitHubContentClient =
                 |> Seq.truncate count
                 |> Seq.iter (fun entry -> removeCachedPayload entry.Key)
 
-        let findCachedPayload now cacheKey =
+        let findCachedPayloadOrStartFetch now cacheKey =
             lock cacheLock (fun () ->
                 removeExpiredCachedPayloads now
 
-                match cache.TryGetValue(cacheKey) with
-                | true, value -> Some value
-                | false, _ -> None)
+                let cached =
+                    match cache.TryGetValue(cacheKey) with
+                    | true, value -> Some value
+                    | false, _ -> None
+
+                match cached with
+                | Some value when now <= value.CachedAt.AddMinutes(float ContentDomain.FreshCacheMinutes) ->
+                    Some value, None, false
+                | _ ->
+                    let completion, shouldStart =
+                        match inFlightFetches.TryGetValue(cacheKey) with
+                        | true, current -> current, false
+                        | false, _ ->
+                            let created =
+                                TaskCompletionSource<Result<GitHubPayload, FetchFailure>>(
+                                    TaskCreationOptions.RunContinuationsAsynchronously
+                                )
+
+                            inFlightFetches.Add(cacheKey, created)
+                            created, true
+
+                    None, Some(completion, cached), shouldStart)
 
         let storeCachedPayload now cacheKey payload =
             lock cacheLock (fun () ->
@@ -386,6 +408,130 @@ module GitHubContentClient =
             else
                 Error failure
 
+        let fetchFromGitHub
+            now
+            cacheKey
+            cached
+            (uri: Uri)
+            (accept: string)
+            : Task<Result<GitHubPayload, FetchFailure>> =
+            task {
+                use timeout = new CancellationTokenSource()
+                timeout.CancelAfter(TimeSpan.FromSeconds(float ContentDomain.GitHubTimeoutSeconds))
+                use request = new HttpRequestMessage(HttpMethod.Get, uri)
+                request.Headers.Accept.ParseAdd(accept)
+                request.Headers.UserAgent.ParseAdd(userAgent)
+                request.Headers.Add("X-GitHub-Api-Version", apiVersion)
+
+                match cached with
+                | Some { CachedEtag = Some etag } ->
+                    request.Headers.TryAddWithoutValidation("If-None-Match", etag) |> ignore
+                | Some { CachedEtag = None }
+                | None -> ()
+
+                try
+                    let! response =
+                        httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
+
+                    use response = response
+
+                    let failure =
+                        if response.StatusCode = HttpStatusCode.NotFound then
+                            Some Missing
+                        elif response.StatusCode = HttpStatusCode.TooManyRequests then
+                            Some RateLimited
+                        elif
+                            response.StatusCode = HttpStatusCode.Forbidden
+                            && (match response.Headers.TryGetValues("X-RateLimit-Remaining") with
+                                | true, values -> values |> Seq.exists (fun value -> value = "0")
+                                | false, _ -> false)
+                        then
+                            Some RateLimited
+                        elif response.IsSuccessStatusCode || response.StatusCode = HttpStatusCode.NotModified then
+                            None
+                        else
+                            Some Unavailable
+
+                    match response.StatusCode, failure, cached with
+                    | HttpStatusCode.NotModified, None, Some value ->
+                        let refreshed = { value with CachedAt = now }
+
+                        storeCachedPayload now cacheKey refreshed
+
+                        return
+                            Ok
+                                { PayloadBody = refreshed.CachedBody
+                                  PayloadFetchedAt = refreshed.CachedAt
+                                  PayloadCacheState = ContentDomain.Fresh
+                                  PayloadNextPage = refreshed.CachedNextPage }
+                    | _, Some fetchFailure, Some value -> return stale now value fetchFailure
+                    | _, Some fetchFailure, None -> return Error fetchFailure
+                    | HttpStatusCode.NotModified, None, None -> return Error Unavailable
+                    | _, None, _ ->
+                        let! body = response.Content.ReadAsStringAsync(timeout.Token)
+
+                        if Encoding.UTF8.GetByteCount(body) > ContentDomain.DocumentByteLimit then
+                            match cached with
+                            | Some value -> return stale now value Unavailable
+                            | None -> return Error Unavailable
+                        else
+                            let etag =
+                                if isNull response.Headers.ETag then
+                                    None
+                                else
+                                    Some response.Headers.ETag.Tag
+
+                            let stored =
+                                { CachedEtag = etag
+                                  CachedBody = body
+                                  CachedAt = now
+                                  CachedNextPage = nextPage response.Headers }
+
+                            storeCachedPayload now cacheKey stored
+
+                            return
+                                Ok
+                                    { PayloadBody = body
+                                      PayloadFetchedAt = now
+                                      PayloadCacheState = ContentDomain.Fresh
+                                      PayloadNextPage = stored.CachedNextPage }
+                with
+                | :? OperationCanceledException
+                | :? HttpRequestException ->
+                    match cached with
+                    | Some value -> return stale now value Unavailable
+                    | None -> return Error Unavailable
+            }
+
+        let removeInFlightFetch cacheKey (completion: TaskCompletionSource<Result<GitHubPayload, FetchFailure>>) =
+            lock cacheLock (fun () ->
+                match inFlightFetches.TryGetValue(cacheKey) with
+                | true, current when Object.ReferenceEquals(current, completion) ->
+                    inFlightFetches.Remove(cacheKey) |> ignore
+                | _ -> ())
+
+        let startSharedFetch
+            now
+            cacheKey
+            cached
+            uri
+            accept
+            (completion: TaskCompletionSource<Result<GitHubPayload, FetchFailure>>)
+            =
+            task {
+                try
+                    try
+                        let! result = fetchFromGitHub now cacheKey cached uri accept
+                        completion.TrySetResult(result) |> ignore
+                    with
+                    | :? OperationCanceledException as error ->
+                        completion.TrySetCanceled(error.CancellationToken) |> ignore
+                    | error -> completion.TrySetException(error) |> ignore
+                finally
+                    removeInFlightFetch cacheKey completion
+            }
+            |> ignore
+
         let fetch
             (uri: Uri)
             (accept: string)
@@ -395,104 +541,22 @@ module GitHubContentClient =
                 let now = clock ()
                 let cacheKey = $"{accept}|{uri.AbsoluteUri}"
 
-                let cached = findCachedPayload now cacheKey
+                let cached, sharedFetch, shouldStart = findCachedPayloadOrStartFetch now cacheKey
 
-                match cached with
-                | Some value when now <= value.CachedAt.AddMinutes(float ContentDomain.FreshCacheMinutes) ->
+                match cached, sharedFetch with
+                | Some value, _ ->
                     return
                         Ok
                             { PayloadBody = value.CachedBody
                               PayloadFetchedAt = value.CachedAt
                               PayloadCacheState = ContentDomain.Fresh
                               PayloadNextPage = value.CachedNextPage }
-                | _ ->
-                    use timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
-                    timeout.CancelAfter(TimeSpan.FromSeconds(float ContentDomain.GitHubTimeoutSeconds))
-                    use request = new HttpRequestMessage(HttpMethod.Get, uri)
-                    request.Headers.Accept.ParseAdd(accept)
-                    request.Headers.UserAgent.ParseAdd(userAgent)
-                    request.Headers.Add("X-GitHub-Api-Version", apiVersion)
+                | None, Some(completion, staleCached) ->
+                    if shouldStart then
+                        startSharedFetch now cacheKey staleCached uri accept completion
 
-                    match cached with
-                    | Some { CachedEtag = Some etag } ->
-                        request.Headers.TryAddWithoutValidation("If-None-Match", etag) |> ignore
-                    | Some { CachedEtag = None }
-                    | None -> ()
-
-                    try
-                        let! response =
-                            httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token)
-
-                        use response = response
-
-                        let failure =
-                            if response.StatusCode = HttpStatusCode.NotFound then
-                                Some Missing
-                            elif response.StatusCode = HttpStatusCode.TooManyRequests then
-                                Some RateLimited
-                            elif
-                                response.StatusCode = HttpStatusCode.Forbidden
-                                && (match response.Headers.TryGetValues("X-RateLimit-Remaining") with
-                                    | true, values -> values |> Seq.exists (fun value -> value = "0")
-                                    | false, _ -> false)
-                            then
-                                Some RateLimited
-                            elif response.IsSuccessStatusCode || response.StatusCode = HttpStatusCode.NotModified then
-                                None
-                            else
-                                Some Unavailable
-
-                        match response.StatusCode, failure, cached with
-                        | HttpStatusCode.NotModified, None, Some value ->
-                            let refreshed = { value with CachedAt = now }
-
-                            storeCachedPayload now cacheKey refreshed
-
-                            return
-                                Ok
-                                    { PayloadBody = refreshed.CachedBody
-                                      PayloadFetchedAt = refreshed.CachedAt
-                                      PayloadCacheState = ContentDomain.Fresh
-                                      PayloadNextPage = refreshed.CachedNextPage }
-                        | _, Some fetchFailure, Some value -> return stale now value fetchFailure
-                        | _, Some fetchFailure, None -> return Error fetchFailure
-                        | HttpStatusCode.NotModified, None, None -> return Error Unavailable
-                        | _, None, _ ->
-                            let! body = response.Content.ReadAsStringAsync(timeout.Token)
-
-                            if Encoding.UTF8.GetByteCount(body) > ContentDomain.DocumentByteLimit then
-                                match cached with
-                                | Some value -> return stale now value Unavailable
-                                | None -> return Error Unavailable
-                            else
-                                let etag =
-                                    if isNull response.Headers.ETag then
-                                        None
-                                    else
-                                        Some response.Headers.ETag.Tag
-
-                                let stored =
-                                    { CachedEtag = etag
-                                      CachedBody = body
-                                      CachedAt = now
-                                      CachedNextPage = nextPage response.Headers }
-
-                                storeCachedPayload now cacheKey stored
-
-                                return
-                                    Ok
-                                        { PayloadBody = body
-                                          PayloadFetchedAt = now
-                                          PayloadCacheState = ContentDomain.Fresh
-                                          PayloadNextPage = stored.CachedNextPage }
-                    with
-                    | :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
-                        return! Task.FromCanceled<Result<GitHubPayload, FetchFailure>>(error.CancellationToken)
-                    | :? OperationCanceledException
-                    | :? HttpRequestException ->
-                        match cached with
-                        | Some value -> return stale now value Unavailable
-                        | None -> return Error Unavailable
+                    return! completion.Task.WaitAsync(cancellationToken)
+                | None, None -> return Error Unavailable
             }
 
         let getJson uri cancellationToken =
