@@ -610,26 +610,22 @@ async function readFile(
     };
   }
 
-  try {
-    const document = await documents.read(resolution.node.documentHandle, context.signal);
+  const document = await documents.read(resolution.node.documentHandle, context.signal);
 
-    if (context.signal.aborted || document.kind === "cancelled") {
-      return { kind: "cancelled" };
-    }
+  if (context.signal.aborted || document.kind === "cancelled") {
+    return { kind: "cancelled" };
+  }
 
-    if (document.kind === "missing") {
-      return { kind: "failed", outcome: unavailableContentOutcome(commandName) };
-    }
-
-    return {
-      kind: "read",
-      file: resolution.node,
-      text: document.document.text,
-      sourcePath: document.document.source.path,
-    };
-  } catch {
+  if (document.kind === "missing") {
     return { kind: "failed", outcome: unavailableContentOutcome(commandName) };
   }
+
+  return {
+    kind: "read",
+    file: resolution.node,
+    text: document.document.text,
+    sourcePath: document.document.source.path,
+  };
 }
 
 function wildcardMatches(pattern: string, value: string): boolean {

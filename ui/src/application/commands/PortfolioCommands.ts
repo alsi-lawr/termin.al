@@ -239,28 +239,24 @@ async function openTarget(
     };
   }
 
-  try {
-    const document = await documents.read(resolution.node.documentHandle, context.signal);
+  const document = await documents.read(resolution.node.documentHandle, context.signal);
 
-    if (context.signal.aborted || document.kind === "cancelled") {
-      return { kind: "cancelled" };
-    }
+  if (context.signal.aborted || document.kind === "cancelled") {
+    return { kind: "cancelled" };
+  }
 
-    if (document.kind === "missing") {
-      return { kind: "failed", outcome: unavailableContentOutcome(commandName) };
-    }
-
-    return {
-      kind: "viewer",
-      viewer: createDocumentViewerContent({
-        title: resolution.node.name,
-        presentation: "inline",
-        document: document.document,
-      }),
-    };
-  } catch {
+  if (document.kind === "missing") {
     return { kind: "failed", outcome: unavailableContentOutcome(commandName) };
   }
+
+  return {
+    kind: "viewer",
+    viewer: createDocumentViewerContent({
+      title: resolution.node.name,
+      presentation: "inline",
+      document: document.document,
+    }),
+  };
 }
 
 function createHelpCommand(): CommandDefinition {

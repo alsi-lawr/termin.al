@@ -236,3 +236,22 @@ test("reports empty, missing, unsupported-option, and cancelled command outcomes
   assert.equal(option.kind, "failed");
   assert.equal(cancelled.kind, "cancelled");
 });
+
+test("routes unexpected supplier failures through the execution boundary", async () => {
+  const outcome = await execute(
+    "cat about.md",
+    createRegistry(100, {
+      read: async () => {
+        throw new Error("Unexpected supplier failure.");
+      },
+    }),
+  );
+
+  assert.equal(outcome.kind, "failed");
+  if (outcome.kind !== "failed") {
+    return;
+  }
+
+  assert.equal(outcome.failure.kind, "execution-error");
+  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
+});
