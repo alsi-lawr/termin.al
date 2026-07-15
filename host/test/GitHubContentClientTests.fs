@@ -502,22 +502,23 @@ module GitHubContentClientTests =
         then
             failwith "Cancelling one caller must not start a duplicate or cancel the shared fetch."
 
-    let private testFailedSharedFetchCanRetry () =
+    let private testFailedSharedFetchCanRetryImmediately () =
         let contentRepositoryPath = "/repos/example-owner/content"
 
         let catalogPath =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
         let contentRepositoryGate = new RequestGate()
+        let retryGate = new RequestGate()
         let mutable failFetch = true
 
         let handler =
             new GatedHandler(
                 (fun request ->
-                    if failFetch && request.PathAndQuery = contentRepositoryPath then
-                        Some contentRepositoryGate
-                    else
-                        None),
+                    match request.PathAndQuery, failFetch with
+                    | path, true when path = contentRepositoryPath -> Some contentRepositoryGate
+                    | path, false when path = contentRepositoryPath -> Some retryGate
+                    | _ -> None),
                 fun request ->
                     match request.PathAndQuery, failFetch with
                     | path, true when path = contentRepositoryPath -> response HttpStatusCode.ServiceUnavailable "" None
@@ -542,20 +543,22 @@ module GitHubContentClientTests =
         let second = contentClient.GetCatalog(CancellationToken.None)
         contentRepositoryGate.Release()
 
-        Task.WhenAll([| first; second |]).GetAwaiter().GetResult()
-        |> Array.iter (fun result ->
-            match result with
-            | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
-            | _ -> failwith "Concurrent failed callers must receive the typed upstream failure.")
-
-        if countRequests contentRepositoryPath handler.Requests <> 1 then
-            failwith "Concurrent failed callers must share one upstream request."
+        match first.GetAwaiter().GetResult() with
+        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+        | _ -> failwith "The first failed caller must receive the typed upstream failure."
 
         failFetch <- false
 
-        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
-        |> expectOk
-        |> ignore
+        let retry = contentClient.GetCatalog(CancellationToken.None)
+        retryGate.WaitForRequest().GetAwaiter().GetResult()
+
+        match second.GetAwaiter().GetResult() with
+        | Error problem when ContentDomain.Problem.code problem = ContentDomain.UpstreamUnavailable -> ()
+        | _ -> failwith "Concurrent failed callers must receive the typed upstream failure."
+
+        retryGate.Release()
+
+        retry.GetAwaiter().GetResult() |> expectOk |> ignore
 
         let requests = handler.Requests
 
@@ -563,7 +566,7 @@ module GitHubContentClientTests =
             countRequests contentRepositoryPath requests <> 2
             || countRequests catalogPath requests <> 1
         then
-            failwith "A completed failed fetch must be removed so a later request can retry."
+            failwith "An immediate request after a failed shared fetch must start a new upstream attempt."
 
     let private testDifferentKeysRemainParallel () =
         let contentRepositoryPath = "/repos/example-owner/content"
@@ -1476,7 +1479,7 @@ module GitHubContentClientTests =
         testSameKeyColdRequests ()
         testSameKeyStaleRequests ()
         testCallerCancellationDoesNotCancelSharedFetch ()
-        testFailedSharedFetchCanRetry ()
+        testFailedSharedFetchCanRetryImmediately ()
         testDifferentKeysRemainParallel ()
         testPayloadCacheRetention ()
         testRateMalformedAndTimeoutFailures ()

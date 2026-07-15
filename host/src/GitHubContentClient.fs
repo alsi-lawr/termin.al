@@ -520,15 +520,16 @@ module GitHubContentClient =
             =
             task {
                 try
-                    try
-                        let! result = fetchFromGitHub now cacheKey cached uri accept
-                        completion.TrySetResult(result) |> ignore
-                    with
-                    | :? OperationCanceledException as error ->
-                        completion.TrySetCanceled(error.CancellationToken) |> ignore
-                    | error -> completion.TrySetException(error) |> ignore
-                finally
+                    let! result = fetchFromGitHub now cacheKey cached uri accept
                     removeInFlightFetch cacheKey completion
+                    completion.TrySetResult(result) |> ignore
+                with
+                | :? OperationCanceledException as error ->
+                    removeInFlightFetch cacheKey completion
+                    completion.TrySetCanceled(error.CancellationToken) |> ignore
+                | error ->
+                    removeInFlightFetch cacheKey completion
+                    completion.TrySetException(error) |> ignore
             }
             |> ignore
 
