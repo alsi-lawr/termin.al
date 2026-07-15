@@ -9,10 +9,14 @@ import {
 } from "./SecretPromptDelivery.ts";
 
 export type SecretPromptEffectConsumptionState =
-  | Readonly<{ kind: "idle" }>
+  | Readonly<{
+      kind: "idle";
+      latestGeneration: number;
+    }>
   | Readonly<{
       kind: "handled";
       requestId: SecretPromptId;
+      latestGeneration: number;
     }>;
 
 export type SecretPromptEffectConsumptionDiagnostic = Readonly<{
@@ -41,6 +45,7 @@ export type SecretPromptEffectConsumption =
       kind: "consumed";
       state: SecretPromptEffectConsumptionState;
       action: SecretPromptEffectConsumedAction;
+      generation: number;
       diagnostic: Promise<SecretPromptEffectConsumptionDiagnostic | undefined>;
     }>;
 
@@ -74,7 +79,14 @@ function deliveryDiagnostic(
 }
 
 export function createSecretPromptEffectConsumptionState(): SecretPromptEffectConsumptionState {
-  return { kind: "idle" };
+  return { kind: "idle", latestGeneration: 0 };
+}
+
+export function shouldApplySecretPromptEffectDiagnostic(
+  state: SecretPromptEffectConsumptionState,
+  generation: number,
+): boolean {
+  return state.latestGeneration === generation;
 }
 
 export function consumePendingSecretPromptEffect({
@@ -85,7 +97,10 @@ export function consumePendingSecretPromptEffect({
   if (effect.kind === "none") {
     return {
       kind: "not-secret",
-      state: createSecretPromptEffectConsumptionState(),
+      state:
+        state.kind === "handled"
+          ? { kind: "idle", latestGeneration: state.latestGeneration }
+          : state,
       effect,
     };
   }
@@ -98,13 +113,20 @@ export function consumePendingSecretPromptEffect({
     return { kind: "duplicate", state };
   }
 
+  const generation = state.latestGeneration + 1;
+
   return {
     kind: "consumed",
-    state: { kind: "handled", requestId: effect.requestId },
+    state: {
+      kind: "handled",
+      requestId: effect.requestId,
+      latestGeneration: generation,
+    },
     action: {
       kind: "secret-prompt.effect.consumed",
       requestId: effect.requestId,
     },
+    generation,
     diagnostic: deliveryDiagnostic(effect, handler),
   };
 }

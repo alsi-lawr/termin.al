@@ -19,6 +19,7 @@ import type { CompletionService } from "../../application/commands/Completion.ts
 import {
   consumePendingSecretPromptEffect,
   createSecretPromptEffectConsumptionState,
+  shouldApplySecretPromptEffectDiagnostic,
   type SecretPromptEffectConsumptionDiagnostic,
   type SecretPromptEffectConsumptionState,
 } from "../../application/commands/SecretPromptEffectConsumption.ts";
@@ -116,7 +117,13 @@ export function useShellEngine({
       const updateSecretPromptDiagnostic = async (): Promise<void> => {
         const diagnostic = await secretPromptConsumption.diagnostic;
 
-        if (mounted.current) {
+        if (
+          mounted.current &&
+          shouldApplySecretPromptEffectDiagnostic(
+            secretPromptEffectConsumption.current,
+            secretPromptConsumption.generation,
+          )
+        ) {
           setTransientDiagnostic(diagnostic);
         }
       };
