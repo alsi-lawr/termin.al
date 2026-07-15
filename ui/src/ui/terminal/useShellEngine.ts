@@ -21,8 +21,8 @@ import {
   shouldApplySecretPromptEffectDiagnostic,
   type SecretPromptEffectConsumptionDiagnostic,
   type SecretPromptEffectConsumptionState,
+  type SecretPromptSubmissionHandler,
 } from "../../application/commands/SecretPromptEffectConsumption.ts";
-import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
 import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts";
 
 export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
@@ -34,7 +34,7 @@ export type UseShellEngineOptions = Readonly<{
   runtimeControl: PaneShellRuntimeControl;
   registry: CommandRegistry;
   completionService: CompletionService;
-  secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
+  secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
 
 export type ShellEngine = Readonly<{
@@ -71,7 +71,7 @@ export function useShellEngine({
   runtimeControl,
   registry,
   completionService,
-  secretPromptOutcomeHandler,
+  secretPromptSubmissionHandler,
 }: UseShellEngineOptions): ShellEngine {
   const [transientDiagnostic, setTransientDiagnostic] = useState<
     ShellEngineDiagnostic | undefined
@@ -93,7 +93,7 @@ export function useShellEngine({
     const secretPromptConsumption = consumePendingSecretPromptEffect({
       state: secretPromptEffectConsumption.current,
       effect: state.pendingEffect,
-      handler: secretPromptOutcomeHandler,
+      submissionHandler: secretPromptSubmissionHandler,
     });
     secretPromptEffectConsumption.current = secretPromptConsumption.state;
 
@@ -189,7 +189,7 @@ export function useShellEngine({
     isSessionOpen,
     registry,
     runtimeControl,
-    secretPromptOutcomeHandler,
+    secretPromptSubmissionHandler,
     state.pendingEffect,
   ]);
 

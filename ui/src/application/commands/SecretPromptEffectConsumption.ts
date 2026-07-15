@@ -5,10 +5,10 @@ import type {
   SecretPromptId,
   ShellEffect,
 } from "../../domain/terminal/Shell.ts";
-import {
-  deliverSecretPromptEffect,
-  type SecretPromptOutcomeHandler,
-} from "./SecretPromptDelivery.ts";
+
+export type SecretPromptSubmissionHandler = (
+  effect: Extract<SecretPromptEffect, { kind: "secret-submitted" }>,
+) => void | Promise<void>;
 
 export type SecretPromptEffectGeneration = number & {
   readonly [secretPromptEffectGenerationBrand]: "SecretPromptEffectGeneration";
@@ -58,7 +58,7 @@ export type SecretPromptEffectConsumption =
 export type ConsumePendingSecretPromptEffectOptions = Readonly<{
   state: SecretPromptEffectConsumptionState;
   effect: ShellEffect;
-  handler: SecretPromptOutcomeHandler | undefined;
+  submissionHandler: SecretPromptSubmissionHandler | undefined;
 }>;
 
 const secretPromptDeliveryFailureDiagnostic = {
@@ -76,20 +76,16 @@ function incrementSecretPromptEffectGeneration(
 }
 
 function deliveryDiagnostic(
-  effect: SecretPromptEffect,
-  handler: SecretPromptOutcomeHandler | undefined,
+  effect: Extract<SecretPromptEffect, { kind: "secret-submitted" }>,
+  submissionHandler: SecretPromptSubmissionHandler | undefined,
 ): Promise<SecretPromptEffectConsumptionDiagnostic | undefined> {
-  if (effect.kind === "secret-cancelled") {
-    return Promise.resolve(undefined);
+  if (submissionHandler === undefined) {
+    return Promise.resolve(secretPromptDeliveryFailureDiagnostic);
   }
 
   return Promise.resolve()
-    .then(() => deliverSecretPromptEffect({ effect, handler }))
-    .then((result) =>
-      result.kind === "delivered"
-        ? undefined
-        : secretPromptDeliveryFailureDiagnostic,
-    )
+    .then(() => submissionHandler(effect))
+    .then(() => undefined)
     .catch(() => secretPromptDeliveryFailureDiagnostic);
 }
 
@@ -107,7 +103,7 @@ export function shouldApplySecretPromptEffectDiagnostic(
 export function consumePendingSecretPromptEffect({
   state,
   effect,
-  handler,
+  submissionHandler,
 }: ConsumePendingSecretPromptEffectOptions): SecretPromptEffectConsumption {
   if (effect.kind === "none") {
     return {
@@ -142,6 +138,9 @@ export function consumePendingSecretPromptEffect({
       requestId: effect.requestId,
     },
     generation,
-    diagnostic: deliveryDiagnostic(effect, handler),
+    diagnostic:
+      effect.kind === "secret-submitted"
+        ? deliveryDiagnostic(effect, submissionHandler)
+        : Promise.resolve(undefined),
   };
 }

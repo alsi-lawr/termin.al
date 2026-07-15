@@ -30,7 +30,7 @@ import {
 } from "../../application/commands/Completion.ts";
 import { createReadOnlyCommandDefinitions } from "../../application/commands/ReadOnlyCommands.ts";
 import { createPortfolioCommandDefinitions } from "../../application/commands/PortfolioCommands.ts";
-import type { SecretPromptOutcomeHandler } from "../../application/commands/SecretPromptDelivery.ts";
+import type { SecretPromptSubmissionHandler } from "../../application/commands/SecretPromptEffectConsumption.ts";
 import {
   InputCapture,
   type InputCaptureHandle,
@@ -65,7 +65,7 @@ type TerminalProps = Readonly<{
   paneCommandHandler: PaneCommandHandler;
   onCloseInlineViewer: (paneId: PaneId) => void;
   prompt?: string;
-  secretPromptOutcomeHandler?: SecretPromptOutcomeHandler;
+  secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
 
 export function Terminal({
@@ -82,7 +82,7 @@ export function Terminal({
   paneCommandHandler,
   onCloseInlineViewer,
   prompt = "$",
-  secretPromptOutcomeHandler,
+  secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
   const dispatchShellAction = useCallback(
@@ -124,7 +124,7 @@ export function Terminal({
     runtimeControl,
     registry,
     completionService,
-    secretPromptOutcomeHandler,
+    secretPromptSubmissionHandler,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
   const editor =

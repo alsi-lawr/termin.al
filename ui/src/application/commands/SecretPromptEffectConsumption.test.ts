@@ -18,8 +18,8 @@ import {
   shouldApplySecretPromptEffectDiagnostic,
   type SecretPromptEffectConsumptionDiagnostic,
   type SecretPromptEffectConsumptionState,
+  type SecretPromptSubmissionHandler,
 } from "./SecretPromptEffectConsumption.ts";
-import type { SecretPromptOutcomeHandler } from "./SecretPromptDelivery.ts";
 
 type SecretSubmission = Readonly<{
   request: SecretPromptRequest;
@@ -33,8 +33,8 @@ type SecretCancellation = Readonly<{
   effect: Extract<SecretPromptEffect, { kind: "secret-cancelled" }>;
 }>;
 
-type DeferredSecretPromptHandler = Readonly<{
-  handler: SecretPromptOutcomeHandler;
+type DeferredSecretPromptSubmissionHandler = Readonly<{
+  submissionHandler: SecretPromptSubmissionHandler;
   resolve: () => void;
   reject: (error: Error) => void;
 }>;
@@ -89,7 +89,7 @@ function createSecretCancellation(value: string): SecretCancellation {
   return { request, state: cancelled, effect: cancelled.pendingEffect };
 }
 
-function createDeferredSecretPromptHandler(): DeferredSecretPromptHandler {
+function createDeferredSecretPromptSubmissionHandler(): DeferredSecretPromptSubmissionHandler {
   let resolveDeferred: (() => void) | undefined;
   let rejectDeferred: ((error: Error) => void) | undefined;
   const promise = new Promise<void>((resolve, reject) => {
@@ -98,7 +98,7 @@ function createDeferredSecretPromptHandler(): DeferredSecretPromptHandler {
   });
 
   return {
-    handler: () => promise,
+    submissionHandler: () => promise,
     resolve: () => {
       const resolve = resolveDeferred;
 
@@ -126,7 +126,7 @@ function clearSecretPromptEffect(
   const clearance = consumePendingSecretPromptEffect({
     state,
     effect: { kind: "none" },
-    handler: undefined,
+    submissionHandler: undefined,
   });
 
   if (clearance.kind !== "not-secret") {
@@ -158,8 +158,8 @@ test("consumes one correlated secret submission without retaining it", async () 
   const consumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect,
-    handler: (outcome) => {
-      received.push(outcome);
+    submissionHandler: (submission) => {
+      received.push(submission);
     },
   });
 
@@ -170,8 +170,8 @@ test("consumes one correlated secret submission without retaining it", async () 
   const duplicate = consumePendingSecretPromptEffect({
     state: consumption.state,
     effect,
-    handler: (outcome) => {
-      received.push(outcome);
+    submissionHandler: (submission) => {
+      received.push(submission);
     },
   });
   const consumed = reduceShellState(state, consumption.action);
@@ -217,7 +217,7 @@ test("consumes secret cancellation without invoking a handler", async () => {
   const consumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect: cancelled.pendingEffect,
-    handler: () => {
+    submissionHandler: () => {
       calls += 1;
     },
   });
@@ -242,7 +242,7 @@ test("reports a secret-free diagnostic when no submission handler is available",
   const consumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect,
-    handler: undefined,
+    submissionHandler: undefined,
   });
 
   if (consumption.kind !== "consumed") {
@@ -266,7 +266,7 @@ test("reports a secret-free diagnostic when a submission handler fails", async (
   const consumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect,
-    handler: () => {
+    submissionHandler: () => {
       attempts += 1;
       throw new Error(secret);
     },
@@ -292,15 +292,15 @@ test("suppresses a stale failed secret delivery after a later success with the s
   const newerSecret = "newer-sensitive-value";
   const olderSubmission = createSecretSubmission(olderSecret);
   const newerSubmission = createSecretSubmission(newerSecret);
-  const olderHandler = createDeferredSecretPromptHandler();
-  const newerHandler = createDeferredSecretPromptHandler();
+  const olderHandler = createDeferredSecretPromptSubmissionHandler();
+  const newerHandler = createDeferredSecretPromptSubmissionHandler();
 
   assert.equal(olderSubmission.request.id, newerSubmission.request.id);
 
   const olderConsumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect: olderSubmission.effect,
-    handler: olderHandler.handler,
+    submissionHandler: olderHandler.submissionHandler,
   });
 
   if (olderConsumption.kind !== "consumed") {
@@ -315,7 +315,7 @@ test("suppresses a stale failed secret delivery after a later success with the s
   const newerConsumption = consumePendingSecretPromptEffect({
     state: afterOlderConsumption,
     effect: newerSubmission.effect,
-    handler: newerHandler.handler,
+    submissionHandler: newerHandler.submissionHandler,
   });
 
   if (newerConsumption.kind !== "consumed") {
@@ -388,7 +388,7 @@ test("suppresses a stale failed secret delivery after a later cancellation with 
   const cancelledSecret = "cancelled-sensitive-value";
   const olderSubmission = createSecretSubmission(olderSecret);
   const laterCancellation = createSecretCancellation(cancelledSecret);
-  const olderHandler = createDeferredSecretPromptHandler();
+  const olderHandler = createDeferredSecretPromptSubmissionHandler();
   let cancellationHandlerCalls = 0;
 
   assert.equal(olderSubmission.request.id, laterCancellation.request.id);
@@ -396,7 +396,7 @@ test("suppresses a stale failed secret delivery after a later cancellation with 
   const olderConsumption = consumePendingSecretPromptEffect({
     state: createSecretPromptEffectConsumptionState(),
     effect: olderSubmission.effect,
-    handler: olderHandler.handler,
+    submissionHandler: olderHandler.submissionHandler,
   });
 
   if (olderConsumption.kind !== "consumed") {
@@ -411,7 +411,7 @@ test("suppresses a stale failed secret delivery after a later cancellation with 
   const cancellationConsumption = consumePendingSecretPromptEffect({
     state: afterOlderConsumption,
     effect: laterCancellation.effect,
-    handler: () => {
+    submissionHandler: () => {
       cancellationHandlerCalls += 1;
     },
   });
