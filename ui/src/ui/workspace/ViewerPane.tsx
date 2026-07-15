@@ -93,6 +93,8 @@ export function ViewerPane({
         applyPagerOperation(pagerKey.operation);
         return;
       }
+
+      return;
     }
 
     if (

@@ -152,6 +152,21 @@ test("maps practical pager keys to typed operations", () => {
   }
 });
 
+test("declines modified pager quit keys without mapping a close operation", () => {
+  const inputs = [
+    { key: "q", altKey: true, ctrlKey: false, metaKey: false },
+    { key: "Escape", altKey: true, ctrlKey: false, metaKey: false },
+    { key: "q", altKey: false, ctrlKey: true, metaKey: false },
+    { key: "Escape", altKey: false, ctrlKey: true, metaKey: false },
+    { key: "q", altKey: false, ctrlKey: false, metaKey: true },
+    { key: "Escape", altKey: false, ctrlKey: false, metaKey: true },
+  ];
+
+  for (const input of inputs) {
+    assert.deepEqual(rawPagerOperationFromKey(input), { kind: "ignored" });
+  }
+});
+
 test("ignores modified and unrelated keys so pane prefixes remain authoritative", () => {
   assert.deepEqual(rawPagerOperationFromKey({
     key: "b",
