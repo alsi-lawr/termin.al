@@ -44,6 +44,11 @@ import {
   previousUnicodeCursorOffset,
 } from "../../domain/terminal/UnicodeCursor.ts";
 import {
+  vimBufferCursorOffset,
+  vimBufferText,
+  vimPromptMode,
+} from "../../domain/vim/VimBuffer.ts";
+import {
   MobilePaneControls,
   type MobilePaneControl,
 } from "../workspace/MobilePaneControls";
@@ -138,16 +143,16 @@ export function Terminal({
     secretPromptSubmissionHandler,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
-  const editor =
+  const promptBuffer =
     activePrompt.kind === "secret"
-      ? activePrompt.prompt.editor
-      : activePrompt.editor;
+      ? activePrompt.prompt.buffer
+      : activePrompt.buffer;
   const displayPrompt =
     activePrompt.kind === "secret" ? activePrompt.prompt.request.label : prompt;
   const displayInput =
     activePrompt.kind === "secret"
-      ? "•".repeat(editor.buffer.value.length)
-      : editor.buffer.value;
+      ? "•".repeat(vimBufferText(promptBuffer).length)
+      : vimBufferText(promptBuffer);
 
   useLayoutEffect(() => {
     if (isActive && presentation.kind === "shell") {
@@ -186,35 +191,38 @@ export function Terminal({
         shell.complete();
         return;
       case "left":
-        if (editor.buffer.mode.kind === "normal") {
+        if (vimPromptMode(promptBuffer).kind === "normal") {
           shell.normalKey({ kind: "motion", motion: "left" });
           return;
         }
 
         shell.moveCursor(
           previousUnicodeCursorOffset(
-            editor.buffer.value,
-            editor.buffer.cursor,
+            vimBufferText(promptBuffer),
+            vimBufferCursorOffset(promptBuffer),
           ),
         );
         return;
       case "right":
-        if (editor.buffer.mode.kind === "normal") {
+        if (vimPromptMode(promptBuffer).kind === "normal") {
           shell.normalKey({ kind: "motion", motion: "right" });
           return;
         }
 
         shell.moveCursor(
-          nextUnicodeCursorOffset(editor.buffer.value, editor.buffer.cursor),
+          nextUnicodeCursorOffset(
+            vimBufferText(promptBuffer),
+            vimBufferCursorOffset(promptBuffer),
+          ),
         );
         return;
       case "up":
-        if (editor.buffer.mode.kind === "normal") {
+        if (vimPromptMode(promptBuffer).kind === "normal") {
           shell.normalKey({ kind: "history-older" });
         }
         return;
       case "down":
-        if (editor.buffer.mode.kind === "normal") {
+        if (vimPromptMode(promptBuffer).kind === "normal") {
           shell.normalKey({ kind: "history-newer" });
         }
         return;
@@ -259,7 +267,7 @@ export function Terminal({
           rows={shell.state.history}
           prompt={displayPrompt}
           currentInput={displayInput}
-          cursorColumn={editor.buffer.cursor}
+          cursorColumn={vimBufferCursorOffset(promptBuffer)}
           status={getShellStatus(shell.state)}
           completion={shell.state.completion}
           transientDiagnostic={shell.transientDiagnostic?.message}
@@ -276,9 +284,9 @@ export function Terminal({
 
       <InputCapture
         ref={inputRef}
-        value={editor.buffer.value}
-        cursor={editor.buffer.cursor}
-        mode={editor.buffer.mode}
+        value={vimBufferText(promptBuffer)}
+        cursor={vimBufferCursorOffset(promptBuffer)}
+        mode={vimPromptMode(promptBuffer)}
         promptKind={activePrompt.kind}
         isActive={isActive}
         focusVersion={focusVersion}

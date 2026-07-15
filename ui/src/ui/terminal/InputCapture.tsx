@@ -14,10 +14,10 @@ import {
   type SyntheticEvent,
 } from "react";
 import {
-  normalPromptKeyFromKeyboard,
-  type NormalPromptKey,
-} from "../../domain/terminal/PromptEditor.ts";
-import type { PromptMode } from "../../domain/terminal/PromptBuffer.ts";
+  normalVimPromptKeyFromKeyboard,
+  type VimPromptKey,
+  type VimPromptMode,
+} from "../../domain/vim/VimBuffer.ts";
 import {
   moveNativeInputSelectionLeft,
   moveNativeInputSelectionRight,
@@ -46,14 +46,14 @@ export type InputCapturePaneKeyResult =
 type InputCaptureProps = Readonly<{
   value: string;
   cursor: number;
-  mode: PromptMode;
+  mode: VimPromptMode;
   promptKind: InputCapturePromptKind;
   isActive: boolean;
   focusVersion: number;
   onNativeValueChange: (value: string, cursor: number) => void;
   onMoveCursor: (cursor: number) => void;
   onInsertText: (text: string) => void;
-  onNormalKey: (key: NormalPromptKey) => void;
+  onNormalKey: (key: VimPromptKey) => void;
   onSubmit: () => void;
   onCancel: () => void;
   onComplete: () => void;
@@ -174,7 +174,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
     };
 
     const handleNormalKey = (input: InputCapturePaneKeyInput): void => {
-      const match = normalPromptKeyFromKeyboard(
+      const match = normalVimPromptKeyFromKeyboard(
         input.key,
         input.ctrlKey,
         input.metaKey,

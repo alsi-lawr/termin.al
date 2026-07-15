@@ -19,6 +19,10 @@ import {
   type CommandOutcome,
   type ShellState,
 } from "./Shell.ts";
+import {
+  vimBufferCursorOffset,
+  vimBufferText,
+} from "../vim/VimBuffer.ts";
 
 function createState(
   scrollbackLimit = 3,
@@ -290,11 +294,56 @@ test("navigates bounded command history with normal-mode k and j", () => {
     key: { kind: "history-newer" },
   });
 
-  assert.equal(previous.input.buffer.value, "second");
-  assert.equal(oldest.input.buffer.value, "first");
-  assert.equal(newer.input.buffer.value, "second");
-  assert.equal(draft.input.buffer.value, "");
+  assert.equal(vimBufferText(previous.input), "second");
+  assert.equal(vimBufferText(oldest.input), "first");
+  assert.equal(vimBufferText(newer.input), "second");
+  assert.equal(vimBufferText(draft.input), "");
   assert.deepEqual(draft.historyNavigation, { kind: "not-browsing" });
+});
+
+test("routes terminal normal prompt editing through the shared Vim buffer", () => {
+  const typed = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "one two",
+  });
+  const normal = reduceShellState(typed, {
+    kind: "prompt.normal-key",
+    key: { kind: "escape" },
+  });
+  const atStart = reduceShellState(normal, {
+    kind: "prompt.normal-key",
+    key: { kind: "digit", digit: 0 },
+  });
+  const deleting = reduceShellState(atStart, {
+    kind: "prompt.normal-key",
+    key: { kind: "operator", operator: "delete" },
+  });
+  const deleted = reduceShellState(deleting, {
+    kind: "prompt.normal-key",
+    key: { kind: "motion", motion: "word-forward" },
+  });
+  const undone = reduceShellState(deleted, {
+    kind: "prompt.normal-key",
+    key: { kind: "undo" },
+  });
+
+  assert.equal(vimBufferText(deleted.input), "two");
+  assert.deepEqual(deleted.input.register, {
+    kind: "character",
+    text: "one ",
+  });
+  assert.equal(vimBufferText(undone.input), "one two");
+  assert.equal(undone.input.mode.kind, "normal");
+});
+
+test("bounds terminal prompt undo snapshots through the shared Vim core", () => {
+  let state = createState();
+
+  for (let index = 0; index < 101; index += 1) {
+    state = reduceShellState(state, { kind: "input.insert", text: "x" });
+  }
+
+  assert.equal(state.input.undoStack.length, 100);
 });
 
 test("keeps secret prompts separate from command input and all histories", () => {
@@ -317,12 +366,12 @@ test("keeps secret prompts separate from command input and all histories", () =>
   }
 
   assert.equal(activePrompt.prompt.request.id, request.id);
-  assert.equal(activePrompt.prompt.editor.buffer.value, "sensitive-value");
+  assert.equal(vimBufferText(activePrompt.prompt.buffer), "sensitive-value");
 
   const submitted = reduceShellState(typed, { kind: "prompt.submit" });
 
   assert.deepEqual(submitted.secretPrompt, { kind: "none" });
-  assert.equal(submitted.input.buffer.value, "");
+  assert.equal(vimBufferText(submitted.input), "");
   assert.deepEqual(submitted.history, []);
   assert.deepEqual(submitted.commandHistory, []);
   assert.deepEqual(submitted.completion, { kind: "idle" });
@@ -429,8 +478,8 @@ test("applies current single completions and exposes multiple matches", () => {
     },
   });
 
-  assert.equal(completed.input.buffer.value, "open");
-  assert.equal(completed.input.buffer.cursor, 4);
+  assert.equal(vimBufferText(completed.input), "open");
+  assert.equal(vimBufferCursorOffset(completed.input), 4);
 
   const pathInput = reduceShellState(createState(), {
     kind: "input.insert",
@@ -483,9 +532,9 @@ test("preserves astral input through cursor editing and command submission", () 
     { kind: "prompt.submit" },
   );
 
-  assert.equal(normalized.input.buffer.cursor, 0);
-  assert.equal(backspaced.input.buffer.value, "");
-  assert.equal(deleted.input.buffer.value, "");
+  assert.equal(vimBufferCursorOffset(normalized.input), 0);
+  assert.equal(vimBufferText(backspaced.input), "");
+  assert.equal(vimBufferText(deleted.input), "");
 
   if (submitted.lifecycle.kind !== "running") {
     assert.fail("Expected astral input to submit a command.");

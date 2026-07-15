@@ -9,7 +9,12 @@ import {
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
-import type { NormalPromptKey } from "../../domain/terminal/PromptEditor.ts";
+import {
+  vimBufferCursorOffset,
+  vimBufferText,
+  vimPromptMode,
+  type VimPromptKey,
+} from "../../domain/vim/VimBuffer.ts";
 import {
   executeCommandLine,
 } from "../../application/commands/CommandExecution.ts";
@@ -43,7 +48,7 @@ export type ShellEngine = Readonly<{
   insertText: (text: string) => void;
   replaceInputValue: (value: string, cursor: number) => void;
   moveCursor: (cursor: number) => void;
-  normalKey: (key: NormalPromptKey) => void;
+  normalKey: (key: VimPromptKey) => void;
   submit: () => void;
   cancel: () => void;
   complete: () => void;
@@ -200,15 +205,15 @@ export function useShellEngine({
   const complete = (): void => {
     const prompt = getActiveShellPrompt(state);
 
-    if (prompt.kind !== "command" || prompt.editor.buffer.mode.kind !== "insert") {
+    if (prompt.kind !== "command" || vimPromptMode(prompt.buffer).kind !== "insert") {
       return;
     }
 
     const request = createCompletionRequest(
       state.id,
       state.sessionId,
-      prompt.editor.buffer.value,
-      prompt.editor.buffer.cursor,
+      vimBufferText(prompt.buffer),
+      vimBufferCursorOffset(prompt.buffer),
     );
     const controller = runtimeControl.startCompletion();
 

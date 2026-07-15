@@ -14,6 +14,7 @@ import type {
   CommandOutcome,
   ShellState,
 } from "../../domain/terminal/Shell.ts";
+import { vimBufferText } from "../../domain/vim/VimBuffer.ts";
 import {
   applyPaneOperation,
   createPaneWorkspace,
@@ -227,9 +228,9 @@ test("keeps shell state and current directory with stable pane IDs through pane 
   runtimes = synchronise(runtimes, rebuilt);
 
   assert.equal(runtimes, beforeTransforms);
-  assert.equal(stateFor(runtimes, firstPaneId).input.buffer.value, "first input");
-  assert.equal(stateFor(runtimes, secondPaneId).input.buffer.value, "second input");
-  assert.equal(stateFor(runtimes, thirdPaneId).input.buffer.value, "third input");
+  assert.equal(vimBufferText(stateFor(runtimes, firstPaneId).input), "first input");
+  assert.equal(vimBufferText(stateFor(runtimes, secondPaneId).input), "second input");
+  assert.equal(vimBufferText(stateFor(runtimes, thirdPaneId).input), "third input");
   assert.equal(stateFor(runtimes, secondPaneId).currentDirectory, "~/projects");
   assert.deepEqual(
     paneLeaves(rebuilt.tree).map((pane) => pane.id),
@@ -244,8 +245,8 @@ test("keeps shell state and current directory with stable pane IDs through pane 
   runtimes = synchronise(runtimes, closed);
 
   assert.equal(hasPaneShellRuntime(runtimes, secondPaneId), false);
-  assert.equal(stateFor(runtimes, firstPaneId).input.buffer.value, "first input");
-  assert.equal(stateFor(runtimes, thirdPaneId).input.buffer.value, "third input");
+  assert.equal(vimBufferText(stateFor(runtimes, firstPaneId).input), "first input");
+  assert.equal(vimBufferText(stateFor(runtimes, thirdPaneId).input), "third input");
 });
 
 test("keeps two pane-owned shell runtimes after swap and layout reconstruction", () => {
@@ -280,11 +281,11 @@ test("keeps two pane-owned shell runtimes after swap and layout reconstruction",
   runtimes = synchronise(runtimes, rebuilt);
 
   assert.equal(
-    stateFor(runtimes, firstPane.id).input.buffer.value,
+    vimBufferText(stateFor(runtimes, firstPane.id).input),
     "first pane input",
   );
   assert.equal(
-    stateFor(runtimes, secondPane.id).input.buffer.value,
+    vimBufferText(stateFor(runtimes, secondPane.id).input),
     "second pane input",
   );
 });

@@ -1,16 +1,20 @@
 import {
-  backspacePromptEditor,
-  createEmptyPromptEditor,
-  createPromptEditorForHistory,
-  deletePromptEditorAtCursor,
-  insertPromptEditorText,
-  movePromptEditorCursor,
-  replacePromptEditorValue,
-  applyNormalPromptKey,
-  type NormalPromptKey,
-  type PromptEditor,
-} from "./PromptEditor.ts";
-import { PromptMode, type PromptMode as PromptModeValue } from "./PromptBuffer.ts";
+  VimMode,
+  applyVimPromptKey,
+  backspaceVimInsertText,
+  createEmptyVimPromptBuffer,
+  createVimPromptBuffer,
+  deleteVimInsertText,
+  insertVimText,
+  moveVimInsertCursorToTextOffset,
+  replaceVimInsertText,
+  vimBufferCursorOffset,
+  vimBufferText,
+  vimPromptMode,
+  type VimBuffer,
+  type VimPromptKey,
+  type VimPromptMode,
+} from "../vim/VimBuffer.ts";
 import {
   createCompletionEdit,
   type CompletionCandidate,
@@ -274,13 +278,13 @@ export type CommandHistoryEntry = Readonly<{
 
 export type SecretPromptState = Readonly<{
   request: SecretPromptRequest;
-  editor: PromptEditor;
+  buffer: VimBuffer;
 }>;
 
 export type ActiveShellPrompt =
   | Readonly<{
       kind: "command";
-      editor: PromptEditor;
+      buffer: VimBuffer;
     }>
   | Readonly<{
       kind: "secret";
@@ -299,7 +303,7 @@ export type HistoryNavigation =
   | Readonly<{
       kind: "browsing";
       index: number;
-      draft: PromptEditor;
+      draft: VimBuffer;
     }>;
 
 export type ShellCompletion =
@@ -329,7 +333,7 @@ export type ShellState = Readonly<{
   id: ShellId;
   sessionId: ShellSessionId;
   currentDirectory: VirtualDirectoryPath;
-  input: PromptEditor;
+  input: VimBuffer;
   secretPrompt: SecretPrompt;
   lifecycle: CommandLifecycle;
   history: ReadonlyArray<ShellHistoryEntry>;
@@ -347,11 +351,11 @@ export type ShellState = Readonly<{
 export type ShellStatus =
   | Readonly<{
       kind: "ready";
-      mode: PromptModeValue;
+      mode: VimPromptMode;
     }>
   | Readonly<{
       kind: "secret";
-      mode: PromptModeValue;
+      mode: VimPromptMode;
     }>
   | Readonly<{
       kind: "running";
@@ -388,7 +392,7 @@ export type ShellAction =
   | Readonly<{ kind: "input.delete" }>
   | Readonly<{
       kind: "prompt.normal-key";
-      key: NormalPromptKey;
+      key: VimPromptKey;
     }>
   | Readonly<{ kind: "prompt.submit" }>
   | Readonly<{ kind: "prompt.cancel" }>
@@ -493,19 +497,19 @@ function activePrompt(state: ShellState): ActiveShellPrompt {
     return { kind: "secret", prompt: state.secretPrompt.prompt };
   }
 
-  return { kind: "command", editor: state.input };
+  return { kind: "command", buffer: state.input };
 }
 
-function updateActiveEditor(
+function updateActivePromptBuffer(
   state: ShellState,
-  editor: PromptEditor,
+  buffer: VimBuffer,
 ): ShellState {
   if (state.secretPrompt.kind === "active") {
     return {
       ...state,
       secretPrompt: {
         kind: "active",
-        prompt: { ...state.secretPrompt.prompt, editor },
+        prompt: { ...state.secretPrompt.prompt, buffer },
       },
       completion: { kind: "idle" },
     };
@@ -513,7 +517,7 @@ function updateActiveEditor(
 
   return {
     ...state,
-    input: editor,
+    input: buffer,
     historyNavigation: { kind: "not-browsing" },
     completion: { kind: "idle" },
   };
@@ -524,7 +528,7 @@ function createSecretPromptState(
 ): SecretPromptState {
   return {
     request,
-    editor: createEmptyPromptEditor(),
+    buffer: createEmptyVimPromptBuffer(),
   };
 }
 
@@ -536,9 +540,9 @@ function isMatchingCompletionRequest(
 
   return (
     prompt.kind === "command" &&
-    prompt.editor.buffer.mode.kind === "insert" &&
-    prompt.editor.buffer.value === request.source &&
-    prompt.editor.buffer.cursor === request.cursor
+    vimPromptMode(prompt.buffer).kind === "insert" &&
+    vimBufferText(prompt.buffer) === request.source &&
+    vimBufferCursorOffset(prompt.buffer) === request.cursor
   );
 }
 
@@ -546,7 +550,7 @@ function browseOlderHistory(state: ShellState): ShellState {
   if (
     state.secretPrompt.kind === "active" ||
     state.commandHistory.length === 0 ||
-    state.input.buffer.mode.kind !== "normal"
+    vimPromptMode(state.input).kind !== "normal"
   ) {
     return state;
   }
@@ -564,11 +568,11 @@ function browseOlderHistory(state: ShellState): ShellState {
 
   return {
     ...state,
-    input: createPromptEditorForHistory(
-      entry.source,
-      PromptMode.Normal,
-      state.input.register,
-    ),
+    input: createVimPromptBuffer({
+      text: entry.source,
+      mode: VimMode.Normal,
+      register: state.input.register,
+    }),
     historyNavigation: {
       kind: "browsing",
       index,
@@ -582,7 +586,7 @@ function browseNewerHistory(state: ShellState): ShellState {
   if (
     state.secretPrompt.kind === "active" ||
     state.historyNavigation.kind === "not-browsing" ||
-    state.input.buffer.mode.kind !== "normal"
+    vimPromptMode(state.input).kind !== "normal"
   ) {
     return state;
   }
@@ -605,11 +609,11 @@ function browseNewerHistory(state: ShellState): ShellState {
 
   return {
     ...state,
-    input: createPromptEditorForHistory(
-      entry.source,
-      PromptMode.Normal,
-      state.input.register,
-    ),
+    input: createVimPromptBuffer({
+      text: entry.source,
+      mode: VimMode.Normal,
+      register: state.input.register,
+    }),
     historyNavigation: { ...state.historyNavigation, index },
     completion: { kind: "idle" },
   };
@@ -721,7 +725,7 @@ export function createShellState({
     id,
     sessionId,
     currentDirectory,
-    input: createEmptyPromptEditor(),
+    input: createEmptyVimPromptBuffer(),
     secretPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
     history: [],
@@ -745,13 +749,13 @@ export function getShellStatus(state: ShellState): ShellStatus {
   if (state.secretPrompt.kind === "active") {
     return {
       kind: "secret",
-      mode: state.secretPrompt.prompt.editor.buffer.mode,
+      mode: vimPromptMode(state.secretPrompt.prompt.buffer),
     };
   }
 
   switch (state.lifecycle.kind) {
     case "idle":
-      return { kind: "ready", mode: state.input.buffer.mode };
+      return { kind: "ready", mode: vimPromptMode(state.input) };
     case "running":
       return {
         kind: "running",
@@ -777,10 +781,9 @@ export function reduceShellState(
 
       {
         const prompt = activePrompt(state);
-        const editor =
-          prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+        const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-        return updateActiveEditor(state, insertPromptEditorText(editor, action.text));
+        return updateActivePromptBuffer(state, insertVimText(buffer, action.text));
       }
     case "input.replace": {
       if (!canEditPrompt(state)) {
@@ -788,15 +791,15 @@ export function reduceShellState(
       }
 
       const prompt = activePrompt(state);
-      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-      if (editor.buffer.mode.kind !== "insert") {
+      if (vimPromptMode(buffer).kind !== "insert") {
         return state;
       }
 
-      return updateActiveEditor(
+      return updateActivePromptBuffer(
         state,
-        replacePromptEditorValue(editor, action.value, action.cursor),
+        replaceVimInsertText(buffer, action.value, action.cursor),
       );
     }
     case "input.move-cursor": {
@@ -805,13 +808,16 @@ export function reduceShellState(
       }
 
       const prompt = activePrompt(state);
-      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-      if (editor.buffer.mode.kind !== "insert") {
+      if (vimPromptMode(buffer).kind !== "insert") {
         return state;
       }
 
-      return updateActiveEditor(state, movePromptEditorCursor(editor, action.cursor));
+      return updateActivePromptBuffer(
+        state,
+        moveVimInsertCursorToTextOffset(buffer, action.cursor),
+      );
     }
     case "input.backspace": {
       if (!canEditPrompt(state)) {
@@ -819,13 +825,13 @@ export function reduceShellState(
       }
 
       const prompt = activePrompt(state);
-      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-      if (editor.buffer.mode.kind !== "insert") {
+      if (vimPromptMode(buffer).kind !== "insert") {
         return state;
       }
 
-      return updateActiveEditor(state, backspacePromptEditor(editor));
+      return updateActivePromptBuffer(state, backspaceVimInsertText(buffer));
     }
     case "input.delete": {
       if (!canEditPrompt(state)) {
@@ -833,13 +839,13 @@ export function reduceShellState(
       }
 
       const prompt = activePrompt(state);
-      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
-      if (editor.buffer.mode.kind !== "insert") {
+      if (vimPromptMode(buffer).kind !== "insert") {
         return state;
       }
 
-      return updateActiveEditor(state, deletePromptEditorAtCursor(editor));
+      return updateActivePromptBuffer(state, deleteVimInsertText(buffer));
     }
     case "prompt.normal-key": {
       if (!canEditPrompt(state)) {
@@ -855,20 +861,20 @@ export function reduceShellState(
       }
 
       const prompt = activePrompt(state);
-      const editor = prompt.kind === "secret" ? prompt.prompt.editor : prompt.editor;
+      const buffer = prompt.kind === "secret" ? prompt.prompt.buffer : prompt.buffer;
 
       if (
-        editor.buffer.mode.kind !== "normal" &&
+        vimPromptMode(buffer).kind !== "normal" &&
         action.key.kind !== "escape"
       ) {
         return state;
       }
 
-      return updateActiveEditor(state, applyNormalPromptKey(editor, action.key));
+      return updateActivePromptBuffer(state, applyVimPromptKey(buffer, action.key));
     }
     case "prompt.submit": {
       if (state.secretPrompt.kind === "active") {
-        const { request, editor } = state.secretPrompt.prompt;
+        const { request, buffer } = state.secretPrompt.prompt;
 
         return {
           ...state,
@@ -877,12 +883,12 @@ export function reduceShellState(
           pendingEffect: {
             kind: "secret-submitted",
             requestId: request.id,
-            value: createSecretPromptValue(editor.buffer.value),
+            value: createSecretPromptValue(vimBufferText(buffer)),
           },
         };
       }
 
-      if (!canEditPrompt(state) || state.input.buffer.value.trim().length === 0) {
+      if (!canEditPrompt(state) || vimBufferText(state.input).trim().length === 0) {
         return state;
       }
 
@@ -891,7 +897,7 @@ export function reduceShellState(
           state.sessionId,
           state.nextCommandHistorySequence,
         ),
-        source: state.input.buffer.value,
+        source: vimBufferText(state.input),
       };
       const commandHistory = appendBounded(
         state.commandHistory,
@@ -909,7 +915,7 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyPromptEditor(),
+        input: createEmptyVimPromptBuffer(),
         lifecycle: { kind: "running", command },
         commandHistory,
         historyNavigation: { kind: "not-browsing" },
@@ -955,7 +961,7 @@ export function reduceShellState(
 
       return {
         ...state,
-        input: createEmptyPromptEditor(),
+        input: createEmptyVimPromptBuffer(),
         historyNavigation: { kind: "not-browsing" },
         completion: { kind: "idle" },
       };
@@ -993,9 +999,9 @@ export function reduceShellState(
       if (action.result.kind === "single") {
         const edit = createCompletionEdit(action.request, action.result.candidate);
 
-        return updateActiveEditor(
+        return updateActivePromptBuffer(
           state,
-          replacePromptEditorValue(state.input, edit.value, edit.cursor),
+          replaceVimInsertText(state.input, edit.value, edit.cursor),
         );
       }
 
