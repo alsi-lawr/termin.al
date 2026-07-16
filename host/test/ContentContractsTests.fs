@@ -338,7 +338,7 @@ module ContentContractsTests =
         | Ok _ -> failwith "Project collection paths must reject traversal."
         | Error _ -> ()
 
-        let nestedPublication =
+        let nestedBlogPublication =
             ContentDomain.ContentDocument.tryCreate
                 (contentId "nested-post")
                 (virtualPath "~/blog/engineering/types/nested-post.md")
@@ -349,9 +349,38 @@ module ContentContractsTests =
                 cache
                 validPublication
 
-        match nestedPublication with
+        match nestedBlogPublication with
         | Ok _ -> ()
-        | Error failure -> failwith $"Nested publication paths should validate: {failure.Message}"
+        | Error failure -> failwith $"Nested blog paths should validate: {failure.Message}"
+
+        let nestedNotesPublication =
+            ContentDomain.ContentDocument.tryCreate
+                (contentId "nested-note")
+                (virtualPath "~/notes/field-notes/types/nested-note.md")
+                (timestamp "2026-07-15T00:00:00.000Z")
+                (source
+                    "notes/field-notes/types/nested-note.md"
+                    "https://github.com/example-owner/content/blob/main/notes/field-notes/types/nested-note.md")
+                cache
+                validPublication
+
+        match nestedNotesPublication with
+        | Ok _ -> ()
+        | Error failure -> failwith $"Nested notes paths should validate: {failure.Message}"
+
+        match
+            ContentDomain.ContentDocument.tryCreate
+                (contentId "nested-mismatch")
+                (virtualPath "~/blog/engineering/types/different.md")
+                (timestamp "2026-07-15T00:00:00.000Z")
+                (source
+                    "blog/engineering/types/nested-post.md"
+                    "https://github.com/example-owner/content/blob/main/blog/engineering/types/nested-post.md")
+                cache
+                validPublication
+        with
+        | Ok _ -> failwith "Nested publication paths must retain the exact slug filename."
+        | Error _ -> ()
 
         let oversized = String.replicate (ContentDomain.DocumentByteLimit + 1) "a"
 

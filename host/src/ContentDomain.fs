@@ -718,8 +718,11 @@ module ContentDomain =
                     | PublicationKind.Note -> "notes"
 
                 let slug = publication |> PublicationMetadata.slug |> ContentSlug.value
+                let root = $"~/{directory}/"
+                let fileName = $"/{slug}.md"
 
-                value = $"~/{directory}/{slug}.md"
+                value.StartsWith(root, StringComparison.Ordinal)
+                && value.EndsWith(fileName, StringComparison.Ordinal)
 
         let tryCreate
             (id: ContentId)
