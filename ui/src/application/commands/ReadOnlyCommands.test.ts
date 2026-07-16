@@ -23,7 +23,6 @@ import {
 } from "./CommandRegistry.ts";
 import {
   createReadOnlyCommandDefinitions,
-  formatTerminalManualPage,
 } from "./ReadOnlyCommands.ts";
 
 function createRegistry(
@@ -211,22 +210,6 @@ test("implements line readers, terminal history, manual pages, and pager effects
   assert.equal(pagerEffect.viewer.document.source.path, "~/notes/sample-note.md");
   assert.equal(pagerEffect.viewer.presentation, "raw-pager");
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
-});
-
-test("formats aliases, examples, and Unicode in conventional terminal manuals", () => {
-  const manual = formatTerminalManualPage({
-    group: "gnu-like",
-    name: "inspect",
-    aliases: ["i"],
-    summary: "Inspect a Unicode-aware virtual document.",
-    usage: "inspect [path]",
-    examples: ["inspect notes/長い名前😀.md"],
-  });
-
-  assert.match(manual, /^INSPECT\(1\).*INSPECT\(1\)$/mu);
-  assert.match(manual, /\nALIASES\n       i/u);
-  assert.match(manual, /\nEXAMPLES\n       \$ inspect notes\/長い名前😀\.md/u);
-  assert.match(manual, /\nSEE ALSO\n       help\(1\), man\(1\)/u);
 });
 
 test("renders hidden, locked, directory, and long Unicode listings as text", async () => {

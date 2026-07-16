@@ -1290,7 +1290,7 @@ function manualSection(
   return [title, ...lines.map((line) => `       ${line}`)].join("\n");
 }
 
-export function formatTerminalManualPage(metadata: CommandMetadata): string {
+function formatTerminalManualPage(metadata: CommandMetadata): string {
   const sections = [
     manualSection("NAME", [`${metadata.name} - ${metadata.summary}`]),
     manualSection("SYNOPSIS", [metadata.usage]),

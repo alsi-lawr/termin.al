@@ -265,38 +265,39 @@ test("navigates history with Up and Down while restoring its command draft", () 
 });
 
 test("derives, accepts, and dismisses a history autosuggestion without mutating input", () => {
-  const first = settleSucceeded(
-    submit(createState(), "open about.md"),
-    "one",
-  );
-  const second = settleSucceeded(submit(first, "open tools.md"), "two");
-  const typed = reduceShellState(second, {
+  const history = settleSucceeded(submit(createState(), "help 😀"), "one");
+  const typed = reduceShellState(history, {
     kind: "input.insert",
-    text: "open t",
+    text: "h",
   });
 
-  assert.equal(typed.input.text, "open t");
+  assert.equal(typed.input.text, "h");
   assert.deepEqual(getShellAutosuggestion(typed), {
     kind: "suggestion",
-    value: "open tools.md",
-    suffix: "ools.md",
+    value: "help 😀",
+    suffix: "elp 😀",
   });
 
-  const accepted = reduceShellState(typed, { kind: "input.move-right" });
+  const acceptedWithRight = reduceShellState(typed, {
+    kind: "input.move-right",
+  });
+  const acceptedWithEnd = reduceShellState(typed, { kind: "input.move-end" });
 
-  assert.equal(accepted.input.text, "open tools.md");
-  assert.equal(accepted.input.cursor, "open tools.md".length);
+  for (const accepted of [acceptedWithRight, acceptedWithEnd]) {
+    assert.equal(accepted.input.text, "help 😀");
+    assert.equal(accepted.input.cursor, "help 😀".length);
+  }
 
-  const refreshed = reduceShellState(second, {
+  const refreshed = reduceShellState(history, {
     kind: "input.insert",
-    text: "open a",
+    text: "he",
   });
   const dismissed = reduceShellState(refreshed, {
     kind: "completion.dismiss",
   });
 
   assert.deepEqual(getShellAutosuggestion(dismissed), { kind: "none" });
-  assert.equal(dismissed.input.text, "open a");
+  assert.equal(dismissed.input.text, "he");
 });
 
 test("keeps secret values out of history, autosuggestion, and retained state", () => {
@@ -425,4 +426,76 @@ test("applies common completion prefixes, cycles candidates, and has no terminal
 
   assert.deepEqual(dismissed.completion, { kind: "idle" });
   assert.equal("mode" in getShellStatus(createState()), false);
+});
+
+test("retains a browser Tab completion when native selection repeats the request cursor", () => {
+  const input = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "h",
+  });
+  const request = createCompletionRequest(
+    input.id,
+    input.sessionId,
+    input.input.text,
+    input.input.cursor,
+  );
+  const pending = reduceShellState(input, {
+    kind: "completion.request",
+    request,
+  });
+  const repeatedNativeSelection = reduceShellState(pending, {
+    kind: "input.move-cursor",
+    cursor: request.cursor,
+  });
+
+  assert.strictEqual(repeatedNativeSelection, pending);
+
+  const resolved = reduceShellState(repeatedNativeSelection, {
+    kind: "completion.resolved",
+    request,
+    result: {
+      kind: "multiple",
+      candidates: [
+        { kind: "command", value: "head", label: "GNU-like" },
+        { kind: "command", value: "help", label: "Application" },
+        { kind: "command", value: "history", label: "GNU-like" },
+      ],
+    },
+  });
+
+  assert.equal(resolved.input.text, "h");
+  assert.equal(resolved.completion.kind, "suggestions");
+});
+
+test("applies a unique virtual-path completion at the cursor end", () => {
+  const input = reduceShellState(createState(), {
+    kind: "input.insert",
+    text: "cat pro",
+  });
+  const request = createCompletionRequest(
+    input.id,
+    input.sessionId,
+    input.input.text,
+    input.input.cursor,
+  );
+  const pending = reduceShellState(input, {
+    kind: "completion.request",
+    request,
+  });
+  const resolved = reduceShellState(pending, {
+    kind: "completion.resolved",
+    request,
+    result: {
+      kind: "single",
+      candidate: {
+        kind: "path",
+        value: "projects/",
+        label: "Directory",
+      },
+    },
+  });
+
+  assert.equal(resolved.input.text, "cat projects/");
+  assert.equal(resolved.input.cursor, "cat projects/".length);
+  assert.deepEqual(resolved.completion, { kind: "idle" });
 });

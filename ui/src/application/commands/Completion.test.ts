@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   createCompletionEdit,
   createCompletionRequest,
@@ -191,6 +192,24 @@ test("completes direct virtual paths from the active directory without hidden en
   assert.deepEqual(
     await nestedProvider.complete(nestedRequest, controller.signal),
     [{ kind: "path", value: "readme.md", label: "File" }],
+  );
+});
+
+test("completes the demo projects directory from a cat argument", async () => {
+  const provider = createVirtualFilesystemPathCompletionProvider({
+    filesystem: demoContentCorpus.filesystem,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const request = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "cat pro",
+    "cat pro".length,
+  );
+
+  assert.deepEqual(
+    await provider.complete(request, new AbortController().signal),
+    [{ kind: "path", value: "projects/", label: "Directory" }],
   );
 });
 

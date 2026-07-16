@@ -45,3 +45,14 @@ test("handles BMP and end-of-line input boundaries", () => {
   assert.equal(moveNativeInputSelectionLeft("ab", 2), 1);
   assert.equal(moveNativeInputSelectionRight("ab", 2), 2);
 });
+
+test("keeps native and rendered cursors at a Unicode-safe input end", () => {
+  const value = "help 😀";
+
+  assert.equal(normalizeNativeInputSelection(value, value.length), value.length);
+  assert.deepEqual(segmentVisibleInputRow(value, value.length), {
+    beforeCursor: value,
+    cursor: "",
+    afterCursor: "",
+  });
+});

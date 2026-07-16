@@ -140,7 +140,13 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
         return;
       }
 
-      props.onMoveCursor(selectionCursor(event.currentTarget));
+      const cursor = selectionCursor(event.currentTarget);
+
+      if (cursor === props.cursor) {
+        return;
+      }
+
+      props.onMoveCursor(cursor);
     };
 
     const handleCompositionStart = (): void => {

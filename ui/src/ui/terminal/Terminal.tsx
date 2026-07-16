@@ -1,7 +1,6 @@
 import {
   useCallback,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -133,16 +132,14 @@ export function Terminal({
       ],
     }),
   );
-  const completionService = useMemo(() =>
+  const completionService =
     createCompletionService({
       commands: createRegistryCommandCompletionProvider(registry),
       paths: createVirtualFilesystemPathCompletionProvider({
         filesystem,
         currentDirectory: state.currentDirectory,
       }),
-    }),
-    [filesystem, registry, state.currentDirectory],
-  );
+    });
   const shell = useShellEngine({
     state,
     onAction: dispatchShellAction,

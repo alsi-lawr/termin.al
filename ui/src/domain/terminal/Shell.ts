@@ -497,6 +497,12 @@ function promptLine(prompt: ActiveShellPrompt): ShellLine {
 }
 
 function updateActivePromptLine(state: ShellState, line: ShellLine): ShellState {
+  const currentLine = promptLine(activePrompt(state));
+
+  if (currentLine.text === line.text && currentLine.cursor === line.cursor) {
+    return state;
+  }
+
   if (state.secretPrompt.kind === "active") {
     return {
       ...state,
