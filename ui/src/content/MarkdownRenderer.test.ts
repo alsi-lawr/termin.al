@@ -218,7 +218,8 @@ test("finds parsed Markdown blocks for viewer search", () => {
   assert.deepEqual(matches, [5]);
   const markup = render(renderedMarkdown, matches[0]);
 
-  assert.match(markup, /data-markdown-search-active="true"/u);
+  assert.match(markup, /data-markdown-current="true"/u);
+  assert.match(markup, /aria-current="true"/u);
   assert.match(markup, /ring-ui-search/u);
 });
 

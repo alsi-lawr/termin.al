@@ -4,7 +4,7 @@ import {
   applyRawPagerOperation,
   createRawPagerState,
   rawPagerOperationFromKey,
-  rawPagerPageText,
+  rawPagerPageLines,
   rawPagerStatus,
   type RawPagerOperation,
   type RawPagerState,
@@ -35,16 +35,16 @@ test("clamps every movement and reports an empty document", () => {
   ];
 
   assert.deepEqual(rawPagerStatus(state), { kind: "empty" });
-  assert.equal(rawPagerPageText("", state), "");
+  assert.deepEqual(rawPagerPageLines("", state), []);
 
   for (const operation of operations) {
     const updated = updatedState(state, operation);
     assert.deepEqual(rawPagerStatus(updated), { kind: "empty" });
-    assert.equal(rawPagerPageText("", updated), "");
+    assert.deepEqual(rawPagerPageLines("", updated), []);
   }
 });
 
-test("reports all short document lines in its visible range", () => {
+test("reports a visible logical cursor in short documents", () => {
   const text = "one\ntwo";
   const state = createRawPagerState(text);
 
@@ -52,46 +52,52 @@ test("reports all short document lines in its visible range", () => {
     kind: "range",
     firstLine: 1,
     lastLine: 2,
+    currentLine: 1,
     totalLines: 2,
   });
-  assert.equal(rawPagerPageText(text, state), text);
+  assert.deepEqual(rawPagerPageLines(text, state), [
+    { lineNumber: 1, text: "one\n", isCurrent: true },
+    { lineNumber: 2, text: "two", isCurrent: false },
+  ]);
 });
 
-test("moves by line and page while clamping multi-page bounds", () => {
+test("moves the logical cursor by line and page while clamping bounds", () => {
   const text = "one\ntwo\nthree\nfour\nfive";
   const start = createRawPagerState(text, 3);
   const lineDown = updatedState(start, { kind: "line-down" });
-  const atEnd = updatedState(start, { kind: "page-forward" });
-  const clampedEnd = updatedState(atEnd, { kind: "page-forward" });
-  const back = updatedState(atEnd, { kind: "page-back" });
-  const clampedStart = updatedState(back, { kind: "line-up" });
+  const pageForward = updatedState(start, { kind: "page-forward" });
+  const clampedEnd = updatedState(pageForward, { kind: "page-forward" });
+  const pageBack = updatedState(clampedEnd, { kind: "page-back" });
+  const clampedStart = updatedState(pageBack, { kind: "page-back" });
 
-  assert.deepEqual(rawPagerStatus(start), {
+  assert.equal(rawPagerStatus(start).kind, "range");
+  assert.deepEqual(rawPagerStatus(lineDown), {
     kind: "range",
     firstLine: 1,
     lastLine: 3,
+    currentLine: 2,
     totalLines: 5,
   });
-  assert.deepEqual(rawPagerStatus(lineDown), {
-    kind: "range",
-    firstLine: 2,
-    lastLine: 4,
-    totalLines: 5,
-  });
-  assert.deepEqual(rawPagerStatus(atEnd), {
+  assert.deepEqual(rawPagerStatus(pageForward), {
     kind: "range",
     firstLine: 3,
     lastLine: 5,
+    currentLine: 4,
     totalLines: 5,
   });
-  assert.deepEqual(rawPagerStatus(clampedEnd), rawPagerStatus(atEnd));
-  assert.deepEqual(rawPagerStatus(back), rawPagerStatus(start));
-  assert.deepEqual(rawPagerStatus(clampedStart), rawPagerStatus(back));
-  assert.equal(rawPagerPageText(text, atEnd), "three\nfour\nfive");
+  assert.deepEqual(rawPagerStatus(clampedEnd), {
+    kind: "range",
+    firstLine: 3,
+    lastLine: 5,
+    currentLine: 5,
+    totalLines: 5,
+  });
+  assert.deepEqual(rawPagerStatus(clampedStart), rawPagerStatus(start));
 });
 
-test("moves directly to start and end without mutating prior state", () => {
-  const start = createRawPagerState("one\ntwo\nthree\nfour\nfive", 2);
+test("moves directly to document start and end without mutating prior state", () => {
+  const text = "one\ntwo\nthree\nfour\nfive";
+  const start = createRawPagerState(text, 2);
   const end = updatedState(start, { kind: "end" });
   const returned = updatedState(end, { kind: "start" });
 
@@ -99,23 +105,27 @@ test("moves directly to start and end without mutating prior state", () => {
     kind: "range",
     firstLine: 1,
     lastLine: 2,
+    currentLine: 1,
     totalLines: 5,
   });
   assert.deepEqual(rawPagerStatus(end), {
     kind: "range",
     firstLine: 4,
     lastLine: 5,
+    currentLine: 5,
     totalLines: 5,
   });
   assert.deepEqual(rawPagerStatus(returned), rawPagerStatus(start));
-  assert.equal(rawPagerPageText("one\ntwo\nthree\nfour\nfive", end), "four\nfive");
 });
 
-test("preserves raw line endings in visible page text", () => {
+test("preserves raw line endings in visible page lines", () => {
   const text = "one\r\ntwo\n\n";
   const state = createRawPagerState(text);
 
-  assert.equal(rawPagerPageText(text, state), text);
+  assert.equal(
+    rawPagerPageLines(text, state).map((line) => line.text).join(""),
+    text,
+  );
 });
 
 test("returns an explicit quit transition", () => {
@@ -126,70 +136,42 @@ test("returns an explicit quit transition", () => {
   });
 });
 
-test("maps practical pager keys to typed operations", () => {
-  const mappings: ReadonlyArray<readonly [string, RawPagerOperation]> = [
-    ["ArrowUp", { kind: "line-up" }],
-    ["k", { kind: "line-up" }],
-    ["ArrowDown", { kind: "line-down" }],
-    ["j", { kind: "line-down" }],
-    ["PageDown", { kind: "page-forward" }],
-    [" ", { kind: "page-forward" }],
-    ["PageUp", { kind: "page-back" }],
-    ["b", { kind: "page-back" }],
-    ["g", { kind: "start" }],
-    ["G", { kind: "end" }],
-    ["Escape", { kind: "quit" }],
-    ["q", { kind: "quit" }],
+test("maps practical pager keys including Ctrl+f page-forward", () => {
+  const mappings: ReadonlyArray<readonly [string, boolean, RawPagerOperation]> = [
+    ["ArrowUp", false, { kind: "line-up" }],
+    ["k", false, { kind: "line-up" }],
+    ["ArrowDown", false, { kind: "line-down" }],
+    ["j", false, { kind: "line-down" }],
+    ["PageDown", false, { kind: "page-forward" }],
+    [" ", false, { kind: "page-forward" }],
+    ["f", true, { kind: "page-forward" }],
+    ["PageUp", false, { kind: "page-back" }],
+    ["b", false, { kind: "page-back" }],
+    ["g", false, { kind: "start" }],
+    ["G", false, { kind: "end" }],
+    ["Escape", false, { kind: "quit" }],
+    ["q", false, { kind: "quit" }],
   ];
 
-  for (const [key, operation] of mappings) {
+  for (const [key, ctrlKey, operation] of mappings) {
     assert.deepEqual(rawPagerOperationFromKey({
       key,
       altKey: false,
-      ctrlKey: false,
+      ctrlKey,
       metaKey: false,
     }), { kind: "operation", operation });
   }
 });
 
-test("declines modified pager quit keys without mapping a close operation", () => {
+test("ignores modified and unrelated keys so pane prefixes remain authoritative", () => {
   const inputs = [
-    { key: "q", altKey: true, ctrlKey: false, metaKey: false },
-    { key: "Escape", altKey: true, ctrlKey: false, metaKey: false },
-    { key: "q", altKey: false, ctrlKey: true, metaKey: false },
-    { key: "Escape", altKey: false, ctrlKey: true, metaKey: false },
+    { key: "b", altKey: false, ctrlKey: true, metaKey: false },
     { key: "q", altKey: false, ctrlKey: false, metaKey: true },
-    { key: "Escape", altKey: false, ctrlKey: false, metaKey: true },
+    { key: "ArrowDown", altKey: true, ctrlKey: false, metaKey: false },
+    { key: "x", altKey: false, ctrlKey: false, metaKey: false },
   ];
 
   for (const input of inputs) {
     assert.deepEqual(rawPagerOperationFromKey(input), { kind: "ignored" });
   }
-});
-
-test("ignores modified and unrelated keys so pane prefixes remain authoritative", () => {
-  assert.deepEqual(rawPagerOperationFromKey({
-    key: "b",
-    altKey: false,
-    ctrlKey: true,
-    metaKey: false,
-  }), { kind: "ignored" });
-  assert.deepEqual(rawPagerOperationFromKey({
-    key: "q",
-    altKey: false,
-    ctrlKey: false,
-    metaKey: true,
-  }), { kind: "ignored" });
-  assert.deepEqual(rawPagerOperationFromKey({
-    key: "ArrowDown",
-    altKey: true,
-    ctrlKey: false,
-    metaKey: false,
-  }), { kind: "ignored" });
-  assert.deepEqual(rawPagerOperationFromKey({
-    key: "x",
-    altKey: false,
-    ctrlKey: false,
-    metaKey: false,
-  }), { kind: "ignored" });
 });

@@ -888,6 +888,10 @@ export function markdownSearchMatches(
   return matches;
 }
 
+export function markdownBlockCount(document: MarkdownDocument): number {
+  return parseBlocks(document.text).length;
+}
+
 export type MarkdownRendererProps = Readonly<{
   document: MarkdownDocument;
   activeBlockIndex: number | undefined;
@@ -911,8 +915,9 @@ export function MarkdownRenderer({
           className:
             activeBlockIndex === index ? "rounded ring-1 ring-ui-search" : undefined,
           "data-markdown-block-index": index,
-          "data-markdown-search-active":
+          "data-markdown-current":
             activeBlockIndex === index ? "true" : undefined,
+          "aria-current": activeBlockIndex === index ? "true" : undefined,
         },
         blockElement(block, index),
       ),

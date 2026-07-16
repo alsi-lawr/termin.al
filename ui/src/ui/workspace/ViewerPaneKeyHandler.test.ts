@@ -108,3 +108,58 @@ test("closes ordinary viewers with unmodified quit keys", () => {
     assert.equal(pagerOperationCount, 0);
   }
 });
+
+test("prevents native find and pages a raw viewer forward on Ctrl+f", () => {
+  const pagerOperations: Array<string> = [];
+  let defaultPreventionCount = 0;
+
+  handleViewerPaneKeyInput({
+    input: {
+      kind: "raw-pager",
+      key: "f",
+      altKey: false,
+      ctrlKey: true,
+      metaKey: false,
+    },
+    onPaneKeyInput: () => ({ kind: "unhandled" }),
+    onPagerOperation: (operation) => {
+      pagerOperations.push(operation.kind);
+    },
+    preventDefault: () => {
+      defaultPreventionCount += 1;
+    },
+  });
+
+  assert.deepEqual(pagerOperations, ["page-forward"]);
+  assert.equal(defaultPreventionCount, 1);
+});
+
+test("delegates Ctrl+b to the tmux prefix before viewer navigation", () => {
+  const paneInputs: Array<string> = [];
+  let pagerOperationCount = 0;
+  let defaultPreventionCount = 0;
+
+  handleViewerPaneKeyInput({
+    input: {
+      kind: "raw-pager",
+      key: "b",
+      altKey: false,
+      ctrlKey: true,
+      metaKey: false,
+    },
+    onPaneKeyInput: (input) => {
+      paneInputs.push(`${input.ctrlKey ? "Ctrl+" : ""}${input.key}`);
+      return { kind: "handled" };
+    },
+    onPagerOperation: () => {
+      pagerOperationCount += 1;
+    },
+    preventDefault: () => {
+      defaultPreventionCount += 1;
+    },
+  });
+
+  assert.deepEqual(paneInputs, ["Ctrl+b"]);
+  assert.equal(pagerOperationCount, 0);
+  assert.equal(defaultPreventionCount, 1);
+});

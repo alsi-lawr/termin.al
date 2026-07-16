@@ -15,12 +15,13 @@ import {
 import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   MarkdownRenderer,
+  markdownBlockCount,
   markdownSearchMatches,
 } from "../../content/MarkdownRenderer.ts";
 import {
   applyRawPagerOperation,
   createRawPagerState,
-  rawPagerPageText,
+  rawPagerPageLines,
   rawPagerStatus,
   type RawPagerOperation,
 } from "../../domain/viewer/RawPager.ts";
@@ -28,9 +29,24 @@ import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
 import { MobilePaneControls, type MobilePaneControl } from "./MobilePaneControls";
 import {
+  createMarkdownViewerPosition,
   markdownViewerOperationFromKey,
+  markdownViewerPositionStatus,
+  moveMarkdownViewerPosition,
+  setMarkdownViewerPosition,
+  type MarkdownViewerMotion,
   type MarkdownViewerOperation,
 } from "./MarkdownViewerNavigation.ts";
+import { restoreMarkdownViewerFocus } from "./MarkdownViewerFocus.ts";
+import {
+  beginMarkdownViewerSearch,
+  createMarkdownViewerSearch,
+  cycleMarkdownViewerSearch,
+  markdownViewerSearchStatus,
+  submitMarkdownViewerSearch as transitionMarkdownViewerSearch,
+  updateMarkdownViewerSearch,
+  type MarkdownViewerSearch,
+} from "./MarkdownViewerSearch.ts";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
 
@@ -50,20 +66,6 @@ type ViewerPaneProps = Readonly<{
   ) => MobileCtrlInputResolution;
   onClose?: () => void;
 }>;
-
-type MarkdownSearch =
-  | Readonly<{ kind: "idle" }>
-  | Readonly<{
-      kind: "editing";
-      query: string;
-    }>
-  | Readonly<{
-      kind: "active";
-      query: string;
-      matchIndex: number;
-    }>;
-
-const idleMarkdownSearch: MarkdownSearch = { kind: "idle" };
 
 type OpenedViewerDocument = Readonly<{
   title: string;
@@ -253,14 +255,30 @@ function PublicationList({
   );
 }
 
-function markdownSearchStatus(
-  query: string,
-  matchCount: number,
-  matchIndex: number,
-): string {
-  return matchCount === 0
-    ? `No matches for ${query}`
-    : `/${query} ${matchIndex + 1}/${matchCount}`;
+function ViewerNavigationStatusLine({
+  mode,
+  documentIdentity,
+  position,
+  match,
+}: Readonly<{
+  mode: "NORMAL" | "SEARCH";
+  documentIdentity: string;
+  position: string;
+  match: string;
+}>): ReactElement {
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center gap-x-3 border-t border-surface-border bg-surface-raised px-4 py-1 text-xs text-text-muted"
+      role="status"
+      aria-live="polite"
+      aria-label="Viewer navigation status"
+    >
+      <span className="font-semibold text-ui-accent">{mode}</span>
+      <span className="min-w-0 truncate text-text-bright">{documentIdentity}</span>
+      <span>{position}</span>
+      <span>{match}</span>
+    </div>
+  );
 }
 
 export function ViewerPane({
@@ -302,20 +320,26 @@ export function ViewerPane({
     activeViewer.presentation === "raw-pager"
       ? activeViewer.document.text
       : "";
+  const markdownBlocks = markdownDocument === undefined
+    ? 0
+    : markdownBlockCount(markdownDocument);
   const [rawPagerState, setRawPagerState] = useState(() =>
     createRawPagerState(rawText),
   );
-  const [markdownSearch, setMarkdownSearch] = useState<MarkdownSearch>(
-    idleMarkdownSearch,
+  const [markdownPosition, setMarkdownPosition] = useState(() =>
+    createMarkdownViewerPosition(markdownBlocks),
+  );
+  const [markdownSearch, setMarkdownSearch] = useState<MarkdownViewerSearch>(
+    createMarkdownViewerSearch,
   );
   const searchMatches =
     markdownDocument === undefined || markdownSearch.kind !== "active"
       ? []
       : markdownSearchMatches(markdownDocument, markdownSearch.query);
-  const activeBlockIndex =
-    markdownSearch.kind === "active"
-      ? searchMatches[markdownSearch.matchIndex]
-      : undefined;
+  const markdownPositionStatus = markdownViewerPositionStatus(markdownPosition);
+  const activeBlockIndex = markdownPositionStatus.kind === "block"
+    ? markdownPositionStatus.currentBlock - 1
+    : undefined;
 
   useEffect(() => {
     if (isActive) {
@@ -329,8 +353,9 @@ export function ViewerPane({
 
   useEffect(() => {
     setRawPagerState(createRawPagerState(rawText));
-    setMarkdownSearch(idleMarkdownSearch);
-  }, [rawText, markdownDocument?.text]);
+    setMarkdownPosition(createMarkdownViewerPosition(markdownBlocks));
+    setMarkdownSearch(createMarkdownViewerSearch());
+  }, [markdownBlocks, markdownDocument?.text, rawText]);
 
   useEffect(() => {
     if (markdownSearch.kind === "editing") {
@@ -368,30 +393,29 @@ export function ViewerPane({
     });
   };
 
-  const applyMarkdownOperation = (operation: MarkdownViewerOperation): void => {
-    const content = contentRef.current;
+  const applyMarkdownMotion = (motion: MarkdownViewerMotion): void => {
+    const pageBlockCount = Math.max(
+      1,
+      Math.floor((contentRef.current?.clientHeight ?? 40) / 40),
+    );
 
+    setMarkdownPosition((current) =>
+      moveMarkdownViewerPosition(current, motion, pageBlockCount)
+    );
+  };
+
+  const applyMarkdownOperation = (operation: MarkdownViewerOperation): void => {
     switch (operation.kind) {
       case "line-up":
-        content?.scrollBy({ top: -40 });
-        return;
       case "line-down":
-        content?.scrollBy({ top: 40 });
-        return;
       case "page-up":
-        content?.scrollBy({ top: -(content?.clientHeight ?? 0) * 0.8 });
-        return;
       case "page-down":
-        content?.scrollBy({ top: (content?.clientHeight ?? 0) * 0.8 });
-        return;
       case "top":
-        content?.scrollTo({ top: 0 });
-        return;
       case "bottom":
-        content?.scrollTo({ top: content?.scrollHeight ?? 0 });
+        applyMarkdownMotion(operation);
         return;
       case "search":
-        setMarkdownSearch({ kind: "editing", query: "" });
+        setMarkdownSearch(beginMarkdownViewerSearch());
         return;
       case "search-next":
       case "search-previous":
@@ -399,17 +423,22 @@ export function ViewerPane({
           return;
         }
 
-        setMarkdownSearch((current) => {
-          if (current.kind !== "active") {
-            return current;
-          }
+        const direction = operation.kind === "search-next" ? 1 : -1;
+        const transition = cycleMarkdownViewerSearch(
+          markdownSearch,
+          searchMatches,
+          direction,
+        );
 
-          const direction = operation.kind === "search-next" ? 1 : -1;
-          const nextIndex =
-            (current.matchIndex + direction + searchMatches.length) %
-            searchMatches.length;
-          return { ...current, matchIndex: nextIndex };
-        });
+        setMarkdownSearch(transition.search);
+
+        const matchedBlockIndex = transition.matchedBlockIndex;
+
+        if (matchedBlockIndex !== undefined) {
+          setMarkdownPosition((position) =>
+            setMarkdownViewerPosition(position, matchedBlockIndex)
+          );
+        }
     }
   };
 
@@ -419,16 +448,27 @@ export function ViewerPane({
     }
 
     const query = markdownSearch.query.trim();
-    setMarkdownSearch(
-      query === ""
-        ? idleMarkdownSearch
-        : { kind: "active", query, matchIndex: 0 },
-    );
+    const matches = markdownDocument === undefined
+      ? []
+      : markdownSearchMatches(markdownDocument, query);
+    const transition = transitionMarkdownViewerSearch(markdownSearch, matches);
+
+    setMarkdownSearch(transition.search);
+
+    const matchedBlockIndex = transition.matchedBlockIndex;
+
+    if (matchedBlockIndex !== undefined) {
+      setMarkdownPosition((position) =>
+        setMarkdownViewerPosition(position, matchedBlockIndex)
+      );
+    }
+
+    restoreMarkdownViewerFocus(viewerRef.current);
   };
 
   const cancelMarkdownSearch = (): void => {
-    setMarkdownSearch(idleMarkdownSearch);
-    viewerRef.current?.focus({ preventScroll: true });
+    setMarkdownSearch(createMarkdownViewerSearch());
+    restoreMarkdownViewerFocus(viewerRef.current);
   };
 
   const handleSearchInputKeyDown = (
@@ -576,25 +616,22 @@ export function ViewerPane({
         );
       case "document":
         if (activeViewer.presentation === "raw-pager") {
-          const status = rawPagerStatus(rawPagerState);
-          const statusText = status.kind === "empty"
-            ? "No lines"
-            : `Lines ${status.firstLine}-${status.lastLine} of ${status.totalLines}`;
-
           return (
             <>
-              <p
-                className="mt-2 text-text-muted"
-                role="status"
-                aria-live="polite"
-              >
-                Raw pager · {statusText}
-              </p>
               <pre
                 className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright"
                 aria-label="Current raw pager page"
               >
-                {rawPagerPageText(activeViewer.document.text, rawPagerState)}
+                {rawPagerPageLines(activeViewer.document.text, rawPagerState)
+                  .map((line) => (
+                    <span
+                      key={line.lineNumber}
+                      className={line.isCurrent ? "bg-surface-highlight text-ui-accent" : undefined}
+                      aria-current={line.isCurrent ? "true" : undefined}
+                    >
+                      {line.text}
+                    </span>
+                  ))}
               </pre>
               <p className="mt-3 text-xs text-text-muted">
                 ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · Esc/q return
@@ -624,10 +661,7 @@ export function ViewerPane({
                   className="min-w-0 flex-1 rounded border border-surface-border bg-surface-deepest px-2 py-1 text-text-primary outline-none focus:border-ui-focus"
                   aria-label="Search Markdown"
                   onChange={(event) => {
-                    setMarkdownSearch({
-                      kind: "editing",
-                      query: event.target.value,
-                    });
+                    setMarkdownSearch(updateMarkdownViewerSearch(event.target.value));
                   }}
                   onKeyDown={handleSearchInputKeyDown}
                 />
@@ -638,15 +672,6 @@ export function ViewerPane({
                   Find
                 </button>
               </form>
-            ) : null}
-            {markdownSearch.kind === "active" ? (
-              <p className="mt-3 text-text-muted" role="status" aria-live="polite">
-                {markdownSearchStatus(
-                  markdownSearch.query,
-                  searchMatches.length,
-                  markdownSearch.matchIndex,
-                )}
-              </p>
             ) : null}
             <MarkdownRenderer
               document={activeViewer.document}
@@ -714,6 +739,40 @@ export function ViewerPane({
         </div>
         {content}
       </div>
+      {activeViewer.kind !== "document" ? null : (() => {
+        if (activeViewer.presentation === "raw-pager") {
+          const status = rawPagerStatus(rawPagerState);
+          const position = status.kind === "empty"
+            ? "No lines"
+            : `Line ${status.currentLine}/${status.totalLines}`;
+
+          return (
+            <ViewerNavigationStatusLine
+              mode="NORMAL"
+              documentIdentity={title}
+              position={position}
+              match="No search"
+            />
+          );
+        }
+
+        const position = markdownPositionStatus.kind === "empty"
+          ? "No blocks"
+          : `Block ${markdownPositionStatus.currentBlock}/${markdownPositionStatus.totalBlocks}`;
+        const searchStatus = markdownViewerSearchStatus(
+          markdownSearch,
+          searchMatches.length,
+        );
+
+        return (
+          <ViewerNavigationStatusLine
+            mode={searchStatus.mode}
+            documentIdentity={title}
+            position={position}
+            match={searchStatus.match}
+          />
+        );
+      })()}
       <MobilePaneControls
         ctrlPressed={mobileCtrlPressed}
         onCtrlToggle={onToggleMobileCtrl}
