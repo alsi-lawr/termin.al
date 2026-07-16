@@ -26,8 +26,30 @@ export type VimMotion =
   | "document-start"
   | "document-end"
   | "line-last-nonblank"
+  | "sentence-backward"
+  | "sentence-forward"
+  | "paragraph-backward"
+  | "paragraph-forward"
+  | "section-start-backward"
+  | "section-end-backward"
+  | "section-start-forward"
+  | "section-end-forward"
   | "match-pair"
   | "percentage";
+
+export type VimTextObject =
+  | "word"
+  | "WORD"
+  | "sentence"
+  | "paragraph"
+  | "double-quote"
+  | "single-quote"
+  | "backtick-quote"
+  | "square-brackets"
+  | "round-brackets"
+  | "angle-brackets"
+  | "curly-brackets"
+  | "tag";
 
 export type VimFindMotion = "f" | "F" | "t" | "T";
 
@@ -49,6 +71,16 @@ export type VimMotionRequest =
       kind: "find";
       motion: VimFindMotion;
       target: string;
+    }>
+  | Readonly<{
+      kind: "mark";
+      target: Readonly<{ line: number; column: number }>;
+      linewise: boolean;
+    }>
+  | Readonly<{
+      kind: "text-object";
+      object: VimTextObject;
+      around: boolean;
     }>;
 
 export type VimCharacterRange = Readonly<{
@@ -957,11 +989,888 @@ function resolveMatchPair(options: ResolveVimMotionOptions): VimMotionResolution
   };
 }
 
+const paragraphMacroPairs = "IPLPPPQPP TPHPLIPpLpItpplpipbp";
+const sectionMacroPairs = "SHNHH HUnhsh";
+
+type OffsetSpan = Readonly<{ start: number; end: number }>;
+type TagToken = Readonly<{
+  kind: "open" | "close";
+  name: string;
+  start: number;
+  end: number;
+}>;
+
+function sortedUnique(values: ReadonlyArray<number>): ReadonlyArray<number> {
+  return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function lineStarts(lines: ReadonlyArray<string>): ReadonlyArray<number> {
+  const starts: Array<number> = [];
+  let offset = 0;
+
+  for (const line of lines) {
+    starts.push(offset);
+    offset += line.length + 1;
+  }
+
+  return starts;
+}
+
+function matchesRoffMacro(line: string, pairs: string): boolean {
+  if (!line.startsWith(".") || line.length < 2) {
+    return false;
+  }
+
+  const first = line.slice(1, 2);
+  const second = line.slice(2, 3);
+
+  if (second === " ") {
+    for (let index = 0; index < pairs.length; index += 2) {
+      if (pairs.slice(index, index + 1) === first) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  const pair = first + second;
+
+  for (let index = 0; index < pairs.length; index += 2) {
+    if (pairs.slice(index, index + 2) === pair) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function sectionBoundaryLines(lines: ReadonlyArray<string>): ReadonlyArray<number> {
+  const boundaries = [0];
+
+  for (let line = 0; line < lines.length; line += 1) {
+    const value = lineAt(lines, line);
+
+    if (
+      value.startsWith("\f") ||
+      value.startsWith("{") ||
+      matchesRoffMacro(value, sectionMacroPairs)
+    ) {
+      boundaries.push(line);
+    }
+  }
+
+  return sortedUnique(boundaries);
+}
+
+function paragraphBoundaryLines(
+  lines: ReadonlyArray<string>,
+  whitespaceOnly: boolean,
+): ReadonlyArray<number> {
+  const boundaries = [...sectionBoundaryLines(lines)];
+
+  for (let line = 0; line < lines.length; line += 1) {
+    const value = lineAt(lines, line);
+    const blank = whitespaceOnly ? /^\s*$/u.test(value) : value.length === 0;
+
+    if (blank || matchesRoffMacro(value, paragraphMacroPairs)) {
+      boundaries.push(line);
+    }
+  }
+
+  return sortedUnique(boundaries);
+}
+
+function sentenceBoundaryOffsets(lines: ReadonlyArray<string>): ReadonlyArray<number> {
+  const text = joinLines(lines);
+  const starts = lineStarts(lines);
+  const boundaries: Array<number> = [0];
+
+  for (const line of paragraphBoundaryLines(lines, false)) {
+    const start = starts[line];
+
+    if (start !== undefined) {
+      boundaries.push(start, start + firstNonblankColumn(lineAt(lines, line)));
+    }
+  }
+
+  let offset = 0;
+
+  while (offset < text.length) {
+    const character = characterAt(text, offset);
+
+    if (character === "." || character === "!" || character === "?") {
+      let after = nextUnicodeCursorOffset(text, offset);
+
+      while (after < text.length && ")]\"'".includes(characterAt(text, after))) {
+        after = nextUnicodeCursorOffset(text, after);
+      }
+
+      const atLineEnd = after >= text.length || characterAt(text, after) === "\n";
+      const hasTwoSpaces = text.slice(after, after + 2) === "  ";
+
+      if (atLineEnd || hasTwoSpaces) {
+        let next = after;
+
+        while (next < text.length && /^\s$/u.test(characterAt(text, next))) {
+          next = nextUnicodeCursorOffset(text, next);
+        }
+
+        if (next < text.length) {
+          boundaries.push(next);
+        }
+      }
+    }
+
+    offset = nextUnicodeCursorOffset(text, offset);
+  }
+
+  return sortedUnique(boundaries);
+}
+
+function countedBoundary(
+  boundaries: ReadonlyArray<number>,
+  origin: number,
+  count: number,
+  direction: "backward" | "forward",
+): number | undefined {
+  const candidates = boundaries.filter((boundary) =>
+    direction === "backward" ? boundary < origin : boundary > origin,
+  );
+  const ordered = direction === "backward" ? [...candidates].reverse() : candidates;
+  const availableIndex = Math.min(count, ordered.length) - 1;
+
+  return availableIndex < 0 ? undefined : ordered[availableIndex];
+}
+
+function resolveBoundaryMotion(
+  options: ResolveVimMotionOptions,
+  boundaries: ReadonlyArray<number>,
+  direction: "backward" | "forward",
+): VimMotionResolution {
+  const origin = vimTextOffsetForPosition(options.lines, options.cursor);
+  const target = countedBoundary(boundaries, origin, options.count, direction);
+
+  if (target === undefined) {
+    return { kind: "invalid" };
+  }
+
+  const cursor = vimPositionForTextOffset(options.lines, target, "character");
+  const linewiseEnd = Math.max(options.cursor.line, cursor.line) - 1;
+  const range: VimMotionRange = cursor.column === 0 && cursor.line !== options.cursor.line
+    ? {
+        kind: "line",
+        startLine: Math.min(options.cursor.line, cursor.line),
+        endLine: linewiseEnd,
+      }
+    : exclusiveRange(origin, target);
+
+  return {
+    kind: "resolved",
+    motion: {
+      cursor,
+      range,
+      goalColumn: { kind: "none" },
+    },
+  };
+}
+
+function sectionTargetOffsets(
+  lines: ReadonlyArray<string>,
+  target: "start" | "end",
+): ReadonlyArray<number> {
+  const starts = lineStarts(lines);
+  const offsets: Array<number> = [];
+
+  for (let line = 0; line < lines.length; line += 1) {
+    const value = lineAt(lines, line);
+    const matches = target === "start"
+      ? value.startsWith("{") || matchesRoffMacro(value, sectionMacroPairs) || value.startsWith("\f")
+      : value.startsWith("}");
+
+    if (matches) {
+      const start = starts[line];
+
+      if (start !== undefined) {
+        offsets.push(start);
+      }
+    }
+  }
+
+  if (target === "start") {
+    offsets.push(0);
+  } else {
+    const lastLine = lines.length - 1;
+    const last = lineAt(lines, lastLine);
+    const start = starts[lastLine];
+
+    if (start !== undefined) {
+      const terminalIsLineStart = last.length === 0 || last === "]]" || last === "}";
+      offsets.push(terminalIsLineStart ? start : start + lastCursorColumn(last));
+    }
+  }
+
+  return sortedUnique(offsets);
+}
+
+function resolveMark(
+  options: ResolveVimMotionOptions,
+  target: Readonly<{ line: number; column: number }>,
+  linewise: boolean,
+): VimMotionResolution {
+  const targetLine = Math.max(0, Math.min(options.lines.length - 1, target.line));
+  const targetColumn = linewise
+    ? firstNonblankColumn(lineAt(options.lines, targetLine))
+    : target.column;
+  const cursor = vimPositionForTextOffset(
+    options.lines,
+    vimTextOffsetForPosition(options.lines, { line: targetLine, column: targetColumn }),
+    "character",
+  );
+  const range = linewise
+    ? orderedLineRange(options.cursor.line, cursor.line)
+    : exclusiveRange(
+        vimTextOffsetForPosition(options.lines, options.cursor),
+        vimTextOffsetForPosition(options.lines, cursor),
+      );
+
+  return {
+    kind: "resolved",
+    motion: { cursor, range, goalColumn: { kind: "none" } },
+  };
+}
+
+function trimSpan(text: string, span: OffsetSpan): OffsetSpan | undefined {
+  let start = span.start;
+  let end = span.end;
+
+  while (start < end && /^\s$/u.test(characterAt(text, start))) {
+    start = nextUnicodeCursorOffset(text, start);
+  }
+
+  while (end > start) {
+    const previous = previousUnicodeCursorOffset(text, end);
+
+    if (!/^\s$/u.test(characterAt(text, previous))) {
+      break;
+    }
+
+    end = previous;
+  }
+
+  return start === end ? undefined : { start, end };
+}
+
+function aroundWhitespace(text: string, span: OffsetSpan): OffsetSpan {
+  let end = span.end;
+
+  while (end < text.length && /^\s$/u.test(characterAt(text, end))) {
+    end = nextUnicodeCursorOffset(text, end);
+  }
+
+  if (end > span.end) {
+    return { start: span.start, end };
+  }
+
+  let start = span.start;
+
+  while (start > 0) {
+    const previous = previousUnicodeCursorOffset(text, start);
+
+    if (!/^\s$/u.test(characterAt(text, previous))) {
+      break;
+    }
+
+    start = previous;
+  }
+
+  return { start, end: span.end };
+}
+
+function wordSpans(text: string, size: "small" | "big"): ReadonlyArray<OffsetSpan> {
+  const spans: Array<OffsetSpan> = [];
+  let start = 0;
+
+  while (start < text.length) {
+    const targetClass = wordClass(characterAt(text, start), size);
+    let end = nextUnicodeCursorOffset(text, start);
+
+    while (end < text.length && wordClass(characterAt(text, end), size) === targetClass) {
+      end = nextUnicodeCursorOffset(text, end);
+    }
+
+    spans.push({ start, end });
+    start = end;
+  }
+
+  return spans;
+}
+
+function spanContainingOrFollowing(
+  spans: ReadonlyArray<OffsetSpan>,
+  cursor: number,
+): number | undefined {
+  const containing = spans.findIndex((span) => cursor >= span.start && cursor < span.end);
+
+  if (containing >= 0) {
+    return containing;
+  }
+
+  const following = spans.findIndex((span) => span.start >= cursor);
+  return following >= 0 ? following : undefined;
+}
+
+function resolveWordObject(
+  options: ResolveVimMotionOptions,
+  size: "small" | "big",
+  around: boolean,
+): OffsetSpan | undefined {
+  const text = joinLines(options.lines);
+  const spans = wordSpans(text, size);
+  const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
+  const first = spanContainingOrFollowing(spans, cursor);
+
+  if (first === undefined) {
+    return undefined;
+  }
+
+  let selectedFirst = first;
+  let selectedLast = first;
+
+  if (around) {
+    const spanIsBlank = (index: number): boolean => {
+      const span = spans[index];
+      return span === undefined || wordClass(characterAt(text, span.start), size) === "blank";
+    };
+
+    while (selectedFirst < spans.length && spanIsBlank(selectedFirst)) {
+      selectedFirst += 1;
+    }
+
+    if (selectedFirst >= spans.length) {
+      selectedFirst = first;
+
+      while (selectedFirst > 0 && spanIsBlank(selectedFirst)) {
+        selectedFirst -= 1;
+      }
+    }
+
+    selectedLast = selectedFirst;
+    let selectedObjects = 1;
+
+    while (selectedObjects < options.count) {
+      let next = selectedLast + 1;
+
+      while (next < spans.length && spanIsBlank(next)) {
+        next += 1;
+      }
+
+      if (next >= spans.length) {
+        break;
+      }
+
+      selectedLast = next;
+      selectedObjects += 1;
+    }
+  } else {
+    selectedLast = Math.min(spans.length - 1, first + options.count - 1);
+  }
+
+  const firstSpan = spans[selectedFirst];
+  const lastSpan = spans[selectedLast];
+
+  if (firstSpan === undefined || lastSpan === undefined) {
+    return undefined;
+  }
+
+  const span = { start: firstSpan.start, end: lastSpan.end };
+  return around ? aroundWhitespace(text, span) : span;
+}
+
+function sentenceSpans(lines: ReadonlyArray<string>): ReadonlyArray<OffsetSpan> {
+  const text = joinLines(lines);
+  const boundaries = sentenceBoundaryOffsets(lines);
+  const spans: Array<OffsetSpan> = [];
+
+  for (let index = 0; index < boundaries.length; index += 1) {
+    const start = boundaries[index];
+    const next = boundaries[index + 1] ?? text.length;
+
+    if (start !== undefined && next > start) {
+      spans.push({ start, end: next });
+    }
+  }
+
+  return spans;
+}
+
+function resolveSentenceObject(
+  options: ResolveVimMotionOptions,
+  around: boolean,
+): OffsetSpan | undefined {
+  const text = joinLines(options.lines);
+  const spans = sentenceSpans(options.lines);
+  const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
+  const first = spanContainingOrFollowing(spans, cursor);
+
+  if (first === undefined) {
+    return undefined;
+  }
+
+  const last = Math.min(spans.length - 1, first + options.count - 1);
+  const firstSpan = spans[first];
+  const lastSpan = spans[last];
+
+  if (firstSpan === undefined || lastSpan === undefined) {
+    return undefined;
+  }
+
+  const trimmed = trimSpan(text, { start: firstSpan.start, end: lastSpan.end });
+
+  if (trimmed === undefined) {
+    return undefined;
+  }
+
+  return around ? aroundWhitespace(text, trimmed) : trimmed;
+}
+
+function resolveParagraphObject(
+  options: ResolveVimMotionOptions,
+  around: boolean,
+): VimLineRange | undefined {
+  const firstLine = lineAt(options.lines, 0);
+  const firstLineIsBoundary = /^\s*$/u.test(firstLine) ||
+    matchesRoffMacro(firstLine, paragraphMacroPairs) ||
+    matchesRoffMacro(firstLine, sectionMacroPairs) ||
+    firstLine.startsWith("\f") ||
+    firstLine.startsWith("{");
+  const boundarySet = new Set(
+    paragraphBoundaryLines(options.lines, true).filter(
+      (line) => line !== 0 || firstLineIsBoundary,
+    ),
+  );
+  let startLine = options.cursor.line;
+
+  if (boundarySet.has(startLine)) {
+    while (startLine < options.lines.length && boundarySet.has(startLine)) {
+      startLine += 1;
+    }
+  }
+
+  if (startLine >= options.lines.length) {
+    return undefined;
+  }
+
+  while (startLine > 0 && !boundarySet.has(startLine - 1)) {
+    startLine -= 1;
+  }
+
+  let endLine = startLine;
+  let paragraphs = 1;
+
+  while (paragraphs < options.count) {
+    while (endLine + 1 < options.lines.length && !boundarySet.has(endLine + 1)) {
+      endLine += 1;
+    }
+
+    let next = endLine + 1;
+
+    while (next < options.lines.length && boundarySet.has(next)) {
+      next += 1;
+    }
+
+    if (next >= options.lines.length) {
+      break;
+    }
+
+    endLine = next;
+    paragraphs += 1;
+  }
+
+  while (endLine + 1 < options.lines.length && !boundarySet.has(endLine + 1)) {
+    endLine += 1;
+  }
+
+  if (around) {
+    let separatorEnd = endLine;
+
+    while (separatorEnd + 1 < options.lines.length && boundarySet.has(separatorEnd + 1)) {
+      separatorEnd += 1;
+    }
+
+    if (separatorEnd > endLine) {
+      endLine = separatorEnd;
+    } else {
+      while (startLine > 0 && boundarySet.has(startLine - 1)) {
+        startLine -= 1;
+      }
+    }
+  }
+
+  return { kind: "line", startLine, endLine };
+}
+
+function isEscaped(text: string, offset: number): boolean {
+  let backslashes = 0;
+  let position = offset;
+
+  while (position > 0) {
+    const previous = previousUnicodeCursorOffset(text, position);
+
+    if (characterAt(text, previous) !== "\\") {
+      break;
+    }
+
+    backslashes += 1;
+    position = previous;
+  }
+
+  return backslashes % 2 === 1;
+}
+
+function resolveQuoteObject(
+  options: ResolveVimMotionOptions,
+  quote: string,
+  around: boolean,
+): OffsetSpan | undefined {
+  const line = lineAt(options.lines, options.cursor.line);
+  const lineStart = vimLineStartOffset(options.lines, options.cursor.line);
+  const quotes: Array<number> = [];
+  let column = 0;
+
+  while (column < line.length) {
+    if (characterAt(line, column) === quote && !isEscaped(line, column)) {
+      quotes.push(column);
+    }
+
+    column = nextUnicodeCursorOffset(line, column);
+  }
+
+  for (let index = 0; index + 1 < quotes.length; index += 2) {
+    const opening = quotes[index];
+    const closing = quotes[index + 1];
+
+    if (opening === undefined || closing === undefined) {
+      continue;
+    }
+
+    if (options.cursor.column >= opening && options.cursor.column <= closing) {
+      const includeDelimiters = around || (!around && options.count === 2);
+      const start = lineStart + (includeDelimiters ? opening : nextUnicodeCursorOffset(line, opening));
+      const end = lineStart + (includeDelimiters ? nextUnicodeCursorOffset(line, closing) : closing);
+
+      if (start === end) {
+        return around ? { start: lineStart + opening, end: lineStart + nextUnicodeCursorOffset(line, closing) } : undefined;
+      }
+
+      return around ? aroundWhitespace(joinLines(options.lines), { start, end }) : { start, end };
+    }
+  }
+
+  return undefined;
+}
+
+function resolveDelimiterObject(
+  options: ResolveVimMotionOptions,
+  opening: string,
+  closing: string,
+  around: boolean,
+): OffsetSpan | undefined {
+  const text = joinLines(options.lines);
+  const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
+  const enclosing: Array<OffsetSpan> = [];
+  const stack: Array<Readonly<{ character: string; offset: number }>> = [];
+  const objectOpenings = "([{<";
+  const objectClosings = ")]}>";
+  let offset = 0;
+
+  while (offset < text.length) {
+    const character = characterAt(text, offset);
+
+    if (!isEscaped(text, offset)) {
+      const openingIndex = objectOpenings.indexOf(character);
+      const closingIndex = objectClosings.indexOf(character);
+
+      if (openingIndex >= 0) {
+        stack.push({ character, offset });
+      } else if (closingIndex >= 0) {
+        const expectedOpening = objectOpenings.slice(closingIndex, closingIndex + 1);
+        const candidate = stack.at(-1);
+
+        if (candidate?.character === expectedOpening) {
+          stack.pop();
+
+          if (
+            candidate.character === opening &&
+            character === closing &&
+            cursor >= candidate.offset &&
+            cursor <= offset
+          ) {
+            enclosing.push({
+              start: candidate.offset,
+              end: nextUnicodeCursorOffset(text, offset),
+            });
+          }
+        } else {
+          const crossed = stack.findIndex((entry) => entry.character === expectedOpening);
+
+          if (crossed >= 0) {
+            stack.splice(crossed);
+          }
+        }
+      }
+    }
+
+    offset = nextUnicodeCursorOffset(text, offset);
+  }
+
+  enclosing.sort((left, right) => (left.end - left.start) - (right.end - right.start));
+  const selected = enclosing[Math.min(options.count, enclosing.length) - 1];
+
+  if (selected === undefined) {
+    return undefined;
+  }
+
+  const span = around
+    ? selected
+    : {
+        start: nextUnicodeCursorOffset(text, selected.start),
+        end: previousUnicodeCursorOffset(text, selected.end),
+      };
+
+  return span.start === span.end ? undefined : span;
+}
+
+function scanTagEnd(text: string, start: number): number | undefined {
+  let quote: string | undefined;
+  let offset = start;
+
+  while (offset < text.length) {
+    const character = characterAt(text, offset);
+
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined;
+      }
+    } else if (character === "\"" || character === "'") {
+      quote = character;
+    } else if (character === "<") {
+      return undefined;
+    } else if (character === ">") {
+      return nextUnicodeCursorOffset(text, offset);
+    }
+
+    offset = nextUnicodeCursorOffset(text, offset);
+  }
+
+  return undefined;
+}
+
+function tagTokens(text: string): ReadonlyArray<TagToken> {
+  const tokens: Array<TagToken> = [];
+  let offset = 0;
+
+  while (offset < text.length) {
+    if (characterAt(text, offset) !== "<") {
+      offset = nextUnicodeCursorOffset(text, offset);
+      continue;
+    }
+
+    if (text.startsWith("<!--", offset)) {
+      const commentEnd = text.indexOf("-->", offset + 4);
+
+      if (commentEnd < 0) {
+        break;
+      }
+
+      offset = commentEnd + 3;
+      continue;
+    }
+
+    const end = scanTagEnd(text, nextUnicodeCursorOffset(text, offset));
+
+    if (end === undefined) {
+      offset = nextUnicodeCursorOffset(text, offset);
+      continue;
+    }
+
+    const source = text.slice(offset + 1, end - 1).trim();
+    const skipped = source.length === 0 || source.startsWith("!") || source.startsWith("?") || source.endsWith("/");
+
+    if (!skipped) {
+      const close = source.startsWith("/");
+      const nameSource = close ? source.slice(1).trimStart() : source;
+      const match = /^[A-Za-z][A-Za-z0-9:._-]*/u.exec(nameSource);
+
+      if (match !== null) {
+        const remainder = nameSource.slice(match[0].length);
+
+        if (close && remainder.trim().length > 0) {
+          offset = end;
+          continue;
+        }
+
+        tokens.push({
+          kind: close ? "close" : "open",
+          name: match[0].toLowerCase(),
+          start: offset,
+          end,
+        });
+      }
+    }
+
+    offset = end;
+  }
+
+  return tokens;
+}
+
+function resolveTagObject(
+  options: ResolveVimMotionOptions,
+  around: boolean,
+): OffsetSpan | undefined {
+  const text = joinLines(options.lines);
+  const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
+  const stack: Array<TagToken> = [];
+  const enclosing: Array<Readonly<{ open: TagToken; close: TagToken }>> = [];
+
+  for (const token of tagTokens(text)) {
+    if (token.kind === "open") {
+      stack.push(token);
+      continue;
+    }
+
+    const open = stack.at(-1);
+
+    if (open?.name !== token.name) {
+      const crossed = stack.findIndex((candidate) => candidate.name === token.name);
+
+      if (crossed >= 0) {
+        stack.splice(crossed);
+      }
+
+      continue;
+    }
+
+    stack.pop();
+
+    if (cursor >= open.start && cursor < token.end) {
+      enclosing.push({ open, close: token });
+    }
+  }
+
+  enclosing.sort((left, right) =>
+    (left.close.end - left.open.start) - (right.close.end - right.open.start),
+  );
+  const pair = enclosing[Math.min(options.count, enclosing.length) - 1];
+
+  if (pair === undefined) {
+    return undefined;
+  }
+
+  if (around) {
+    return { start: pair.open.start, end: pair.close.end };
+  }
+
+  if (pair.open.end === pair.close.start) {
+    return { start: pair.open.start, end: pair.open.end };
+  }
+
+  return { start: pair.open.end, end: pair.close.start };
+}
+
+function resolveTextObject(options: ResolveVimMotionOptions): VimMotionResolution {
+  if (options.request.kind !== "text-object") {
+    return { kind: "invalid" };
+  }
+
+  if (options.request.object === "paragraph") {
+    const range = resolveParagraphObject(options, options.request.around);
+
+    if (range === undefined) {
+      return { kind: "invalid" };
+    }
+
+    return {
+      kind: "resolved",
+      motion: {
+        cursor: { line: range.startLine, column: firstNonblankColumn(lineAt(options.lines, range.startLine)) },
+        range,
+        goalColumn: { kind: "none" },
+      },
+    };
+  }
+
+  let span: OffsetSpan | undefined;
+
+  switch (options.request.object) {
+    case "word":
+      span = resolveWordObject(options, "small", options.request.around);
+      break;
+    case "WORD":
+      span = resolveWordObject(options, "big", options.request.around);
+      break;
+    case "sentence":
+      span = resolveSentenceObject(options, options.request.around);
+      break;
+    case "double-quote":
+      span = resolveQuoteObject(options, "\"", options.request.around);
+      break;
+    case "single-quote":
+      span = resolveQuoteObject(options, "'", options.request.around);
+      break;
+    case "backtick-quote":
+      span = resolveQuoteObject(options, "`", options.request.around);
+      break;
+    case "square-brackets":
+      span = resolveDelimiterObject(options, "[", "]", options.request.around);
+      break;
+    case "round-brackets":
+      span = resolveDelimiterObject(options, "(", ")", options.request.around);
+      break;
+    case "angle-brackets":
+      span = resolveDelimiterObject(options, "<", ">", options.request.around);
+      break;
+    case "curly-brackets":
+      span = resolveDelimiterObject(options, "{", "}", options.request.around);
+      break;
+    case "tag":
+      span = resolveTagObject(options, options.request.around);
+      break;
+  }
+
+  if (span === undefined || span.start === span.end) {
+    return { kind: "invalid" };
+  }
+
+  return {
+    kind: "resolved",
+    motion: {
+      cursor: vimPositionForTextOffset(options.lines, span.start, "character"),
+      range: {
+        kind: "character",
+        start: normalizeUnicodeCursorOffset(joinLines(options.lines), span.start),
+        end: normalizeUnicodeCursorOffset(joinLines(options.lines), span.end),
+        inclusivity: "inclusive",
+      },
+      goalColumn: { kind: "none" },
+    },
+  };
+}
+
 export function resolveVimMotion(
   options: ResolveVimMotionOptions,
 ): VimMotionResolution {
   if (options.request.kind === "find") {
     return resolveFind(options, options.request.motion, options.request.target);
+  }
+
+  if (options.request.kind === "mark") {
+    return resolveMark(options, options.request.target, options.request.linewise);
+  }
+
+  if (options.request.kind === "text-object") {
+    return resolveTextObject(options);
   }
 
   switch (options.request.motion) {
@@ -1005,6 +1914,34 @@ export function resolveVimMotion(
       return resolveDocumentLine(options, "start");
     case "document-end":
       return resolveDocumentLine(options, "end");
+    case "sentence-backward":
+      return resolveBoundaryMotion(options, sentenceBoundaryOffsets(options.lines), "backward");
+    case "sentence-forward":
+      return resolveBoundaryMotion(options, sentenceBoundaryOffsets(options.lines), "forward");
+    case "paragraph-backward": {
+      const starts = lineStarts(options.lines);
+      const boundaries = paragraphBoundaryLines(options.lines, false).flatMap((line) => {
+        const start = starts[line];
+        return start === undefined ? [] : [start];
+      });
+      return resolveBoundaryMotion(options, boundaries, "backward");
+    }
+    case "paragraph-forward": {
+      const starts = lineStarts(options.lines);
+      const boundaries = paragraphBoundaryLines(options.lines, false).flatMap((line) => {
+        const start = starts[line];
+        return start === undefined ? [] : [start];
+      });
+      return resolveBoundaryMotion(options, boundaries, "forward");
+    }
+    case "section-start-backward":
+      return resolveBoundaryMotion(options, sectionTargetOffsets(options.lines, "start"), "backward");
+    case "section-end-backward":
+      return resolveBoundaryMotion(options, sectionTargetOffsets(options.lines, "end"), "backward");
+    case "section-start-forward":
+      return resolveBoundaryMotion(options, sectionTargetOffsets(options.lines, "start"), "forward");
+    case "section-end-forward":
+      return resolveBoundaryMotion(options, sectionTargetOffsets(options.lines, "end"), "forward");
     case "match-pair":
       return resolveMatchPair(options);
     case "percentage":

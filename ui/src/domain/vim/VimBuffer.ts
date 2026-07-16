@@ -14,6 +14,7 @@ import {
   type VimMotion,
   type VimMotionRange,
   type VimMotionRequest,
+  type VimTextObject,
 } from "./VimMotion.ts";
 
 export type { VimMotion } from "./VimMotion.ts";
@@ -90,6 +91,16 @@ export type VimOperator = "delete" | "change" | "yank";
 
 export type VimDigit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
+export type VimMarkName =
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i"
+  | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r"
+  | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z";
+
+export type VimMark = Readonly<{
+  name: VimMarkName;
+  position: VimPosition;
+}>;
+
 export type VimNormalKey =
   | Readonly<{
       kind: "literal";
@@ -144,6 +155,7 @@ type VimSnapshot = Readonly<{
   cursor: VimPosition;
   mode: VimMode;
   selection: VimSelection;
+  marks: ReadonlyArray<VimMark>;
 }>;
 
 type VimCommandContext =
@@ -182,6 +194,24 @@ type VimPending =
       context: VimCommandContext;
       motion: VimFindMotion;
       source: string;
+    }>
+  | Readonly<{
+      kind: "section";
+      context: VimCommandContext;
+      opening: "[" | "]";
+      source: string;
+    }>
+  | Readonly<{
+      kind: "mark";
+      action: "set" | "jump-exact" | "jump-line";
+      context: VimCommandContext;
+      source: string;
+    }>
+  | Readonly<{
+      kind: "text-object";
+      context: Extract<VimCommandContext, { kind: "operator" }>;
+      around: boolean;
+      source: string;
     }>;
 
 type VimTextState = Readonly<{
@@ -208,6 +238,7 @@ export type VimBuffer = Readonly<{
   pending: VimPending;
   goalColumn: VimGoalColumn;
   lastFind: VimLastFind;
+  marks: ReadonlyArray<VimMark>;
 }>;
 
 export type CreateVimBufferOptions = Readonly<{
@@ -309,7 +340,78 @@ function snapshot(buffer: VimBuffer): VimSnapshot {
     cursor: buffer.cursor,
     mode: buffer.mode,
     selection: buffer.selection,
+    marks: buffer.marks,
   };
+}
+
+type VimEditInterval = Readonly<{
+  oldStart: number;
+  oldEnd: number;
+  newEnd: number;
+}>;
+
+function editInterval(oldText: string, newText: string): VimEditInterval {
+  let start = 0;
+  const sharedLength = Math.min(oldText.length, newText.length);
+
+  while (start < sharedLength && oldText[start] === newText[start]) {
+    start += 1;
+  }
+
+  const safeStart = normalizeUnicodeCursorOffset(oldText, start);
+  let oldEnd = oldText.length;
+  let newEnd = newText.length;
+
+  while (
+    oldEnd > safeStart &&
+    newEnd > safeStart &&
+    oldText[oldEnd - 1] === newText[newEnd - 1]
+  ) {
+    oldEnd -= 1;
+    newEnd -= 1;
+  }
+
+  return {
+    oldStart: safeStart,
+    oldEnd: normalizeUnicodeCursorOffset(oldText, oldEnd),
+    newEnd: normalizeUnicodeCursorOffset(newText, newEnd),
+  };
+}
+
+function adjustMarks(
+  buffer: VimBuffer,
+  lines: ReadonlyArray<string>,
+  interval: VimEditInterval,
+): ReadonlyArray<VimMark> {
+  const newText = joinLines(lines);
+  const delta = interval.newEnd - interval.oldEnd;
+  const adjusted: Array<VimMark> = [];
+
+  for (const mark of buffer.marks) {
+    const offset = textOffsetForPosition(buffer.lines, mark.position);
+    let nextOffset = offset;
+
+    if (interval.oldStart === interval.oldEnd) {
+      if (offset >= interval.oldStart) {
+        nextOffset += delta;
+      }
+    } else if (offset >= interval.oldStart && offset < interval.oldEnd) {
+      continue;
+    } else if (offset >= interval.oldEnd) {
+      nextOffset += delta;
+    }
+
+    if (nextOffset < 0 || nextOffset > newText.length) {
+      continue;
+    }
+
+    adjusted.push({
+      name: mark.name,
+      position: vimPositionForTextOffset(lines, nextOffset, "character"),
+    });
+  }
+
+  return adjusted;
 }
 
 function textStateMatches(
@@ -350,6 +452,7 @@ function commitEdit(
   buffer: VimBuffer,
   next: VimTextState,
   register: VimRegister,
+  interval: VimEditInterval,
 ): VimBuffer {
   if (textStateMatches(buffer, next) && buffer.register.kind === register.kind) {
     return resetPending(buffer);
@@ -363,6 +466,7 @@ function commitEdit(
     ),
     redoStack: [],
     register,
+    marks: adjustMarks(buffer, next.lines, interval),
     pending: { kind: "none" },
     status: { kind: "none" },
     goalColumn: { kind: "none" },
@@ -491,6 +595,24 @@ function registerForRange(
   };
 }
 
+function lineDeletionInterval(
+  buffer: VimBuffer,
+  range: Extract<VimTextRange, { kind: "line" }>,
+): VimEditInterval {
+  const oldText = joinLines(buffer.lines);
+  let oldStart = lineStartOffset(buffer.lines, range.startLine);
+
+  if (range.startLine > 0 && range.endLine === buffer.lines.length - 1) {
+    oldStart -= 1;
+  }
+
+  const oldEnd = range.endLine === buffer.lines.length - 1
+    ? oldText.length
+    : lineStartOffset(buffer.lines, range.endLine + 1);
+
+  return { oldStart, oldEnd, newEnd: oldStart };
+}
+
 function deleteRange(
   buffer: VimBuffer,
   range: VimTextRange,
@@ -518,6 +640,7 @@ function deleteRange(
       buffer,
       createTextState(lines, cursor, mode, { kind: "none" }),
       register,
+      lineDeletionInterval(buffer, range),
     );
   }
 
@@ -543,6 +666,7 @@ function deleteRange(
     buffer,
     createTextState(lines, cursor, mode, { kind: "none" }),
     register,
+    { oldStart: start, oldEnd: end, newEnd: start },
   );
 }
 
@@ -792,7 +916,11 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
   }
 
   if (buffer.register.kind === "line") {
+    const oldText = joinLines(buffer.lines);
     const insertionLine = buffer.cursor.line + (afterCursor ? 1 : 0);
+    const insertionOffset = insertionLine === buffer.lines.length
+      ? oldText.length
+      : lineStartOffset(buffer.lines, insertionLine);
     const lines = [
       ...buffer.lines.slice(0, insertionLine),
       ...buffer.register.lines,
@@ -808,6 +936,11 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
         { kind: "none" },
       ),
       buffer.register,
+      {
+        oldStart: insertionOffset,
+        oldEnd: insertionOffset,
+        newEnd: insertionOffset + joinLines(lines).length - oldText.length,
+      },
     );
   }
 
@@ -831,6 +964,11 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
     buffer,
     createTextState(lines, cursor, VimMode.Normal, { kind: "none" }),
     buffer.register,
+    {
+      oldStart: insertionOffset,
+      oldEnd: insertionOffset,
+      newEnd: insertionOffset + buffer.register.text.length,
+    },
   );
 }
 
@@ -943,6 +1081,7 @@ export function createVimBuffer({
     pending: { kind: "none" },
     goalColumn: { kind: "none" },
     lastFind: { kind: "none" },
+    marks: [],
   };
 }
 
@@ -1012,6 +1151,11 @@ export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
     buffer,
     createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
     buffer.register,
+    {
+      oldStart: cursorOffset,
+      oldEnd: cursorOffset,
+      newEnd: cursorOffset + text.length,
+    },
   );
 }
 
@@ -1042,6 +1186,7 @@ function deleteVimInsertRange(
       { kind: "none" },
     ),
     buffer.register,
+    { oldStart: safeStart, oldEnd: safeEnd, newEnd: safeStart },
   );
 }
 
@@ -1093,11 +1238,13 @@ export function replaceVimInsertText(
 
   const lines = splitText(text);
   const cursor = positionForTextOffset(lines, cursorOffset, VimMode.Insert);
+  const interval = editInterval(vimBufferText(buffer), text);
 
   return commitEdit(
     buffer,
     createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
     buffer.register,
+    interval,
   );
 }
 
@@ -1132,6 +1279,203 @@ function beginFind(buffer: VimBuffer, motion: VimFindMotion): VimBuffer {
       motion,
       source: pendingSource(buffer) + motion,
     }),
+  );
+}
+
+function beginSection(buffer: VimBuffer, opening: "[" | "]"): VimBuffer {
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "section",
+      context: commandContext(buffer),
+      opening,
+      source: pendingSource(buffer) + opening,
+    }),
+  );
+}
+
+function beginMark(
+  buffer: VimBuffer,
+  action: "set" | "jump-exact" | "jump-line",
+  source: string,
+): VimBuffer {
+  const context = commandContext(buffer);
+
+  if (
+    action === "set" &&
+    (context.kind === "operator" || buffer.pending.kind !== "none")
+  ) {
+    return invalidInput(buffer, pendingSource(buffer) + source);
+  }
+
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "mark",
+      action,
+      context,
+      source: pendingSource(buffer) + source,
+    }),
+  );
+}
+
+function beginTextObject(buffer: VimBuffer, around: boolean, source: string): VimBuffer {
+  const context = commandContext(buffer);
+
+  if (context.kind !== "operator") {
+    return invalidInput(buffer, pendingSource(buffer) + source);
+  }
+
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "text-object",
+      context,
+      around,
+      source: pendingSource(buffer) + source,
+    }),
+  );
+}
+
+function vimMarkName(value: string): VimMarkName | undefined {
+  switch (value) {
+    case "a": return "a";
+    case "b": return "b";
+    case "c": return "c";
+    case "d": return "d";
+    case "e": return "e";
+    case "f": return "f";
+    case "g": return "g";
+    case "h": return "h";
+    case "i": return "i";
+    case "j": return "j";
+    case "k": return "k";
+    case "l": return "l";
+    case "m": return "m";
+    case "n": return "n";
+    case "o": return "o";
+    case "p": return "p";
+    case "q": return "q";
+    case "r": return "r";
+    case "s": return "s";
+    case "t": return "t";
+    case "u": return "u";
+    case "v": return "v";
+    case "w": return "w";
+    case "x": return "x";
+    case "y": return "y";
+    case "z": return "z";
+    default: return undefined;
+  }
+}
+
+function textObject(value: string): VimTextObject | undefined {
+  switch (value) {
+    case "w": return "word";
+    case "W": return "WORD";
+    case "s": return "sentence";
+    case "p": return "paragraph";
+    case "\"": return "double-quote";
+    case "'": return "single-quote";
+    case "`": return "backtick-quote";
+    case "[":
+    case "]": return "square-brackets";
+    case "(":
+    case ")":
+    case "b": return "round-brackets";
+    case "<":
+    case ">": return "angle-brackets";
+    case "{":
+    case "}":
+    case "B": return "curly-brackets";
+    case "t": return "tag";
+    default: return undefined;
+  }
+}
+
+function applySectionContinuation(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind !== "section") {
+    throw new Error("Vim section continuation requires section state.");
+  }
+
+  const source = buffer.pending.source + value;
+  let motion: VimMotion;
+
+  if (buffer.pending.opening === "[" && value === "[") {
+    motion = "section-start-backward";
+  } else if (buffer.pending.opening === "[" && value === "]") {
+    motion = "section-end-backward";
+  } else if (buffer.pending.opening === "]" && value === "]") {
+    motion = "section-start-forward";
+  } else if (buffer.pending.opening === "]" && value === "[") {
+    motion = "section-end-forward";
+  } else {
+    return invalidInput(buffer, source);
+  }
+
+  return executeMotion(
+    buffer,
+    { kind: "motion", motion },
+    buffer.pending.context,
+    source,
+    buffer.lastFind,
+  );
+}
+
+function applyMarkContinuation(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind !== "mark") {
+    throw new Error("Vim mark continuation requires mark state.");
+  }
+
+  const source = buffer.pending.source + value;
+  const name = vimMarkName(value);
+
+  if (name === undefined) {
+    return invalidInput(buffer, source);
+  }
+
+  if (buffer.pending.action === "set") {
+    const marks = buffer.marks.filter((mark) => mark.name !== name);
+    return {
+      ...resetPending(buffer),
+      marks: [...marks, { name, position: buffer.cursor }],
+    };
+  }
+
+  const mark = buffer.marks.find((candidate) => candidate.name === name);
+
+  if (mark === undefined) {
+    return invalidInput(buffer, source);
+  }
+
+  return executeMotion(
+    buffer,
+    {
+      kind: "mark",
+      target: mark.position,
+      linewise: buffer.pending.action === "jump-line",
+    },
+    buffer.pending.context,
+    source,
+    buffer.lastFind,
+  );
+}
+
+function applyTextObjectContinuation(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind !== "text-object") {
+    throw new Error("Vim text-object continuation requires object state.");
+  }
+
+  const source = buffer.pending.source + value;
+  const object = textObject(value);
+
+  if (object === undefined) {
+    return invalidInput(buffer, source);
+  }
+
+  return executeMotion(
+    buffer,
+    { kind: "text-object", object, around: buffer.pending.around },
+    buffer.pending.context,
+    source,
+    buffer.lastFind,
   );
 }
 
@@ -1262,6 +1606,18 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     return applyFindTarget(buffer, value);
   }
 
+  if (buffer.pending.kind === "section") {
+    return applySectionContinuation(buffer, value);
+  }
+
+  if (buffer.pending.kind === "mark") {
+    return applyMarkContinuation(buffer, value);
+  }
+
+  if (buffer.pending.kind === "text-object") {
+    return applyTextObjectContinuation(buffer, value);
+  }
+
   if (/^[0-9]$/u.test(value)) {
     const digit = Number(value);
     const zeroIsMotion =
@@ -1321,6 +1677,17 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
       return handleMotion(buffer, "word-end", pendingSource(buffer) + value);
     case "E":
       return handleMotion(buffer, "WORD-end", pendingSource(buffer) + value);
+    case "(":
+      return handleMotion(buffer, "sentence-backward", pendingSource(buffer) + value);
+    case ")":
+      return handleMotion(buffer, "sentence-forward", pendingSource(buffer) + value);
+    case "{":
+      return handleMotion(buffer, "paragraph-backward", pendingSource(buffer) + value);
+    case "}":
+      return handleMotion(buffer, "paragraph-forward", pendingSource(buffer) + value);
+    case "[":
+    case "]":
+      return beginSection(buffer, value);
     case "g":
       return beginPrefix(buffer);
     case "G":
@@ -1340,6 +1707,12 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     case "t":
     case "T":
       return beginFind(buffer, value);
+    case "m":
+      return beginMark(buffer, "set", value);
+    case "'":
+      return beginMark(buffer, "jump-line", value);
+    case "`":
+      return beginMark(buffer, "jump-exact", value);
     case ";":
       return repeatFind(buffer, false);
     case ",":
@@ -1396,11 +1769,15 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     case "N":
       return moveToSearchMatch(buffer, "backward");
     case "i":
-      return buffer.mode.kind === "visual"
+      return buffer.pending.kind === "operator"
+        ? beginTextObject(buffer, false, value)
+        : buffer.mode.kind === "visual"
         ? invalidInput(buffer, value)
         : enterInsertMode(buffer, buffer.cursor);
     case "a":
-      return buffer.mode.kind === "visual"
+      return buffer.pending.kind === "operator"
+        ? beginTextObject(buffer, true, value)
+        : buffer.mode.kind === "visual"
         ? invalidInput(buffer, value)
         : insertAfterCursor(buffer);
     case "I":
@@ -1433,7 +1810,11 @@ export function applyNormalVimKey(
   }
 
   if (key.kind === "motion") {
-    if (buffer.pending.kind === "prefix" || buffer.pending.kind === "find") {
+    if (
+      buffer.pending.kind !== "none" &&
+      buffer.pending.kind !== "count" &&
+      buffer.pending.kind !== "operator"
+    ) {
       return invalidInput(buffer, pendingSource(buffer));
     }
 
