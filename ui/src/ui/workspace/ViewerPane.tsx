@@ -50,6 +50,13 @@ import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { lessPrompt } from "./LessPrompt.ts";
 import { HierarchicalCollectionPane } from "./HierarchicalCollectionPane.tsx";
 import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
+import {
+  createVimBuffer,
+  VimCapability,
+  VimMode,
+  type VimBuffer,
+} from "../../domain/vim/VimBuffer.ts";
+import { VimEditorPane } from "./VimEditorPane.tsx";
 
 type ViewerPaneProps = Readonly<{
   viewer: ViewerContent;
@@ -92,6 +99,84 @@ function ViewerNavigationStatusLine({
       <span>{position}</span>
       <span>{match}</span>
     </div>
+  );
+}
+
+type ViManpagerProps = Readonly<{
+  title: string;
+  text: string;
+  documentIdentity: string;
+  isActive: boolean;
+  focusVersion: number;
+  onActivate: () => void;
+  onPaneKeyInput: (
+    input: InputCapturePaneKeyInput,
+  ) => InputCapturePaneKeyResult;
+  mobileCtrlPressed: boolean;
+  onToggleMobileCtrl: () => void;
+  onConsumeMobileCtrl: () => void;
+  resolveMobileCtrlInput: (
+    input: InputCapturePaneKeyInput,
+  ) => MobileCtrlInputResolution;
+  onClose?: () => void;
+}>;
+
+function ViManpager({
+  title,
+  text,
+  documentIdentity,
+  isActive,
+  focusVersion,
+  onActivate,
+  onPaneKeyInput,
+  mobileCtrlPressed,
+  onToggleMobileCtrl,
+  onConsumeMobileCtrl,
+  resolveMobileCtrlInput,
+  onClose,
+}: ViManpagerProps): ReactElement {
+  const [buffer, setBuffer] = useState(() =>
+    createVimBuffer({
+      text,
+      mode: VimMode.Normal,
+      capability: VimCapability.ReadOnly,
+    }),
+  );
+
+  useEffect(() => {
+    setBuffer(createVimBuffer({
+      text,
+      mode: VimMode.Normal,
+      capability: VimCapability.ReadOnly,
+    }));
+  }, [documentIdentity, text]);
+
+  const applyBuffer = (next: VimBuffer): void => {
+    if (
+      next.commandEffect.kind === "quit" ||
+      next.commandEffect.kind === "force-quit"
+    ) {
+      onClose?.();
+      return;
+    }
+
+    setBuffer(next);
+  };
+
+  return (
+    <VimEditorPane
+      title={title}
+      buffer={buffer}
+      isActive={isActive}
+      focusVersion={focusVersion}
+      onBufferChange={applyBuffer}
+      onActivate={onActivate}
+      onPaneKeyInput={onPaneKeyInput}
+      mobileCtrlPressed={mobileCtrlPressed}
+      onToggleMobileCtrl={onToggleMobileCtrl}
+      onConsumeMobileCtrl={onConsumeMobileCtrl}
+      resolveMobileCtrlInput={resolveMobileCtrlInput}
+    />
   );
 }
 
@@ -147,18 +232,13 @@ function StandardViewerPane({
   const isRawPager =
     activeViewer.kind === "document" &&
     activeViewer.presentation === "raw-pager";
-  const isViManpager =
-    activeViewer.kind === "document" &&
-    activeViewer.presentation === "vi-manpager";
-  const isTextPager = isRawPager || isViManpager;
   const markdownDocument =
     activeViewer.kind === "document" && activeViewer.presentation === "inline"
       ? activeViewer.document
       : undefined;
   const rawText =
     activeViewer.kind === "document" &&
-    (activeViewer.presentation === "raw-pager" ||
-      activeViewer.presentation === "vi-manpager")
+    activeViewer.presentation === "raw-pager"
       ? activeViewer.document.text
       : "";
   const markdownBlocks = markdownDocument === undefined
@@ -321,7 +401,7 @@ function StandardViewerPane({
     let defaultPrevented = false;
 
     handleViewerPaneKeyInput({
-      input: isTextPager
+      input: isRawPager
         ? {
             kind: "raw-pager",
             key: input.key,
@@ -393,7 +473,7 @@ function StandardViewerPane({
       return;
     }
 
-    if (isTextPager) {
+    if (isRawPager) {
       switch (control) {
         case "escape":
           applyPagerOperation({ kind: "quit" });
@@ -487,60 +567,23 @@ function StandardViewerPane({
     activeViewer.kind === "document" &&
     activeViewer.presentation === "vi-manpager"
   ) {
-    const status = rawPagerStatus(rawPagerState);
-    const position = status.kind === "empty"
-      ? "No lines"
-      : `Line ${status.currentLine}/${status.totalLines}`;
-    const pageLines = rawPagerPageLines(
-      activeViewer.document.text,
-      rawPagerState,
-    );
+    const documentIdentity = `${activeViewer.title}\u0000${activeViewer.document.source.path}`;
 
     return (
-      <section
-        ref={viewerRef}
-        className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary outline-none"
-        tabIndex={0}
-        aria-label={title + " viewer"}
-        onFocus={onActivate}
-        onKeyDown={handleKeyDown}
-        onClick={handleClick}
-      >
-        <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
-          <pre
-            className="min-h-full whitespace-pre-wrap wrap-break-words text-text-bright"
-            aria-label="Current vi manpage"
-          >
-            {pageLines.map((line) => (
-              <span
-                key={line.lineNumber}
-                className={line.isCurrent
-                  ? "block bg-surface-highlight text-text-bright"
-                  : "block"}
-                aria-current={line.isCurrent ? "true" : undefined}
-              >
-                <span className="text-ui-accent" aria-hidden="true">
-                  {line.isCurrent ? "> " : "  "}
-                </span>
-                {line.text}
-              </span>
-            ))}
-          </pre>
-        </div>
-        <ViewerNavigationStatusLine
-          mode="NORMAL"
-          documentIdentity={title}
-          position={position}
-          match=""
-        />
-        <MobilePaneControls
-          ctrlPressed={mobileCtrlPressed}
-          onCtrlToggle={onToggleMobileCtrl}
-          onCtrlConsumed={onConsumeMobileCtrl}
-          onControl={handleMobileControl}
-          onPrefix={triggerPrefix}
-        />
-      </section>
+      <ViManpager
+        title={title}
+        text={activeViewer.document.text}
+        documentIdentity={documentIdentity}
+        isActive={isActive}
+        focusVersion={focusVersion}
+        onActivate={onActivate}
+        onPaneKeyInput={onPaneKeyInput}
+        mobileCtrlPressed={mobileCtrlPressed}
+        onToggleMobileCtrl={onToggleMobileCtrl}
+        onConsumeMobileCtrl={onConsumeMobileCtrl}
+        resolveMobileCtrlInput={resolveMobileCtrlInput}
+        onClose={closeActiveViewer}
+      />
     );
   }
 

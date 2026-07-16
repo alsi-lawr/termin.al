@@ -79,6 +79,21 @@ function commandEffectLabel(buffer: VimBuffer): string | undefined {
   }
 }
 
+function bufferStatusLabel(buffer: VimBuffer): string | undefined {
+  switch (buffer.status.kind) {
+    case "none":
+      return undefined;
+    case "invalid-input":
+      return `Invalid input: ${buffer.status.source}`;
+    case "invalid-search":
+      return `Invalid pattern: ${buffer.status.query}`;
+    case "no-search-match":
+      return `Pattern not found: ${buffer.status.query}`;
+    case "read-only":
+      return `Read-only: ${buffer.status.source}`;
+  }
+}
+
 function moveInsertCursorForMobile(
   buffer: VimBuffer,
   control: Extract<MobilePaneControl, "left" | "right" | "up" | "down">,
@@ -151,6 +166,7 @@ export function VimEditorPane({
   const modeStatusId = useId();
   const modeStatus = vimEditorModeStatus(buffer);
   const commandEffect = commandEffectLabel(buffer);
+  const bufferStatus = bufferStatusLabel(buffer);
 
   useEffect(() => {
     if (isActive) {
@@ -256,7 +272,7 @@ export function VimEditorPane({
   ): void => {
     composing.current = false;
 
-    if (buffer.mode.kind === "command") {
+    if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
       onBufferChange(
         applyVimCommandInput(buffer, {
           kind: "text",
@@ -280,7 +296,17 @@ export function VimEditorPane({
   const handlePaste = (
     event: ClipboardEvent<HTMLTextAreaElement>,
   ): void => {
-    if (buffer.mode.kind !== "command") {
+    if (
+      buffer.capability.kind === "read-only" &&
+      buffer.mode.kind !== "command" &&
+      buffer.mode.kind !== "search"
+    ) {
+      event.preventDefault();
+      onBufferChange(applyNormalVimKey(buffer, { kind: "paste-after" }));
+      return;
+    }
+
+    if (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") {
       return;
     }
 
@@ -329,7 +355,7 @@ export function VimEditorPane({
     });
     const input = mobileCtrlInput.input;
 
-    if (buffer.mode.kind === "command") {
+    if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
       handleVimEditorPaneCommandInput({
         buffer,
         input: {
@@ -389,7 +415,7 @@ export function VimEditorPane({
         onBufferChange(applyNormalVimKey(buffer, { kind: "escape" }));
         return;
       case "tab":
-        if (buffer.mode.kind === "command") {
+        if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
           onBufferChange(
             applyVimCommandInput(buffer, { kind: "text", text: "\t" }),
           );
@@ -465,6 +491,7 @@ export function VimEditorPane({
               ? "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"
               : "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"}
             value={vimBufferText(buffer)}
+            aria-readonly={buffer.capability.kind === "read-only"}
             aria-label={title + " editor text"}
             aria-describedby={modeStatusId}
             autoCapitalize="off"
@@ -481,15 +508,20 @@ export function VimEditorPane({
             onFocus={onActivate}
           />
         </div>
-        {buffer.mode.kind === "command" ? (
+        {buffer.mode.kind === "command" || buffer.mode.kind === "search" ? (
           <div className="mt-2 text-text-bright" role="status" aria-live="polite">
-            {buffer.mode.prompt}
+            {buffer.mode.kind === "command" ? ":" : buffer.mode.prompt}
             {buffer.mode.input}
           </div>
         ) : null}
         {commandEffect === undefined ? null : (
           <div className="mt-2 text-text-muted" role="status" aria-live="polite">
             {commandEffect}
+          </div>
+        )}
+        {bufferStatus === undefined ? null : (
+          <div className="mt-2 text-text-muted" role="status" aria-live="polite">
+            {bufferStatus}
           </div>
         )}
       </div>

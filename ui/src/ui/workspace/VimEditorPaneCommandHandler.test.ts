@@ -62,7 +62,6 @@ test("dispatches keyboard paste through the Vim editor command boundary", () => 
 
     assert.deepEqual(afterPaste.mode, {
       kind: "command",
-      prompt: ":",
       input: "q!",
     });
   }

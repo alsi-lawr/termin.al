@@ -14,7 +14,7 @@ man -P less|vi <command>
 man --pager=less|vi <command>
 .fi
 .SH DESCRIPTION
-Opens the checked section-1 manual for a registered command. Command aliases resolve through the live registry to one canonical manual. The default and explicit less modes use the same less-style raw pager; vi mode uses the same generated text with a highlighted current line and NORMAL status.
+Opens the checked section-1 manual for a registered command. Command aliases resolve through the live registry to one canonical manual. The default and explicit less modes use the same less-style raw pager; vi mode opens the complete generated text in the native read-only Vim surface.
 .SH OPTIONS
 .TP
 .BI "-P " "less|vi"
@@ -31,13 +31,17 @@ or
 .B -Pvi
 are not accepted spellings.
 .SH VIEWER
-Both modes show at most 20 source lines per page. j/k or arrows move one line; PageUp/b moves back; PageDown/Space or Ctrl+f moves forward; g/G jumps to start/end; q or Escape closes. In vi mode the current source line is marked and the status reports NORMAL plus line position. In less mode an inverse prompt reports the page position.
+Less shows at most 20 source lines per page. j/k or arrows move one line; PageUp/b moves back; PageDown/Space or Ctrl+f moves forward; g/G jumps to start/end; q or Escape closes. Its inverse prompt reports the page position.
+.PP
+Vi shows the complete manual with a real caret and NORMAL, visual, command and search status. Counts, document and structural motions, finds, local marks and text objects use the shared Vim behavior. Slash searches forward and question mark searches backward with native regular expressions; n repeats in the original direction, N reverses it, both directions wrap, and gn or gN selects a search match. Search may also be used as an operator motion in editable Vim buffers.
+.PP
+The vi manual is read-only. q, :q and :q! close it. Insert, change, delete, yank, paste, undo, redo, :w and other write-bearing commands are rejected without changing the manual or shell. Escape first cancels a prompt, visual mode or pending command; a subsequent normal-mode Escape closes.
 .PP
 Ctrl+b remains the pane prefix and takes precedence over pager b. Mobile controls expose Esc, up/down and Prefix. Lines wrap to the pane width without horizontal scrolling.
 .SH FAILURES
 Missing or extra operands, unsupported option forms, an empty selector, unsupported pagers and unregistered command names are rejected. A registered command whose generated artifact is absent reports no manual entry.
 .SH NOTES
-All routes consume the same build-generated UTF-8 artifact. Closing returns to the owning shell with its transcript, history and current directory unchanged; pager position is not persisted.
+All routes consume the same build-generated UTF-8 artifact. Closing returns to the owning shell with its transcript, history and current directory unchanged; pager and transient vi state are not persisted.
 .SH EXAMPLES
 .nf
 $ man grep

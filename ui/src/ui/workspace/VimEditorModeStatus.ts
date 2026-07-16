@@ -38,6 +38,8 @@ export function vimEditorModeStatus(buffer: VimBuffer): string {
     case "visual-block":
       return "VISUAL BLOCK" + visualBounds(buffer);
     case "command":
-      return buffer.mode.prompt === ":" ? "COMMAND" : "SEARCH";
+      return "COMMAND";
+    case "search":
+      return "SEARCH";
   }
 }

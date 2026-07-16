@@ -37,11 +37,9 @@ test("accepts an astral search key as complete command input", () => {
   );
   const submitted = applyVimCommandInput(typed, { kind: "submit" });
 
-  assert.deepEqual(typed.mode, {
-    kind: "command",
-    prompt: "/",
-    input: "😀",
-  });
+  assert.equal(typed.mode.kind, "search");
+  assert.equal(typed.mode.kind === "search" ? typed.mode.prompt : "", "/");
+  assert.equal(typed.mode.kind === "search" ? typed.mode.input : "", "😀");
   assert.deepEqual(submitted.cursor, { line: 1, column: 0 });
 });
 
@@ -57,11 +55,11 @@ test("accepts CJK composition text as complete command input", () => {
   });
   const submitted = applyVimCommandInput(composed, { kind: "submit" });
 
-  assert.deepEqual(composed.mode, {
-    kind: "command",
-    prompt: "/",
-    input: "京都",
-  });
+  assert.equal(composed.mode.kind, "search");
+  assert.equal(
+    composed.mode.kind === "search" ? composed.mode.input : "",
+    "京都",
+  );
   assert.deepEqual(submitted.cursor, { line: 1, column: 0 });
 });
 
@@ -76,7 +74,6 @@ test("accepts pasted command text as complete command input", () => {
 
   assert.deepEqual(pasted.mode, {
     kind: "command",
-    prompt: ":",
     input: "q!",
   });
   assert.deepEqual(submitted.commandEffect, { kind: "force-quit" });
@@ -92,7 +89,6 @@ test("applies physical command controls", () => {
 
   assert.deepEqual(backspaced.mode, {
     kind: "command",
-    prompt: ":",
     input: "",
   });
   assert.equal(escaped.mode.kind, "normal");

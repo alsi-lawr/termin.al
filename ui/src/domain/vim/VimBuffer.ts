@@ -40,8 +40,14 @@ export type VimMode =
   | Readonly<{ kind: "visual-block" }>
   | Readonly<{
       kind: "command";
-      prompt: ":" | "/";
       input: string;
+    }>
+  | Readonly<{
+      kind: "search";
+      prompt: "/" | "?";
+      input: string;
+      direction: VimSearchDirection;
+      context: VimCommandContext;
     }>;
 
 export const VimMode: Readonly<{
@@ -75,7 +81,22 @@ export type VimSearch =
   | Readonly<{
       kind: "active";
       query: string;
+      direction: VimSearchDirection;
     }>;
+
+export type VimSearchDirection = "forward" | "backward";
+
+export type VimCapability =
+  | Readonly<{ kind: "editable" }>
+  | Readonly<{ kind: "read-only" }>;
+
+export const VimCapability: Readonly<{
+  Editable: Extract<VimCapability, { kind: "editable" }>;
+  ReadOnly: Extract<VimCapability, { kind: "read-only" }>;
+}> = {
+  Editable: { kind: "editable" },
+  ReadOnly: { kind: "read-only" },
+};
 
 export type VimCommandEffect =
   | Readonly<{ kind: "none" }>
@@ -91,6 +112,18 @@ export type VimStatus =
   | Readonly<{ kind: "none" }>
   | Readonly<{
       kind: "invalid-input";
+      source: string;
+    }>
+  | Readonly<{
+      kind: "invalid-search";
+      query: string;
+    }>
+  | Readonly<{
+      kind: "no-search-match";
+      query: string;
+    }>
+  | Readonly<{
+      kind: "read-only";
       source: string;
     }>;
 
@@ -168,9 +201,16 @@ type VimSnapshot = Readonly<{
   register: VimRegister;
 }>;
 
-type VimCommandContext =
+export type VimCommandContext =
   | Readonly<{ kind: "normal"; count: number }>
-  | Readonly<{ kind: "visual-selection"; count: number }>
+  | Readonly<{
+      kind: "visual-selection";
+      count: number;
+      mode: Extract<
+        VimMode,
+        { kind: "visual-character" | "visual-line" | "visual-block" }
+      >;
+    }>
   | Readonly<{
       kind: "operator";
       operator: VimOperator;
@@ -243,6 +283,7 @@ type VimInsertSession =
   | Readonly<{ kind: "block-change-ended" }>;
 
 export type VimBuffer = Readonly<{
+  capability: VimCapability;
   lines: ReadonlyArray<string>;
   cursor: VimPosition;
   mode: VimMode;
@@ -264,6 +305,7 @@ export type VimBuffer = Readonly<{
 export type CreateVimBufferOptions = Readonly<{
   text: string;
   mode: Extract<VimMode, { kind: "normal" | "insert" }>;
+  capability?: VimCapability;
 }>;
 
 const vimHistoryCapacity = 100;
@@ -290,7 +332,12 @@ function lastCursorColumn(line: string): number {
     : previousUnicodeCursorOffset(line, line.length);
 }
 
-export function isVimVisualMode(mode: VimMode): boolean {
+export function isVimVisualMode(
+  mode: VimMode,
+): mode is Extract<
+  VimMode,
+  { kind: "visual-character" | "visual-line" | "visual-block" }
+> {
   return mode.kind === "visual-character" ||
     mode.kind === "visual-line" ||
     mode.kind === "visual-block";
@@ -544,6 +591,19 @@ function invalidInput(buffer: VimBuffer, source: string): VimBuffer {
   };
 }
 
+function rejectReadOnly(buffer: VimBuffer, source: string): VimBuffer {
+  return {
+    ...buffer,
+    commandEffect: { kind: "none" },
+    pending: { kind: "none" },
+    status: { kind: "read-only", source },
+  };
+}
+
+function isReadOnly(buffer: VimBuffer): boolean {
+  return buffer.capability.kind === "read-only";
+}
+
 function appendSaturatedDecimal(count: number, digit: number): number {
   const maximumPrefix = Math.floor((Number.MAX_SAFE_INTEGER - digit) / 10);
 
@@ -564,7 +624,11 @@ function pendingCount(pending: VimPending): number {
 
 function commandContext(buffer: VimBuffer): VimCommandContext {
   if (isVimVisualMode(buffer.mode)) {
-    return { kind: "visual-selection", count: pendingCount(buffer.pending) };
+    return {
+      kind: "visual-selection",
+      count: pendingCount(buffer.pending),
+      mode: buffer.mode,
+    };
   }
 
   if (buffer.pending.kind === "operator") {
@@ -899,6 +963,10 @@ function operatorSource(operator: VimOperator): "d" | "c" | "y" {
 }
 
 function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
+  if (isReadOnly(buffer)) {
+    return rejectReadOnly(buffer, pendingSource(buffer) + operatorSource(operator));
+  }
+
   if (isVimVisualMode(buffer.mode)) {
     return applyVisualOperator(buffer, operator);
   }
@@ -1288,63 +1356,182 @@ function redo(buffer: VimBuffer): VimBuffer {
   };
 }
 
-function moveToSearchMatch(
-  buffer: VimBuffer,
-  direction: "forward" | "backward",
-): VimBuffer {
-  if (buffer.search.kind !== "active" || buffer.search.query.length === 0) {
-    return resetPending(buffer);
+type VimSearchMatch = Readonly<{
+  start: number;
+  end: number;
+}>;
+
+type VimSearchMatches =
+  | Readonly<{ kind: "matches"; values: ReadonlyArray<VimSearchMatch> }>
+  | Readonly<{ kind: "invalid" }>;
+
+function searchMatches(text: string, query: string): VimSearchMatches {
+  let expression: RegExp;
+
+  try {
+    expression = new RegExp(query, "gmu");
+  } catch (error: unknown) {
+    if (error instanceof SyntaxError) {
+      return { kind: "invalid" };
+    }
+
+    throw error;
   }
 
-  const text = joinLines(buffer.lines);
-  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-  const searchStart =
-    direction === "forward"
-      ? nextUnicodeCursorOffset(text, cursorOffset)
-      : cursorOffset;
-  let index: number;
+  const values: Array<VimSearchMatch> = [];
+  let match = expression.exec(text);
 
+  while (match !== null) {
+    values.push({ start: match.index, end: match.index + match[0].length });
+
+    if (match[0].length === 0) {
+      expression.lastIndex = nextUnicodeCursorOffset(text, expression.lastIndex);
+
+      if (expression.lastIndex === text.length && match.index === text.length) {
+        break;
+      }
+    }
+
+    match = expression.exec(text);
+  }
+
+  return { kind: "matches", values };
+}
+
+function searchMatchFrom(
+  matches: ReadonlyArray<VimSearchMatch>,
+  cursorOffset: number,
+  direction: VimSearchDirection,
+): VimSearchMatch | undefined {
   if (direction === "forward") {
-    index = text.indexOf(buffer.search.query, searchStart);
-  } else if (searchStart === 0) {
-    index = -1;
-  } else {
-    index = text.lastIndexOf(buffer.search.query, searchStart - 1);
+    return matches.find((match) => match.start > cursorOffset) ?? matches[0];
   }
 
-  let wrappedIndex = index;
+  return matches.findLast((match) => match.start < cursorOffset) ?? matches.at(-1);
+}
 
-  if (index === -1) {
-    wrappedIndex =
-      direction === "forward"
-        ? text.indexOf(buffer.search.query)
-        : text.lastIndexOf(buffer.search.query);
+function searchFailure(
+  buffer: VimBuffer,
+  query: string,
+  kind: "invalid-search" | "no-search-match",
+  context: VimCommandContext,
+): VimBuffer {
+  const mode = context.kind === "visual-selection"
+    ? context.mode
+    : VimMode.Normal;
+
+  return {
+    ...buffer,
+    mode,
+    selection: context.kind === "visual-selection"
+      ? buffer.selection
+      : { kind: "none" },
+    pending: { kind: "none" },
+    status: { kind, query },
+  };
+}
+
+function searchMotionRange(
+  cursorOffset: number,
+  targetOffset: number,
+): VimTextRange {
+  return {
+    kind: "character",
+    start: Math.min(cursorOffset, targetOffset),
+    end: Math.max(cursorOffset, targetOffset),
+    inclusivity: "exclusive",
+  };
+}
+
+function applySearchMatch(
+  buffer: VimBuffer,
+  match: VimSearchMatch,
+  context: VimCommandContext,
+): VimBuffer {
+  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
+  const cursor = positionForTextOffset(buffer.lines, match.start, VimMode.Normal);
+
+  if (context.kind === "operator") {
+    return applyOperatorRange(
+      { ...buffer, mode: VimMode.Normal, selection: { kind: "none" } },
+      context.operator,
+      searchMotionRange(cursorOffset, match.start),
+    );
   }
 
-  if (wrappedIndex === -1) {
-    return resetPending(buffer);
+  if (context.kind === "visual-selection") {
+    if (buffer.selection.kind === "none") {
+      throw new Error("Visual search motions require a typed selection.");
+    }
+
+    const extended = extendVimVisualSelection(
+      buffer.lines,
+      buffer.selection,
+      { kind: "motion", cursor },
+    );
+
+    return withTextState(
+      buffer,
+      createTextState(buffer.lines, extended.cursor, context.mode, extended.selection),
+    );
   }
 
   return withTextState(
     buffer,
-    createTextState(
-      buffer.lines,
-      positionForTextOffset(buffer.lines, wrappedIndex, VimMode.Normal),
-      VimMode.Normal,
-      { kind: "none" },
-    ),
+    createTextState(buffer.lines, cursor, VimMode.Normal, { kind: "none" }),
   );
+}
+
+function moveToSearchMatch(
+  buffer: VimBuffer,
+  direction: VimSearchDirection,
+  context: VimCommandContext,
+): VimBuffer {
+  if (buffer.search.kind !== "active" || buffer.search.query.length === 0) {
+    return invalidInput(buffer, direction === "forward" ? "n" : "N");
+  }
+
+  const text = joinLines(buffer.lines);
+  const matches = searchMatches(text, buffer.search.query);
+
+  if (matches.kind === "invalid") {
+    return searchFailure(buffer, buffer.search.query, "invalid-search", context);
+  }
+
+  if (matches.values.length === 0) {
+    return searchFailure(buffer, buffer.search.query, "no-search-match", context);
+  }
+
+  const stepCount = ((context.count - 1) % matches.values.length) + 1;
+  let cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
+  let target: VimSearchMatch | undefined;
+
+  for (let iteration = 0; iteration < stepCount; iteration += 1) {
+    target = searchMatchFrom(matches.values, cursorOffset, direction);
+
+    if (target === undefined) {
+      return searchFailure(buffer, buffer.search.query, "no-search-match", context);
+    }
+
+    cursorOffset = target.start;
+  }
+
+  return target === undefined
+    ? searchFailure(buffer, buffer.search.query, "no-search-match", context)
+    : applySearchMatch(buffer, target, { ...context, count: 1 });
 }
 
 export function createVimBuffer({
   text,
   mode,
+  capability = VimCapability.Editable,
 }: CreateVimBufferOptions): VimBuffer {
   const lines = splitText(text);
   const cursor = { line: 0, column: 0 };
   const state = createTextState(lines, cursor, mode, { kind: "none" });
 
   return {
+    capability,
     ...state,
     undoStack: [],
     redoStack: [],
@@ -1509,6 +1696,10 @@ function continueBlockChange(
 }
 
 export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
+  if (isReadOnly(buffer)) {
+    return rejectReadOnly(buffer, "insert");
+  }
+
   if (buffer.mode.kind !== "insert" || text.length === 0) {
     return buffer;
   }
@@ -1559,6 +1750,10 @@ function deleteVimInsertRange(
 }
 
 export function backspaceVimInsertText(buffer: VimBuffer): VimBuffer {
+  if (isReadOnly(buffer)) {
+    return rejectReadOnly(buffer, "backspace");
+  }
+
   if (buffer.mode.kind !== "insert") {
     return buffer;
   }
@@ -1577,6 +1772,10 @@ export function backspaceVimInsertText(buffer: VimBuffer): VimBuffer {
 }
 
 export function deleteVimInsertText(buffer: VimBuffer): VimBuffer {
+  if (isReadOnly(buffer)) {
+    return rejectReadOnly(buffer, "delete");
+  }
+
   if (buffer.mode.kind !== "insert") {
     return buffer;
   }
@@ -1600,6 +1799,10 @@ export function replaceVimInsertText(
   text: string,
   cursorOffset: number,
 ): VimBuffer {
+  if (isReadOnly(buffer)) {
+    return rejectReadOnly(buffer, "insert");
+  }
+
   if (buffer.mode.kind !== "insert") {
     return buffer;
   }
@@ -1909,6 +2112,16 @@ function applyPrefixContinuation(buffer: VimBuffer, value: string): VimBuffer {
   }
 
   const source = buffer.pending.source + value;
+
+  if (value === "n" || value === "N") {
+    return selectSearchMatch(
+      buffer,
+      value === "n" ? "forward" : "backward",
+      buffer.pending.context,
+      source,
+    );
+  }
+
   let motion: VimMotion;
 
   switch (value) {
@@ -1934,6 +2147,83 @@ function applyPrefixContinuation(buffer: VimBuffer, value: string): VimBuffer {
     buffer.pending.context,
     source,
     buffer.lastFind,
+  );
+}
+
+function searchObjectMatchFrom(
+  matches: ReadonlyArray<VimSearchMatch>,
+  cursorOffset: number,
+  direction: VimSearchDirection,
+): VimSearchMatch | undefined {
+  const containing = matches.find(
+    (match) => match.start <= cursorOffset && cursorOffset < match.end,
+  );
+
+  return containing ?? searchMatchFrom(matches, cursorOffset, direction);
+}
+
+function selectSearchMatch(
+  buffer: VimBuffer,
+  direction: VimSearchDirection,
+  context: VimCommandContext,
+  source: string,
+): VimBuffer {
+  if (buffer.search.kind !== "active" || buffer.search.query.length === 0) {
+    return invalidInput(buffer, source);
+  }
+
+  const text = joinLines(buffer.lines);
+  const matches = searchMatches(text, buffer.search.query);
+
+  if (matches.kind === "invalid") {
+    return searchFailure(
+      buffer,
+      buffer.search.query,
+      "invalid-search",
+      context,
+    );
+  }
+
+  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
+  const match = searchObjectMatchFrom(matches.values, cursorOffset, direction);
+
+  if (match === undefined || match.start === match.end) {
+    return searchFailure(
+      buffer,
+      buffer.search.query,
+      "no-search-match",
+      context,
+    );
+  }
+
+  if (context.kind === "operator") {
+    return applyOperatorRange(
+      buffer,
+      context.operator,
+      {
+        kind: "character",
+        start: match.start,
+        end: match.end,
+        inclusivity: "inclusive",
+      },
+    );
+  }
+
+  const anchor = positionForTextOffset(buffer.lines, match.start, VimMode.Normal);
+  const active = positionForTextOffset(
+    buffer.lines,
+    previousUnicodeCursorOffset(text, match.end),
+    VimMode.Normal,
+  );
+
+  return withTextState(
+    buffer,
+    createTextState(
+      buffer.lines,
+      active,
+      VimMode.VisualCharacter,
+      { kind: "character", anchor, active },
+    ),
   );
 }
 
@@ -2022,6 +2312,13 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     }
 
     return appendCount(buffer, digit);
+  }
+
+  if (
+    isReadOnly(buffer) &&
+    ["d", "c", "y", "x", "p", "P", "u", "i", "a", "I", "A"].includes(value)
+  ) {
+    return rejectReadOnly(buffer, pendingSource(buffer) + value);
   }
 
   switch (value) {
@@ -2139,25 +2436,46 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
         ? invalidInput(buffer, value)
         : {
             ...buffer,
-            mode: { kind: "command", prompt: ":", input: "" },
+            mode: { kind: "command", input: "" },
             selection: { kind: "none" },
             pending: { kind: "none" },
             status: { kind: "none" },
           };
     case "/":
-      return isVimVisualMode(buffer.mode)
-        ? invalidInput(buffer, value)
-        : {
-            ...buffer,
-            mode: { kind: "command", prompt: "/", input: "" },
-            selection: { kind: "none" },
-            pending: { kind: "none" },
-            status: { kind: "none" },
-          };
+    case "?":
+      return {
+        ...buffer,
+        mode: {
+          kind: "search",
+          prompt: value,
+          input: "",
+          direction: value === "/" ? "forward" : "backward",
+          context: commandContext(buffer),
+        },
+        pending: { kind: "none" },
+        status: { kind: "none" },
+      };
     case "n":
-      return moveToSearchMatch(buffer, "forward");
+      return moveToSearchMatch(
+        buffer,
+        buffer.search.kind === "active" ? buffer.search.direction : "forward",
+        commandContext(buffer),
+      );
     case "N":
-      return moveToSearchMatch(buffer, "backward");
+      return moveToSearchMatch(
+        buffer,
+        buffer.search.kind === "active" && buffer.search.direction === "backward"
+          ? "forward"
+          : "backward",
+        commandContext(buffer),
+      );
+    case "q":
+      return isReadOnly(buffer)
+        ? {
+            ...resetPending(buffer),
+            commandEffect: { kind: "quit" },
+          }
+        : invalidInput(buffer, pendingSource(buffer) + value);
     case "i":
       return buffer.pending.kind === "operator" || isVimVisualMode(buffer.mode)
         ? beginTextObject(buffer, false, value)
@@ -2184,14 +2502,29 @@ export function applyNormalVimKey(
   key: VimNormalKey,
 ): VimBuffer {
   if (key.kind === "escape") {
-    return buffer.mode.kind === "insert" ||
+    if (
+      buffer.mode.kind === "insert" ||
       buffer.mode.kind === "command" ||
+      buffer.mode.kind === "search" ||
       isVimVisualMode(buffer.mode)
-      ? enterNormalMode(buffer)
+    ) {
+      return enterNormalMode(buffer);
+    }
+
+    if (buffer.pending.kind !== "none") {
+      return resetPending(buffer);
+    }
+
+    return isReadOnly(buffer)
+      ? { ...resetPending(buffer), commandEffect: { kind: "quit" } }
       : resetPending(buffer);
   }
 
-  if (buffer.mode.kind === "insert" || buffer.mode.kind === "command") {
+  if (
+    buffer.mode.kind === "insert" ||
+    buffer.mode.kind === "command" ||
+    buffer.mode.kind === "search"
+  ) {
     return buffer;
   }
 
@@ -2221,7 +2554,9 @@ export function applyNormalVimKey(
     case "undo":
       return applyLiteral(buffer, "u");
     case "redo":
-      return isVimVisualMode(buffer.mode)
+      return isReadOnly(buffer)
+        ? rejectReadOnly(buffer, "Ctrl+r")
+        : isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + "Ctrl+r")
         : redo(buffer);
     case "enter-visual-character":
@@ -2255,7 +2590,10 @@ export function appendVimCommandInput(
   buffer: VimBuffer,
   text: string,
 ): VimBuffer {
-  if (buffer.mode.kind !== "command" || text.length === 0) {
+  if (
+    (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") ||
+    text.length === 0
+  ) {
     return buffer;
   }
 
@@ -2269,7 +2607,10 @@ export function appendVimCommandInput(
 }
 
 export function backspaceVimCommandInput(buffer: VimBuffer): VimBuffer {
-  if (buffer.mode.kind !== "command" || buffer.mode.input.length === 0) {
+  if (
+    (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") ||
+    buffer.mode.input.length === 0
+  ) {
     return buffer;
   }
 
@@ -2290,6 +2631,13 @@ export function backspaceVimCommandInput(buffer: VimBuffer): VimBuffer {
 export function parseVimCommand(source: string): VimCommandParseResult {
   switch (source.trim()) {
     case "w":
+    case "w!":
+    case "write":
+    case "write!":
+    case "wq":
+    case "wq!":
+    case "x":
+    case "xit":
       return { kind: "recognized", command: { kind: "write" } };
     case "q":
       return { kind: "recognized", command: { kind: "quit" } };
@@ -2301,28 +2649,53 @@ export function parseVimCommand(source: string): VimCommandParseResult {
 }
 
 export function submitVimCommand(buffer: VimBuffer): VimBuffer {
-  if (buffer.mode.kind !== "command") {
+  if (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") {
     return buffer;
   }
 
-  if (buffer.mode.prompt === "/") {
+  if (buffer.mode.kind === "search") {
     if (buffer.mode.input.length === 0) {
       return enterNormalMode(buffer);
+    }
+
+    const query = buffer.mode.input;
+    const direction = buffer.mode.direction;
+    const context = buffer.mode.context;
+    const matches = searchMatches(joinLines(buffer.lines), query);
+
+    if (matches.kind === "invalid") {
+      return searchFailure(buffer, query, "invalid-search", context);
     }
 
     return moveToSearchMatch(
       {
         ...buffer,
-        mode: VimMode.Normal,
-        selection: { kind: "none" },
-        search: { kind: "active", query: buffer.mode.input },
+        mode: context.kind === "visual-selection" ? context.mode : VimMode.Normal,
+        selection: context.kind === "visual-selection"
+          ? buffer.selection
+          : { kind: "none" },
+        search: { kind: "active", query, direction },
         pending: { kind: "none" },
       },
-      "forward",
+      direction,
+      context,
     );
   }
 
   const parsed = parseVimCommand(buffer.mode.input);
+
+  if (
+    isReadOnly(buffer) &&
+    parsed.kind === "recognized" &&
+    parsed.command.kind === "write"
+  ) {
+    return {
+      ...rejectReadOnly(buffer, ":" + buffer.mode.input),
+      mode: VimMode.Normal,
+      selection: { kind: "none" },
+    };
+  }
+
   const commandEffect: VimCommandEffect =
     parsed.kind === "recognized"
       ? parsed.command

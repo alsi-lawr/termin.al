@@ -153,7 +153,7 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.equal(mobileControlsPosition > promptPosition, true);
 });
 
-test("renders vi manpages with a current line, NORMAL status, and mobile controls", async () => {
+test("renders complete vi manpages in the native read-only Vim editor", async () => {
   const text = Array.from(
     { length: 25 },
     (_, index) => `manual line ${index + 1}\n`,
@@ -169,27 +169,31 @@ test("renders vi manpages with a current line, NORMAL status, and mobile control
     statsIdentity: { kind: "uncounted" },
   });
 
-  assert.equal(markup.includes('aria-label="Current vi manpage"'), true);
-  assert.equal(markup.includes('aria-current="true"'), true);
-  assert.equal(markup.includes("bg-surface-highlight"), true);
+  assert.equal(markup.includes('aria-label="ls(1) editor"'), true);
+  assert.equal(markup.includes('aria-label="ls(1) editor text"'), true);
+  assert.equal(markup.includes('aria-readonly="true"'), true);
+  assert.equal(markup.includes("<textarea"), true);
   assert.equal(markup.includes("manual line 1\n"), true);
   assert.equal(markup.includes("manual line 20\n"), true);
-  assert.equal(markup.includes("manual line 21\n"), false);
+  assert.equal(markup.includes("manual line 21\n"), true);
+  assert.equal(markup.includes("manual line 25\n"), true);
+  assert.equal(markup.includes("&gt; manual line"), false);
+  assert.equal(markup.includes('aria-current="true"'), false);
+  assert.equal(markup.includes("bg-surface-highlight"), false);
   assert.equal(markup.includes('aria-label="Less prompt"'), false);
   assert.equal(markup.includes(">NORMAL</span>"), true);
-  assert.equal(markup.includes(">ls(1)</span>"), true);
-  assert.equal(markup.includes(">Line 1/25</span>"), true);
+  assert.equal(markup.includes(">ls(1)</h2>"), true);
+  assert.equal(markup.includes("Line 1/25"), false);
   assert.equal(markup.includes(">Return</button>"), false);
 
-  const statusPosition = markup.indexOf(
-    'aria-label="Viewer navigation status"',
-  );
+  const editorPosition = markup.indexOf('aria-label="ls(1) editor text"');
   const mobileControlsPosition = markup.indexOf(
     'aria-label="Mobile terminal controls"',
   );
 
-  assert.notEqual(statusPosition, -1);
-  assert.equal(mobileControlsPosition > statusPosition, true);
+  assert.equal(markup.includes('aria-label="Viewer navigation status"'), false);
+  assert.notEqual(editorPosition, -1);
+  assert.equal(mobileControlsPosition > editorPosition, true);
 });
 
 test("renders hierarchical collections as terminal rows with explicit touch controls and no viewer page chrome", async () => {

@@ -205,9 +205,9 @@
       "summary": "Show a command manual.",
       "sourcePath": "man/man.1",
       "artifactPath": "ui/src/generated/manpages/man.txt",
-      "byteCount": 2241,
-      "lineCount": 59,
-      "sha256": "62b504ede3d5fe56c55cea8ae5cdccc3e25cdd5409f5a85eb639ae6e5b69e5cd"
+      "byteCount": 2963,
+      "lineCount": 70,
+      "sha256": "7b11aaebacf7f725ec7ad69e6eb2f3a39053f6a3242f2d050f604bd4517f425a"
     },
     {
       "name": "notes",

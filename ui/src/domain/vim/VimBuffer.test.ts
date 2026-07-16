@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  VimCapability,
   VimMode,
   appendVimCommandInput,
   applyNormalVimKey,
   createVimBuffer,
+  backspaceVimInsertText,
+  deleteVimInsertText,
   insertVimText,
   isVimBufferDirty,
   moveVimInsertCursorToTextOffset,
@@ -538,6 +541,190 @@ test("retains command, search, and insert-mode behavior", () => {
   assert.equal(vimBufferCursorOffset(normalized), 1);
   assert.deepEqual(secondLine.cursor, { line: 1, column: 0 });
   assert.equal(vimBufferCursorOffset(secondLine), 4);
+});
+
+test("searches native regular expressions forward and backward with directional repeats and wrapping", () => {
+  const start = createVimBuffer({
+    text: "alpha 1\nbeta\nalpha 22",
+    mode: VimMode.Normal,
+  });
+  const forward = submitVimCommand(
+    appendVimCommandInput(press(start, "/"), String.raw`alpha \d+`),
+  );
+  const forwardWrapped = press(forward, "n");
+  const forwardReversed = press(forwardWrapped, "N");
+  const countedRepeat = press(forward, "3", "n");
+  const backward = submitVimCommand(
+    appendVimCommandInput(press(start, "?"), String.raw`alpha \d+`),
+  );
+  const backwardRepeated = press(backward, "n");
+  const backwardReversed = press(backwardRepeated, "N");
+  const astralStart = createVimBuffer({
+    text: "😀a\n😀β",
+    mode: VimMode.Normal,
+  });
+  const astral = submitVimCommand(
+    appendVimCommandInput(press(astralStart, "/"), "😀."),
+  );
+
+  assert.deepEqual(forward.cursor, { line: 2, column: 0 });
+  assert.deepEqual(forwardWrapped.cursor, { line: 0, column: 0 });
+  assert.deepEqual(forwardReversed.cursor, { line: 2, column: 0 });
+  assert.deepEqual(countedRepeat.cursor, { line: 0, column: 0 });
+  assert.deepEqual(backward.cursor, { line: 2, column: 0 });
+  assert.deepEqual(backwardRepeated.cursor, { line: 0, column: 0 });
+  assert.deepEqual(backwardReversed.cursor, { line: 2, column: 0 });
+  assert.deepEqual(astral.cursor, { line: 1, column: 0 });
+  assert.deepEqual(forward.search, {
+    kind: "active",
+    query: String.raw`alpha \d+`,
+    direction: "forward",
+  });
+  assert.deepEqual(backward.search, {
+    kind: "active",
+    query: String.raw`alpha \d+`,
+    direction: "backward",
+  });
+});
+
+test("reports invalid and unmatched regular expressions without moving or mutating", () => {
+  const start = createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal });
+  const invalid = submitVimCommand(
+    appendVimCommandInput(press(start, "/"), "["),
+  );
+  const missed = submitVimCommand(
+    appendVimCommandInput(press(start, "?"), "gamma"),
+  );
+
+  assert.deepEqual(invalid.status, { kind: "invalid-search", query: "[" });
+  assert.deepEqual(missed.status, {
+    kind: "no-search-match",
+    query: "gamma",
+  });
+  assert.deepEqual(invalid.cursor, start.cursor);
+  assert.deepEqual(missed.cursor, start.cursor);
+  assert.equal(vimBufferText(invalid), vimBufferText(start));
+  assert.equal(vimBufferText(missed), vimBufferText(start));
+  assert.equal(isVimBufferDirty(invalid), false);
+  assert.equal(isVimBufferDirty(missed), false);
+});
+
+test("uses searches as motions and selects search matches with gn and gN", () => {
+  const text = "one 123 two 456 three";
+  const start = createVimBuffer({ text, mode: VimMode.Normal });
+  const deletedToMatch = submitVimCommand(
+    appendVimCommandInput(press(start, "d", "/"), String.raw`\d+`),
+  );
+  const searched = submitVimCommand(
+    appendVimCommandInput(press(start, "/"), String.raw`\d+`),
+  );
+  const beforeSecond = press(searched, "w");
+  const nextMatch = press(beforeSecond, "g", "n");
+  const previousMatch = press(beforeSecond, "g", "N");
+  const deletedMatch = press(beforeSecond, "d", "g", "n");
+
+  assert.equal(vimBufferText(deletedToMatch), "123 two 456 three");
+  assert.deepEqual(deletedToMatch.register, {
+    kind: "character",
+    text: "one ",
+  });
+  assert.equal(nextMatch.mode.kind, "visual-character");
+  assert.deepEqual(nextMatch.cursor, { line: 0, column: 14 });
+  assert.equal(previousMatch.mode.kind, "visual-character");
+  assert.deepEqual(previousMatch.cursor, { line: 0, column: 6 });
+  assert.equal(vimBufferText(deletedMatch), "one 123 two  three");
+  assert.deepEqual(deletedMatch.register, { kind: "character", text: "456" });
+});
+
+test("enforces read-only Vim capability before every editing transition", () => {
+  const start = createVimBuffer({
+    text: "alpha beta\ngamma",
+    mode: VimMode.Normal,
+    capability: VimCapability.ReadOnly,
+  });
+  const editingKeys = ["d", "c", "y", "x", "p", "P", "u", "i", "a", "I", "A"];
+
+  for (const key of editingKeys) {
+    const rejected = press(start, key);
+    assert.equal(vimBufferText(rejected), vimBufferText(start));
+    assert.deepEqual(rejected.cursor, start.cursor);
+    assert.deepEqual(rejected.register, start.register);
+    assert.deepEqual(rejected.undoStack, start.undoStack);
+    assert.deepEqual(rejected.redoStack, start.redoStack);
+    assert.equal(rejected.status.kind, "read-only");
+    assert.equal(isVimBufferDirty(rejected), false);
+  }
+
+  const redo = pressControl(start, "r");
+  const visualDelete = press(press(start, "v"), "d");
+  assert.equal(redo.status.kind, "read-only");
+  assert.equal(visualDelete.status.kind, "read-only");
+  assert.equal(vimBufferText(visualDelete), vimBufferText(start));
+
+  const readonlyInsert = {
+    ...createVimBuffer({ text: "alpha", mode: VimMode.Insert }),
+    capability: VimCapability.ReadOnly,
+  } satisfies VimBuffer;
+  const insertTransitions = [
+    insertVimText(readonlyInsert, "x"),
+    replaceVimInsertText(readonlyInsert, "xalpha", 1),
+    backspaceVimInsertText(readonlyInsert),
+    deleteVimInsertText(readonlyInsert),
+  ];
+
+  for (const rejected of insertTransitions) {
+    assert.equal(vimBufferText(rejected), "alpha");
+    assert.equal(rejected.status.kind, "read-only");
+    assert.equal(isVimBufferDirty(rejected), false);
+  }
+});
+
+test("allows read-only motion marks search and close while rejecting write commands", () => {
+  const start = createVimBuffer({
+    text: "alpha beta\nalpha gamma",
+    mode: VimMode.Normal,
+    capability: VimCapability.ReadOnly,
+  });
+  const marked = press(start, "m", "a", "w", "'", "a");
+  const searched = submitVimCommand(
+    appendVimCommandInput(press(start, "/"), "alpha\\s+gamma"),
+  );
+  const selected = press(searched, "g", "n");
+
+  assert.deepEqual(marked.cursor, { line: 0, column: 0 });
+  assert.deepEqual(searched.cursor, { line: 1, column: 0 });
+  assert.equal(selected.mode.kind, "visual-character");
+  assert.equal(vimBufferText(selected), vimBufferText(start));
+  assert.equal(isVimBufferDirty(selected), false);
+
+  for (const source of ["w", "w!", "write", "wq", "x"]) {
+    const rejected = submitVimCommand(
+      appendVimCommandInput(press(start, ":"), source),
+    );
+    assert.deepEqual(rejected.status, {
+      kind: "read-only",
+      source: ":" + source,
+    });
+    assert.deepEqual(rejected.commandEffect, { kind: "none" });
+    assert.equal(vimBufferText(rejected), vimBufferText(start));
+    assert.equal(isVimBufferDirty(rejected), false);
+  }
+
+  const normalQuit = press(start, "q");
+  const commandQuit = submitVimCommand(
+    appendVimCommandInput(press(start, ":"), "q"),
+  );
+  const forceQuit = submitVimCommand(
+    appendVimCommandInput(press(start, ":"), "q!"),
+  );
+  const pendingEscape = applyNormalVimKey(press(start, "g"), mappedKey("Escape"));
+  const closeEscape = applyNormalVimKey(pendingEscape, mappedKey("Escape"));
+
+  assert.deepEqual(normalQuit.commandEffect, { kind: "quit" });
+  assert.deepEqual(commandQuit.commandEffect, { kind: "quit" });
+  assert.deepEqual(forceQuit.commandEffect, { kind: "force-quit" });
+  assert.deepEqual(pendingEscape.commandEffect, { kind: "none" });
+  assert.deepEqual(closeEscape.commandEffect, { kind: "quit" });
 });
 
 test("keyboard mapping exposes finite parser input and accepted control aliases", () => {
