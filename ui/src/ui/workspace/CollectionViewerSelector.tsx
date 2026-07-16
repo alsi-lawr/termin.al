@@ -20,6 +20,7 @@ import {
   selectedCollectionViewerEntry,
   type CollectionViewerContent,
   type CollectionViewerDocument,
+  type CollectionViewerEntry,
   type SelectedCollectionViewerEntry,
 } from "./CollectionViewerSelectorModel.ts";
 
@@ -119,6 +120,14 @@ function emptyCollectionMessage(viewer: CollectionViewerContent): string {
         ? "No blog posts are published."
         : "No public notes are published.";
   }
+}
+
+function collectionEntryRowMetadata(
+  entry: CollectionViewerEntry,
+): string {
+  return entry.kind === "project"
+    ? entry.repository
+    : entry.publishedAt.slice(0, 10);
 }
 
 export function CollectionViewerSelector({
@@ -237,7 +246,7 @@ export function CollectionViewerSelector({
                 </span>
                 <span className="min-w-0 flex-1 truncate">{entry.title}</span>
                 <span className="shrink-0 text-xs text-text-muted">
-                  {entry.rowMetadata}
+                  {collectionEntryRowMetadata(entry)}
                 </span>
               </li>
             );

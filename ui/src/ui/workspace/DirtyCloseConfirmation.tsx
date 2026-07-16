@@ -25,29 +25,53 @@ function paneLabel(pane: Pane): string {
   }
 }
 
+function focusedDirtyCloseAction(
+  target: EventTarget,
+  cancelButton: HTMLButtonElement | null,
+  confirmButton: HTMLButtonElement | null,
+): "dialog" | "cancel" | "confirm" {
+  if (target === confirmButton) {
+    return "confirm";
+  }
+
+  if (target === cancelButton) {
+    return "cancel";
+  }
+
+  return "dialog";
+}
+
 export function DirtyCloseConfirmation({
   pane,
   onConfirm,
   onCancel,
 }: DirtyCloseConfirmationProps): ReactElement {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
   const confirmRef = useRef<HTMLButtonElement | null>(null);
 
   useLayoutEffect(() => {
-    cancelRef.current?.focus();
+    dialogRef.current?.focus();
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     const result = handleDirtyCloseConfirmationKey({
       key: event.key,
-      focusedAction:
-        event.target === confirmRef.current ? "confirm" : "cancel",
+      focusedAction: focusedDirtyCloseAction(
+        event.target,
+        cancelRef.current,
+        confirmRef.current,
+      ),
     });
 
     switch (result.kind) {
       case "cancel":
         event.preventDefault();
         onCancel();
+        return;
+      case "confirm":
+        event.preventDefault();
+        onConfirm();
         return;
       case "focus-cancel":
         event.preventDefault();
@@ -64,8 +88,10 @@ export function DirtyCloseConfirmation({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-10 grid place-items-center bg-surface-deepest/80 p-4"
       role="alertdialog"
+      tabIndex={-1}
       aria-modal="true"
       aria-labelledby="dirty-pane-close-title"
       aria-describedby="dirty-pane-close-description"
@@ -82,7 +108,7 @@ export function DirtyCloseConfirmation({
           <button
             ref={cancelRef}
             type="button"
-            className="rounded border border-surface-border px-3 py-2"
+            className="rounded border border-surface-border px-3 py-2 md:hidden"
             onClick={onCancel}
           >
             Keep editing
@@ -90,7 +116,7 @@ export function DirtyCloseConfirmation({
           <button
             ref={confirmRef}
             type="button"
-            className="rounded border border-diagnostic-error px-3 py-2 text-diagnostic-error"
+            className="rounded border border-diagnostic-error px-3 py-2 text-diagnostic-error md:hidden"
             onClick={onConfirm}
           >
             Close pane

@@ -25,7 +25,6 @@ export type CollectionViewerEntry =
       kind: "project";
       id: string;
       title: string;
-      rowMetadata: string;
       summary: string;
       tags: ReadonlyArray<string>;
       repository: string;
@@ -36,7 +35,6 @@ export type CollectionViewerEntry =
       kind: "publication";
       id: string;
       title: string;
-      rowMetadata: string;
       summary: string;
       tags: ReadonlyArray<string>;
       publishedAt: string;
@@ -53,7 +51,6 @@ function projectEntry(project: ViewerProjectCard): CollectionViewerEntry {
     kind: "project",
     id: project.id,
     title: project.name,
-    rowMetadata: project.repository,
     summary: project.summary,
     tags: project.tags,
     repository: project.repository,
@@ -70,7 +67,6 @@ function publicationEntry(
     kind: "publication",
     id: entry.id,
     title: entry.title,
-    rowMetadata: entry.publishedAt.slice(0, 10),
     summary: entry.summary,
     tags: entry.tags,
     publishedAt: entry.publishedAt,
@@ -99,10 +95,11 @@ export function collectionSelectorItemsForViewer(
     id: entry.id,
     searchText: [
       entry.title,
-      entry.rowMetadata,
       entry.summary,
       ...entry.tags,
-      ...(entry.kind === "project" ? [entry.repository] : []),
+      entry.kind === "project"
+        ? entry.repository
+        : entry.publishedAt.slice(0, 10),
     ].join("\n"),
   }));
 }

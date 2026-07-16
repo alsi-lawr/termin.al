@@ -17,6 +17,10 @@ export type MarkdownViewerSearchStatus = Readonly<{
   match: string;
 }>;
 
+export type MarkdownViewerSearchInputKeyResult =
+  | Readonly<{ kind: "cancel" }>
+  | Readonly<{ kind: "unhandled" }>;
+
 export function createMarkdownViewerSearch(): MarkdownViewerSearch {
   return { kind: "idle" };
 }
@@ -29,6 +33,12 @@ export function updateMarkdownViewerSearch(
   query: string,
 ): MarkdownViewerSearch {
   return { kind: "editing", query };
+}
+
+export function markdownViewerSearchInputOperationFromKey(
+  key: string,
+): MarkdownViewerSearchInputKeyResult {
+  return key === "Escape" ? { kind: "cancel" } : { kind: "unhandled" };
 }
 
 export function submitMarkdownViewerSearch(

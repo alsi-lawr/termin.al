@@ -35,6 +35,7 @@ import {
   type MarkdownViewerOperation,
 } from "./MarkdownViewerNavigation.ts";
 import { restoreMarkdownViewerFocus } from "./MarkdownViewerFocus.ts";
+import { MarkdownViewerSearchForm } from "./MarkdownViewerSearchForm.tsx";
 import {
   beginMarkdownViewerSearch,
   createMarkdownViewerSearch,
@@ -401,19 +402,6 @@ export function ViewerPane({
     }
   };
 
-  const handleSearchInputKeyDown = (
-    event: KeyboardEvent<HTMLInputElement>,
-  ): void => {
-    event.stopPropagation();
-
-    if (event.key !== "Escape") {
-      return;
-    }
-
-    event.preventDefault();
-    cancelMarkdownSearch();
-  };
-
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (
       event.target instanceof HTMLButtonElement ||
@@ -521,29 +509,20 @@ export function ViewerPane({
     if (collectionViewer !== undefined && openedDocument === undefined) {
       switch (control) {
         case "escape":
-          if (collectionSelector.mode.kind === "filtering") {
-            setCollectionSelector((current) =>
-              leaveCollectionSelectorFilter(current, collectionItems)
-            );
-            restoreViewerFocus();
-            return;
-          }
-
-          closeActiveViewer?.();
+          applyCollectionSelectorOperation(
+            collectionSelector.mode.kind === "filtering"
+              ? { kind: "leave-filter" }
+              : { kind: "return" },
+          );
           return;
         case "up":
-          setCollectionSelector((current) =>
-            moveCollectionSelectorSelection(
-              current,
-              collectionItems,
-              "previous",
-            )
-          );
+          applyCollectionSelectorOperation({
+            kind: "move",
+            motion: "previous",
+          });
           return;
         case "down":
-          setCollectionSelector((current) =>
-            moveCollectionSelectorSelection(current, collectionItems, "next")
-          );
+          applyCollectionSelectorOperation({ kind: "move", motion: "next" });
           return;
         case "tab":
         case "left":
@@ -630,35 +609,15 @@ export function ViewerPane({
         return (
           <>
             {markdownSearch.kind === "editing" ? (
-              <form
-                className="mt-3 flex items-center gap-2"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  submitMarkdownSearch();
+              <MarkdownViewerSearchForm
+                inputRef={searchInputRef}
+                query={markdownSearch.query}
+                onQueryChange={(query) => {
+                  setMarkdownSearch(updateMarkdownViewerSearch(query));
                 }}
-              >
-                <label className="text-text-muted" htmlFor="markdown-search">
-                  /
-                </label>
-                <input
-                  ref={searchInputRef}
-                  id="markdown-search"
-                  type="search"
-                  value={markdownSearch.query}
-                  className="min-w-0 flex-1 rounded border border-surface-border bg-surface-deepest px-2 py-1 text-text-primary outline-none focus:border-ui-focus"
-                  aria-label="Search Markdown"
-                  onChange={(event) => {
-                    setMarkdownSearch(updateMarkdownViewerSearch(event.target.value));
-                  }}
-                  onKeyDown={handleSearchInputKeyDown}
-                />
-                <button
-                  type="submit"
-                  className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent"
-                >
-                  Find
-                </button>
-              </form>
+                onSubmit={submitMarkdownSearch}
+                onCancel={cancelMarkdownSearch}
+              />
             ) : null}
             <MarkdownRenderer
               document={activeViewer.document}
@@ -714,7 +673,7 @@ export function ViewerPane({
           {closeActiveViewer === undefined ? null : (
             <button
               type="button"
-              className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent"
+              className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent md:hidden"
               onClick={closeActiveViewer}
             >
               {openedDocument === undefined ? "Return" : "Back"}

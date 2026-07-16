@@ -109,6 +109,35 @@ test("closes ordinary viewers with unmodified quit keys", () => {
   }
 });
 
+test("preserves native Tab and modified viewer return keys", () => {
+  const inputs = [
+    { key: "Tab", ctrlKey: false, metaKey: false },
+    { key: "q", ctrlKey: true, metaKey: false },
+    { key: "Escape", ctrlKey: false, metaKey: true },
+  ];
+
+  for (const input of inputs) {
+    let closeCount = 0;
+    let defaultPreventionCount = 0;
+
+    handleViewerPaneKeyInput({
+      input: { kind: "viewer", ...input },
+      onPaneKeyInput: () => ({ kind: "unhandled" }),
+      onViewerKeyInput: () => ({ kind: "unhandled" }),
+      onClose: () => {
+        closeCount += 1;
+      },
+      onPagerOperation: () => undefined,
+      preventDefault: () => {
+        defaultPreventionCount += 1;
+      },
+    });
+
+    assert.equal(closeCount, 0);
+    assert.equal(defaultPreventionCount, 0);
+  }
+});
+
 test("prevents native find and pages a raw viewer forward on Ctrl+f", () => {
   const pagerOperations: Array<string> = [];
   let defaultPreventionCount = 0;

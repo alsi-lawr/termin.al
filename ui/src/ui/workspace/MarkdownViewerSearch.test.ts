@@ -4,6 +4,7 @@ import {
   beginMarkdownViewerSearch,
   createMarkdownViewerSearch,
   cycleMarkdownViewerSearch,
+  markdownViewerSearchInputOperationFromKey,
   markdownViewerSearchStatus,
   submitMarkdownViewerSearch,
   updateMarkdownViewerSearch,
@@ -61,4 +62,13 @@ test("reports no matches and treats an empty submission as normal mode", () => {
     match: "No matches for missing",
   });
   assert.deepEqual(empty.search, { kind: "idle" });
+});
+
+test("cancels search with Escape and leaves Enter to native form submission", () => {
+  assert.deepEqual(markdownViewerSearchInputOperationFromKey("Escape"), {
+    kind: "cancel",
+  });
+  assert.deepEqual(markdownViewerSearchInputOperationFromKey("Enter"), {
+    kind: "unhandled",
+  });
 });
