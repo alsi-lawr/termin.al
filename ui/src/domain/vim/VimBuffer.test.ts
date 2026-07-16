@@ -17,6 +17,7 @@ import {
   type VimNormalKey,
   type VimRegister,
 } from "./VimBuffer.ts";
+import { vimVisualRange } from "./VimVisualSelection.ts";
 
 function mappedKey(
   key: string,
@@ -1232,7 +1233,7 @@ test("keeps adversarial delimiter and malformed-comment object scans bounded", (
   assert.deepEqual(mismatchedTag.status, { kind: "none" });
 });
 
-test("keeps structural visual movement linewise and defers characterwise object adoption", () => {
+test("keeps structural visual movement and adopts shared characterwise objects", () => {
   const selected = press(
     createVimBuffer({ text: "One.  Two\n\nThree", mode: VimMode.Normal }),
     "V", ")",
@@ -1249,4 +1250,258 @@ test("keeps structural visual movement linewise and defers characterwise object 
     "i", "w",
   );
   assert.equal(objectOutsideOperator.mode.kind, "insert");
+});
+
+test("enters, switches, reverses, and cancels each typed visual mode", () => {
+  const start = press(
+    createVimBuffer({ text: "abcd\nefgh", mode: VimMode.Normal }),
+    "l",
+  );
+  const character = press(start, "v", "l", "j");
+  const line = press(character, "V");
+  const block = pressControl(line, "v");
+  const reversed = press(block, "h", "k");
+  const cancelled = pressControl(reversed, "v");
+
+  assert.equal(character.mode.kind, "visual-character");
+  assert.deepEqual(character.selection, {
+    kind: "character",
+    anchor: { line: 0, column: 1 },
+    active: { line: 1, column: 2 },
+  });
+  assert.equal(line.mode.kind, "visual-line");
+  assert.deepEqual(line.selection, {
+    kind: "line",
+    anchorLine: 0,
+    activeLine: 1,
+  });
+  assert.equal(block.mode.kind, "visual-block");
+  assert.deepEqual(reversed.selection, {
+    kind: "block",
+    anchor: { line: 0, column: 2 },
+    active: { line: 0, column: 1 },
+  });
+  assert.deepEqual(vimVisualRange(reversed.lines, reversed.selection), {
+    kind: "block",
+    startLine: 0,
+    endLine: 0,
+    startColumn: 1,
+    endColumn: 3,
+  });
+  assert.equal(cancelled.mode.kind, "normal");
+  assert.deepEqual(cancelled.selection, { kind: "none" });
+});
+
+test("applies exact character visual delete change and yank", () => {
+  const character = press(
+    createVimBuffer({ text: "alpha beta", mode: VimMode.Normal }),
+    "v", "e",
+  );
+  const yanked = press(character, "y");
+  const deleted = press(character, "d");
+  const changed = insertVimText(press(character, "c"), "X");
+
+  assert.deepEqual(yanked.register, { kind: "character", text: "alpha" });
+  assert.equal(vimBufferText(yanked), "alpha beta");
+  assert.equal(yanked.mode.kind, "normal");
+  assert.equal(vimBufferText(deleted), " beta");
+  assert.equal(vimBufferText(changed), "X beta");
+});
+
+test("extends shared text objects in character, line, and block visual modes", () => {
+  const start = press(
+    createVimBuffer({ text: "one two\nthree", mode: VimMode.Normal }),
+    "l", "l", "l", "l",
+  );
+  const character = press(start, "v", "i", "w");
+  const line = press(start, "V", "i", "w");
+  const block = pressControl(start, "v");
+  const blockObject = press(block, "i", "w");
+
+  assert.deepEqual(vimVisualRange(character.lines, character.selection), {
+    kind: "character",
+    start: 4,
+    end: 7,
+  });
+  assert.deepEqual(vimVisualRange(line.lines, line.selection), {
+    kind: "line",
+    startLine: 0,
+    endLine: 0,
+  });
+  assert.deepEqual(vimVisualRange(blockObject.lines, blockObject.selection), {
+    kind: "block",
+    startLine: 0,
+    endLine: 0,
+    startColumn: 4,
+    endColumn: 7,
+  });
+});
+
+test("stores rectangular fragments and applies block yank and delete exactly", () => {
+  const start = press(
+    createVimBuffer({ text: "abcd\nx\nabcdef", mode: VimMode.Normal }),
+    "l",
+  );
+  const selected = press(pressControl(start, "v"), "l", "j", "j");
+  const yanked = press(selected, "y");
+  const deleted = press(selected, "d");
+
+  assert.deepEqual(yanked.register, {
+    kind: "block",
+    fragments: ["bc", "", "bc"],
+    width: 2,
+  });
+  assert.equal(vimBufferText(yanked), "abcd\nx\nabcdef");
+  assert.deepEqual(yanked.cursor, { line: 0, column: 1 });
+  assert.equal(vimBufferText(deleted), "ad\nx\nadef");
+  assert.deepEqual(deleted.cursor, { line: 0, column: 1 });
+  assert.equal(deleted.undoStack.length, 1);
+  assert.equal(isVimBufferDirty(yanked), false);
+  assert.equal(isVimBufferDirty(deleted), true);
+
+  const virtual = press(
+    pressControl(
+      press(
+        createVimBuffer({ text: "abcdef\nx\nabcdefgh", mode: VimMode.Normal }),
+        "l", "l", "l",
+      ),
+      "v",
+    ),
+    "l", "j", "j", "y",
+  );
+
+  assert.deepEqual(virtual.register, {
+    kind: "block",
+    fragments: ["de", "  ", "de"],
+    width: 2,
+  });
+  const marked = {
+    ...selected,
+    marks: [
+      { name: "a", position: { line: 1, column: 0 } },
+      { name: "b", position: { line: 2, column: 4 } },
+      { name: "c", position: { line: 0, column: 1 } },
+    ],
+  } satisfies VimBuffer;
+  const markedDeleted = press(marked, "d");
+  const markedUndone = applyNormalVimKey(markedDeleted, { kind: "undo" });
+
+  assert.deepEqual(markedDeleted.marks, [
+    { name: "a", position: { line: 1, column: 0 } },
+    { name: "b", position: { line: 2, column: 2 } },
+  ]);
+  assert.deepEqual(markedUndone.marks, marked.marks);
+  assert.deepEqual(pressControl(markedUndone, "r").marks, markedDeleted.marks);
+});
+
+test("replicates block change and keeps deletion plus insertion in one undo step", () => {
+  const start = press(
+    createVimBuffer({ text: "abcd\nx\nabcdef", mode: VimMode.Normal }),
+    "l",
+  );
+  const selected = press(pressControl(start, "v"), "l", "j", "j");
+  const changing = press(selected, "c");
+  const inserted = insertVimText(changing, "Z");
+  const escaped = applyNormalVimKey(inserted, { kind: "escape" });
+  const undone = applyNormalVimKey(escaped, { kind: "undo" });
+  const redone = pressControl(undone, "r");
+
+  assert.equal(vimBufferText(inserted), "aZd\nxZ\naZdef");
+  assert.equal(inserted.undoStack.length, 1);
+  assert.deepEqual(escaped.cursor, { line: 0, column: 1 });
+  assert.equal(vimBufferText(undone), "abcd\nx\nabcdef");
+  assert.deepEqual(undone.register, { kind: "empty" });
+  assert.equal(vimBufferText(redone), "aZd\nxZ\naZdef");
+
+  const lateColumn = press(
+    pressControl(
+      press(
+        createVimBuffer({ text: "abcdef\nx\nabcdefgh", mode: VimMode.Normal }),
+        "l", "l", "l",
+      ),
+      "v",
+    ),
+    "l", "j", "j", "c",
+  );
+  assert.equal(vimBufferText(insertVimText(lateColumn, "Z")), "abcZf\nx\nabcZfgh");
+
+  const multiline = insertVimText(insertVimText(changing, "Q"), "\nR");
+  const continued = insertVimText(multiline, "S");
+  const multilineNormal = applyNormalVimKey(continued, { kind: "escape" });
+  const multilineUndo = applyNormalVimKey(multilineNormal, { kind: "undo" });
+
+  assert.equal(vimBufferText(continued), "aQ\nRSd\nx\nadef");
+  assert.equal(continued.undoStack.length, 1);
+  assert.equal(vimBufferText(multilineUndo), "abcd\nx\nabcdef");
+});
+
+test("pastes block registers before, after, across short lines, and beyond EOF", () => {
+  const source = press(
+    pressControl(
+      press(
+        createVimBuffer({ text: "abcd\nefgh", mode: VimMode.Normal }),
+        "l",
+      ),
+      "v",
+    ),
+    "l", "j", "y",
+  );
+  const destination = createVimBuffer({
+    text: "abcd\nefgh",
+    mode: VimMode.Normal,
+  });
+  const after = press(
+    { ...press(destination, "l", "l", "l"), register: source.register },
+    "p",
+  );
+  const before = press(
+    { ...press(destination, "l", "l", "l"), register: source.register },
+    "P",
+  );
+  const eof = press(
+    { ...press(destination, "j", "l", "l", "l"), register: source.register },
+    "p",
+  );
+  const short = press(
+    {
+      ...createVimBuffer({ text: "x\n", mode: VimMode.Normal }),
+      register: source.register,
+    },
+    "p",
+  );
+
+  assert.equal(vimBufferText(after), "abcdbc\nefghfg");
+  assert.deepEqual(after.cursor, { line: 0, column: 4 });
+  assert.equal(vimBufferText(before), "abcbcd\nefgfgh");
+  assert.deepEqual(before.cursor, { line: 0, column: 3 });
+  assert.equal(vimBufferText(eof), "abcd\nefghbc\n    fg");
+  assert.equal(vimBufferText(short), "xbc\n fg");
+  assert.equal(after.undoStack.length, 1);
+  assert.equal(vimBufferText(applyNormalVimKey(after, { kind: "undo" })), "abcd\nefgh");
+});
+
+test("keeps block columns surrogate-safe and repeats padded block puts by count", () => {
+  const selected = press(
+    pressControl(
+      press(
+        createVimBuffer({ text: "a😀b\na😀c", mode: VimMode.Normal }),
+        "l",
+      ),
+      "v",
+    ),
+    "j", "y",
+  );
+  const target = {
+    ...createVimBuffer({ text: "x\ny", mode: VimMode.Normal }),
+    register: selected.register,
+  };
+  const pasted = press(target, "2", "p");
+
+  assert.deepEqual(selected.register, {
+    kind: "block",
+    fragments: ["😀", "😀"],
+    width: 2,
+  });
+  assert.equal(vimBufferText(pasted), "x😀😀\ny😀😀");
+  assert.deepEqual(pasted.cursor, { line: 0, column: 1 });
 });

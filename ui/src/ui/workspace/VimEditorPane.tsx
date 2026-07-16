@@ -10,10 +10,12 @@ import {
   type KeyboardEvent,
   type ReactElement,
   type SyntheticEvent,
+  type UIEvent,
 } from "react";
 import {
   applyNormalVimKey,
   insertVimText,
+  isVimVisualMode,
   moveVimInsertCursor,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
@@ -22,6 +24,8 @@ import {
   vimBufferText,
   type VimBuffer,
 } from "../../domain/vim/VimBuffer.ts";
+import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
+import { vimLineStartOffset } from "../../domain/vim/VimMotion.ts";
 import {
   applyVimCommandInput,
 } from "./VimCommandInput.ts";
@@ -40,6 +44,7 @@ import {
 } from "./MobilePaneControls";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { vimEditorModeStatus } from "./VimEditorModeStatus.ts";
+import { VimEditorBlockSelectionMirror } from "./VimEditorBlockSelectionMirror.tsx";
 
 type VimEditorPaneProps = Readonly<{
   title: string;
@@ -141,9 +146,10 @@ export function VimEditorPane({
   resolveMobileCtrlInput,
 }: VimEditorPaneProps): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const mirrorRef = useRef<HTMLDivElement | null>(null);
   const composing = useRef(false);
   const modeStatusId = useId();
-  const modeStatus = vimEditorModeStatus(buffer.mode);
+  const modeStatus = vimEditorModeStatus(buffer);
   const commandEffect = commandEffectLabel(buffer);
 
   useEffect(() => {
@@ -160,8 +166,59 @@ export function VimEditorPane({
     }
 
     const cursor = vimBufferCursorOffset(buffer);
-    input.setSelectionRange(cursor, cursor);
+
+    if (buffer.mode.kind === "visual-character") {
+      const range = vimVisualRange(buffer.lines, buffer.selection);
+
+      if (range.kind !== "character") {
+        throw new Error("Character visual mode requires a character range.");
+      }
+
+      const direction = buffer.selection.kind === "character" &&
+          (buffer.selection.active.line < buffer.selection.anchor.line ||
+            (buffer.selection.active.line === buffer.selection.anchor.line &&
+              buffer.selection.active.column < buffer.selection.anchor.column))
+        ? "backward"
+        : "forward";
+      input.setSelectionRange(range.start, range.end, direction);
+    } else if (buffer.mode.kind === "visual-line") {
+      const range = vimVisualRange(buffer.lines, buffer.selection);
+
+      if (range.kind !== "line") {
+        throw new Error("Line visual mode requires a line range.");
+      }
+
+      const start = vimLineStartOffset(buffer.lines, range.startLine);
+      const end = range.endLine === buffer.lines.length - 1
+        ? vimBufferText(buffer).length
+        : vimLineStartOffset(buffer.lines, range.endLine + 1);
+      const direction = buffer.selection.kind === "line" &&
+          buffer.selection.activeLine < buffer.selection.anchorLine
+        ? "backward"
+        : "forward";
+      input.setSelectionRange(start, end, direction);
+    } else {
+      input.setSelectionRange(cursor, cursor);
+    }
+
+    const mirror = mirrorRef.current;
+
+    if (mirror !== null) {
+      mirror.scrollTop = input.scrollTop;
+      mirror.scrollLeft = input.scrollLeft;
+    }
   }, [buffer]);
+
+  const handleScroll = (event: UIEvent<HTMLTextAreaElement>): void => {
+    const mirror = mirrorRef.current;
+
+    if (mirror === null) {
+      return;
+    }
+
+    mirror.scrollTop = event.currentTarget.scrollTop;
+    mirror.scrollLeft = event.currentTarget.scrollLeft;
+  };
 
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     if (buffer.mode.kind !== "insert") {
@@ -297,7 +354,7 @@ export function VimEditorPane({
       return;
     }
 
-    if (buffer.mode.kind === "normal" || buffer.mode.kind === "visual") {
+    if (buffer.mode.kind === "normal" || isVimVisualMode(buffer.mode)) {
       handleNormalKey(event, input);
       return;
     }
@@ -350,7 +407,7 @@ export function VimEditorPane({
           return;
         }
 
-        if (buffer.mode.kind === "normal" || buffer.mode.kind === "visual") {
+        if (buffer.mode.kind === "normal" || isVimVisualMode(buffer.mode)) {
           const key = normalVimKeyFromKeyboard(
             {
               left: "ArrowLeft",
@@ -395,24 +452,35 @@ export function VimEditorPane({
             {modeStatus}
           </span>
         </div>
-        <textarea
-          ref={inputRef}
-          className="min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 text-text-primary outline-none focus:border-ui-focus"
-          value={vimBufferText(buffer)}
-          aria-label={title + " editor text"}
-          aria-describedby={modeStatusId}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-          onBeforeInput={handleBeforeInput}
-          onChange={handleChange}
-          onSelect={handleSelect}
-          onCompositionStart={handleCompositionStart}
-          onCompositionEnd={handleCompositionEnd}
-          onPaste={handlePaste}
-          onKeyDown={handleKeyDown}
-          onFocus={onActivate}
-        />
+        <div className="relative flex min-h-0 flex-1">
+          {buffer.mode.kind === "visual-block" ? (
+            <VimEditorBlockSelectionMirror
+              buffer={buffer}
+              mirrorRef={mirrorRef}
+            />
+          ) : null}
+          <textarea
+            ref={inputRef}
+            className={buffer.mode.kind === "visual-block"
+              ? "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"
+              : "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"}
+            value={vimBufferText(buffer)}
+            aria-label={title + " editor text"}
+            aria-describedby={modeStatusId}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            onBeforeInput={handleBeforeInput}
+            onChange={handleChange}
+            onSelect={handleSelect}
+            onCompositionStart={handleCompositionStart}
+            onCompositionEnd={handleCompositionEnd}
+            onPaste={handlePaste}
+            onKeyDown={handleKeyDown}
+            onScroll={handleScroll}
+            onFocus={onActivate}
+          />
+        </div>
         {buffer.mode.kind === "command" ? (
           <div className="mt-2 text-text-bright" role="status" aria-live="polite">
             {buffer.mode.prompt}

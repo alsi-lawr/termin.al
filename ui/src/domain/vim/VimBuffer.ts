@@ -16,18 +16,28 @@ import {
   type VimMotionRequest,
   type VimTextObject,
 } from "./VimMotion.ts";
+import {
+  deleteVimBlock,
+  editVimBlockChange,
+  extendVimVisualSelection,
+  putVimBlock,
+  vimBlockRegister,
+  vimVisualRange,
+  type VimBlockChange,
+  type VimBlockRegister,
+  type VimPosition,
+  type VimSelection,
+  type VimVisualRange,
+} from "./VimVisualSelection.ts";
 
 export type { VimMotion } from "./VimMotion.ts";
-
-export type VimPosition = Readonly<{
-  line: number;
-  column: number;
-}>;
 
 export type VimMode =
   | Readonly<{ kind: "normal" }>
   | Readonly<{ kind: "insert" }>
-  | Readonly<{ kind: "visual" }>
+  | Readonly<{ kind: "visual-character" }>
+  | Readonly<{ kind: "visual-line" }>
+  | Readonly<{ kind: "visual-block" }>
   | Readonly<{
       kind: "command";
       prompt: ":" | "/";
@@ -37,20 +47,16 @@ export type VimMode =
 export const VimMode: Readonly<{
   Normal: Extract<VimMode, { kind: "normal" }>;
   Insert: Extract<VimMode, { kind: "insert" }>;
-  Visual: Extract<VimMode, { kind: "visual" }>;
+  VisualCharacter: Extract<VimMode, { kind: "visual-character" }>;
+  VisualLine: Extract<VimMode, { kind: "visual-line" }>;
+  VisualBlock: Extract<VimMode, { kind: "visual-block" }>;
 }> = {
   Normal: { kind: "normal" },
   Insert: { kind: "insert" },
-  Visual: { kind: "visual" },
+  VisualCharacter: { kind: "visual-character" },
+  VisualLine: { kind: "visual-line" },
+  VisualBlock: { kind: "visual-block" },
 };
-
-export type VimSelection =
-  | Readonly<{ kind: "none" }>
-  | Readonly<{
-      kind: "line";
-      anchorLine: number;
-      activeLine: number;
-    }>;
 
 export type VimRegister =
   | Readonly<{ kind: "empty" }>
@@ -61,7 +67,8 @@ export type VimRegister =
   | Readonly<{
       kind: "line";
       lines: ReadonlyArray<string>;
-    }>;
+    }>
+  | VimBlockRegister;
 
 export type VimSearch =
   | Readonly<{ kind: "none" }>
@@ -117,7 +124,9 @@ export type VimNormalKey =
   | Readonly<{ kind: "paste-before" }>
   | Readonly<{ kind: "undo" }>
   | Readonly<{ kind: "redo" }>
+  | Readonly<{ kind: "enter-visual-character" }>
   | Readonly<{ kind: "enter-visual-line" }>
+  | Readonly<{ kind: "enter-visual-block" }>
   | Readonly<{ kind: "enter-command" }>
   | Readonly<{ kind: "enter-search" }>
   | Readonly<{ kind: "search-next" }>
@@ -156,10 +165,12 @@ type VimSnapshot = Readonly<{
   mode: VimMode;
   selection: VimSelection;
   marks: ReadonlyArray<VimMark>;
+  register: VimRegister;
 }>;
 
 type VimCommandContext =
   | Readonly<{ kind: "normal"; count: number }>
+  | Readonly<{ kind: "visual-selection"; count: number }>
   | Readonly<{
       kind: "operator";
       operator: VimOperator;
@@ -209,7 +220,7 @@ type VimPending =
     }>
   | Readonly<{
       kind: "text-object";
-      context: Extract<VimCommandContext, { kind: "operator" }>;
+      context: Extract<VimCommandContext, { kind: "operator" | "visual-selection" }>;
       around: boolean;
       source: string;
     }>;
@@ -222,6 +233,14 @@ type VimTextState = Readonly<{
 }>;
 
 type VimTextRange = VimMotionRange;
+
+type VimInsertSession =
+  | Readonly<{ kind: "ordinary" }>
+  | Readonly<{
+      kind: "block-change";
+      change: VimBlockChange;
+    }>
+  | Readonly<{ kind: "block-change-ended" }>;
 
 export type VimBuffer = Readonly<{
   lines: ReadonlyArray<string>;
@@ -239,6 +258,7 @@ export type VimBuffer = Readonly<{
   goalColumn: VimGoalColumn;
   lastFind: VimLastFind;
   marks: ReadonlyArray<VimMark>;
+  insertSession: VimInsertSession;
 }>;
 
 export type CreateVimBufferOptions = Readonly<{
@@ -268,6 +288,12 @@ function lastCursorColumn(line: string): number {
   return line.length === 0
     ? 0
     : previousUnicodeCursorOffset(line, line.length);
+}
+
+export function isVimVisualMode(mode: VimMode): boolean {
+  return mode.kind === "visual-character" ||
+    mode.kind === "visual-line" ||
+    mode.kind === "visual-block";
 }
 
 function normalisePosition(
@@ -301,22 +327,6 @@ function normalisePosition(
   };
 }
 
-function normaliseSelection(
-  lines: ReadonlyArray<string>,
-  mode: VimMode,
-  selection: VimSelection,
-): VimSelection {
-  if (mode.kind !== "visual" || selection.kind !== "line") {
-    return { kind: "none" };
-  }
-
-  return {
-    kind: "line",
-    anchorLine: clampLine(lines, selection.anchorLine),
-    activeLine: clampLine(lines, selection.activeLine),
-  };
-}
-
 function createTextState(
   lines: ReadonlyArray<string>,
   cursor: VimPosition,
@@ -330,7 +340,7 @@ function createTextState(
     lines: safeLines,
     cursor: safeCursor,
     mode,
-    selection: normaliseSelection(safeLines, mode, selection),
+    selection,
   };
 }
 
@@ -341,6 +351,7 @@ function snapshot(buffer: VimBuffer): VimSnapshot {
     mode: buffer.mode,
     selection: buffer.selection,
     marks: buffer.marks,
+    register: buffer.register,
   };
 }
 
@@ -381,27 +392,32 @@ function editInterval(oldText: string, newText: string): VimEditInterval {
 function adjustMarks(
   buffer: VimBuffer,
   lines: ReadonlyArray<string>,
-  interval: VimEditInterval,
+  intervals: ReadonlyArray<VimEditInterval>,
 ): ReadonlyArray<VimMark> {
   const newText = joinLines(lines);
-  const delta = interval.newEnd - interval.oldEnd;
   const adjusted: Array<VimMark> = [];
 
   for (const mark of buffer.marks) {
     const offset = textOffsetForPosition(buffer.lines, mark.position);
     let nextOffset = offset;
+    let removed = false;
 
-    if (interval.oldStart === interval.oldEnd) {
-      if (offset >= interval.oldStart) {
+    for (const interval of intervals) {
+      const delta = interval.newEnd - interval.oldEnd;
+
+      if (interval.oldStart === interval.oldEnd) {
+        if (offset >= interval.oldStart) {
+          nextOffset += delta;
+        }
+      } else if (offset >= interval.oldStart && offset < interval.oldEnd) {
+        removed = true;
+        break;
+      } else if (offset >= interval.oldEnd) {
         nextOffset += delta;
       }
-    } else if (offset >= interval.oldStart && offset < interval.oldEnd) {
-      continue;
-    } else if (offset >= interval.oldEnd) {
-      nextOffset += delta;
     }
 
-    if (nextOffset < 0 || nextOffset > newText.length) {
+    if (removed || nextOffset < 0 || nextOffset > newText.length) {
       continue;
     }
 
@@ -412,6 +428,47 @@ function adjustMarks(
   }
 
   return adjusted;
+}
+
+function lineEditIntervals(
+  buffer: VimBuffer,
+  lines: ReadonlyArray<string>,
+  startLine: number,
+  endLine: number,
+): ReadonlyArray<VimEditInterval> {
+  const intervals: Array<VimEditInterval> = [];
+
+  for (let line = startLine; line <= endLine; line += 1) {
+    const oldText = lineAt(buffer.lines, line);
+    const newText = lineAt(lines, line);
+
+    if (oldText === newText) {
+      continue;
+    }
+
+    const local = editInterval(oldText, newText);
+    const offset = lineStartOffset(buffer.lines, line);
+    intervals.push({
+      oldStart: offset + local.oldStart,
+      oldEnd: offset + local.oldEnd,
+      newEnd: offset + local.newEnd,
+    });
+  }
+
+  return intervals;
+}
+
+function adjustLineMarks(
+  buffer: VimBuffer,
+  lines: ReadonlyArray<string>,
+  startLine: number,
+  endLine: number,
+): ReadonlyArray<VimMark> {
+  return adjustMarks(
+    buffer,
+    lines,
+    lineEditIntervals(buffer, lines, startLine, endLine),
+  );
 }
 
 function textStateMatches(
@@ -454,7 +511,7 @@ function commitEdit(
   register: VimRegister,
   interval: VimEditInterval,
 ): VimBuffer {
-  if (textStateMatches(buffer, next) && buffer.register.kind === register.kind) {
+  if (textStateMatches(buffer, next) && buffer.register === register) {
     return resetPending(buffer);
   }
 
@@ -466,7 +523,7 @@ function commitEdit(
     ),
     redoStack: [],
     register,
-    marks: adjustMarks(buffer, next.lines, interval),
+    marks: adjustMarks(buffer, next.lines, [interval]),
     pending: { kind: "none" },
     status: { kind: "none" },
     goalColumn: { kind: "none" },
@@ -506,6 +563,10 @@ function pendingCount(pending: VimPending): number {
 }
 
 function commandContext(buffer: VimBuffer): VimCommandContext {
+  if (isVimVisualMode(buffer.mode)) {
+    return { kind: "visual-selection", count: pendingCount(buffer.pending) };
+  }
+
   if (buffer.pending.kind === "operator") {
     const operatorCount =
       buffer.pending.operatorCount.kind === "present"
@@ -595,6 +656,16 @@ function registerForRange(
   };
 }
 
+function lineAt(lines: ReadonlyArray<string>, line: number): string {
+  const value = lines[line];
+
+  if (value === undefined) {
+    throw new Error("Vim positions must reference existing lines.");
+  }
+
+  return value;
+}
+
 function lineDeletionInterval(
   buffer: VimBuffer,
   range: Extract<VimTextRange, { kind: "line" }>,
@@ -670,6 +741,123 @@ function deleteRange(
   );
 }
 
+function topLeftCursor(
+  lines: ReadonlyArray<string>,
+  range: Extract<VimVisualRange, { kind: "block" }>,
+  mode: VimMode,
+): VimPosition {
+  return normalisePosition(
+    lines,
+    { line: range.startLine, column: range.startColumn },
+    mode,
+  );
+}
+
+function deleteBlockRange(
+  buffer: VimBuffer,
+  range: Extract<VimVisualRange, { kind: "block" }>,
+  operation: "delete" | "change",
+): VimBuffer {
+  const editSource: VimBuffer = {
+    ...buffer,
+    mode: VimMode.Normal,
+    selection: { kind: "none" },
+    insertSession: { kind: "ordinary" },
+  };
+  const deletion = deleteVimBlock(buffer.lines, range);
+  const mode = operation === "change" ? VimMode.Insert : VimMode.Normal;
+  const cursor = topLeftCursor(deletion.lines, range, mode);
+  const committed = commitEdit(
+    editSource,
+    createTextState(deletion.lines, cursor, mode, { kind: "none" }),
+    deletion.register,
+    editInterval(joinLines(buffer.lines), joinLines(deletion.lines)),
+  );
+  const next = {
+    ...committed,
+    marks: adjustLineMarks(
+      editSource,
+      deletion.lines,
+      range.startLine,
+      range.endLine,
+    ),
+  };
+
+  return operation === "change"
+    ? {
+        ...next,
+        insertSession: {
+          kind: "block-change",
+          change: deletion.change,
+        },
+      }
+    : next;
+}
+
+function finishVisualYank(
+  buffer: VimBuffer,
+  register: VimRegister,
+  cursor: VimPosition,
+): VimBuffer {
+  return {
+    ...withTextState(
+      buffer,
+      createTextState(buffer.lines, cursor, VimMode.Normal, { kind: "none" }),
+    ),
+    register,
+    goalColumn: { kind: "none" },
+    insertSession: { kind: "ordinary" },
+  };
+}
+
+function applyVisualOperator(
+  buffer: VimBuffer,
+  operator: VimOperator,
+): VimBuffer {
+  const range = vimVisualRange(buffer.lines, buffer.selection);
+
+  if (range.kind === "block") {
+    return operator === "yank"
+      ? finishVisualYank(
+          buffer,
+          vimBlockRegister(buffer.lines, range),
+          topLeftCursor(buffer.lines, range, VimMode.Normal),
+        )
+      : deleteBlockRange(
+          buffer,
+          range,
+          operator === "change" ? "change" : "delete",
+        );
+  }
+
+  const textRange: VimTextRange = range.kind === "character"
+    ? {
+        kind: "character",
+        start: range.start,
+        end: range.end,
+        inclusivity: "inclusive",
+      }
+    : range;
+
+  if (operator === "yank") {
+    const cursor = range.kind === "line"
+      ? { line: range.startLine, column: 0 }
+      : positionForTextOffset(buffer.lines, range.start, VimMode.Normal);
+    return finishVisualYank(buffer, registerForRange(buffer, textRange), cursor);
+  }
+
+  return deleteRange(
+    {
+      ...buffer,
+      mode: VimMode.Normal,
+      selection: { kind: "none" },
+      insertSession: { kind: "ordinary" },
+    },
+    textRange,
+    operator === "change",
+  );
+}
+
 function applyOperatorRange(
   buffer: VimBuffer,
   operator: VimOperator,
@@ -711,8 +899,8 @@ function operatorSource(operator: VimOperator): "d" | "c" | "y" {
 }
 
 function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
-  if (buffer.mode.kind === "visual") {
-    return applyOperatorRange(buffer, operator, visualRange(buffer));
+  if (isVimVisualMode(buffer.mode)) {
+    return applyVisualOperator(buffer, operator);
   }
 
   if (buffer.pending.kind === "operator") {
@@ -770,22 +958,29 @@ function executeMotion(
     return invalidInput(buffer, source);
   }
 
-  if (buffer.mode.kind === "visual") {
-    if (buffer.selection.kind !== "line") {
-      throw new Error("Visual mode requires a linewise selection.");
+  if (isVimVisualMode(buffer.mode)) {
+    if (buffer.selection.kind === "none") {
+      throw new Error("Visual mode requires a typed visual selection.");
     }
 
+    const extended = extendVimVisualSelection(
+      buffer.lines,
+      buffer.selection,
+      request.kind === "text-object"
+        ? {
+            kind: "text-object",
+            cursor: resolution.motion.cursor,
+            range: resolution.motion.range,
+          }
+        : { kind: "motion", cursor: resolution.motion.cursor },
+    );
     const moved = withTextState(
       buffer,
       createTextState(
         buffer.lines,
-        resolution.motion.cursor,
-        VimMode.Visual,
-        {
-          kind: "line",
-          anchorLine: buffer.selection.anchorLine,
-          activeLine: resolution.motion.cursor.line,
-        },
+        extended.cursor,
+        buffer.mode,
+        extended.selection,
       ),
     );
 
@@ -872,42 +1067,88 @@ function deleteCharacters(buffer: VimBuffer): VimBuffer {
 }
 
 function enterInsertMode(buffer: VimBuffer, cursor: VimPosition): VimBuffer {
-  return withTextState(
-    { ...buffer, goalColumn: { kind: "none" } },
-    createTextState(buffer.lines, cursor, VimMode.Insert, { kind: "none" }),
-  );
+  return {
+    ...withTextState(
+      { ...buffer, goalColumn: { kind: "none" } },
+      createTextState(buffer.lines, cursor, VimMode.Insert, { kind: "none" }),
+    ),
+    insertSession: { kind: "ordinary" },
+  };
 }
 
 function enterNormalMode(buffer: VimBuffer): VimBuffer {
-  return withTextState(
-    buffer,
-    createTextState(buffer.lines, buffer.cursor, VimMode.Normal, {
-      kind: "none",
-    }),
-  );
-}
-
-function enterVisualMode(buffer: VimBuffer): VimBuffer {
-  return withTextState(
-    buffer,
-    createTextState(buffer.lines, buffer.cursor, VimMode.Visual, {
-      kind: "line",
-      anchorLine: buffer.cursor.line,
-      activeLine: buffer.cursor.line,
-    }),
-  );
-}
-
-function visualRange(buffer: VimBuffer): VimTextRange {
-  if (buffer.selection.kind !== "line") {
-    throw new Error("Visual mode requires a linewise selection.");
-  }
+  const cursor = buffer.insertSession.kind === "block-change" &&
+      buffer.insertSession.change.insertedText.length > 0
+    ? {
+        line: buffer.insertSession.change.startLine,
+        column: previousUnicodeCursorOffset(
+          lineAt(buffer.lines, buffer.insertSession.change.startLine),
+          buffer.insertSession.change.startColumn +
+            buffer.insertSession.change.insertedText.length,
+        ),
+      }
+    : buffer.cursor;
 
   return {
-    kind: "line",
-    startLine: Math.min(buffer.selection.anchorLine, buffer.selection.activeLine),
-    endLine: Math.max(buffer.selection.anchorLine, buffer.selection.activeLine),
+    ...withTextState(
+      buffer,
+      createTextState(buffer.lines, cursor, VimMode.Normal, {
+        kind: "none",
+      }),
+    ),
+    insertSession: { kind: "ordinary" },
   };
+}
+
+type VimVisualMode = Extract<
+  VimMode,
+  { kind: "visual-character" | "visual-line" | "visual-block" }
+>;
+
+function selectionForVisualMode(
+  buffer: VimBuffer,
+  mode: VimVisualMode,
+): VimSelection {
+  const anchor = (() => {
+    switch (buffer.selection.kind) {
+      case "character":
+      case "block":
+        return buffer.selection.anchor;
+      case "line":
+        return { line: buffer.selection.anchorLine, column: buffer.cursor.column };
+      case "none":
+        return buffer.cursor;
+    }
+  })();
+
+  switch (mode.kind) {
+    case "visual-character":
+      return { kind: "character", anchor, active: buffer.cursor };
+    case "visual-line":
+      return {
+        kind: "line",
+        anchorLine: anchor.line,
+        activeLine: buffer.cursor.line,
+      };
+    case "visual-block":
+      return { kind: "block", anchor, active: buffer.cursor };
+  }
+}
+
+function enterVisualMode(buffer: VimBuffer, mode: VimVisualMode): VimBuffer {
+  if (buffer.mode.kind === mode.kind) {
+    return enterNormalMode(buffer);
+  }
+
+  return withTextState(
+    buffer,
+    createTextState(
+      buffer.lines,
+      buffer.cursor,
+      mode,
+      selectionForVisualMode(buffer, mode),
+    ),
+  );
 }
 
 function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
@@ -942,6 +1183,38 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
         newEnd: insertionOffset + joinLines(lines).length - oldText.length,
       },
     );
+  }
+
+  if (buffer.register.kind === "block") {
+    const put = putVimBlock(buffer.lines, buffer.cursor, buffer.register, {
+      placement: afterCursor ? "after" : "before",
+      count: pendingCount(buffer.pending),
+    });
+
+    const committed = commitEdit(
+      buffer,
+      createTextState(
+        put.lines,
+        put.cursor,
+        VimMode.Normal,
+        { kind: "none" },
+      ),
+      buffer.register,
+      editInterval(joinLines(buffer.lines), joinLines(put.lines)),
+    );
+
+    return {
+      ...committed,
+      marks: adjustLineMarks(
+        buffer,
+        put.lines,
+        buffer.cursor.line,
+        Math.min(
+          buffer.lines.length - 1,
+          buffer.cursor.line + buffer.register.fragments.length - 1,
+        ),
+      ),
+    };
   }
 
   const text = joinLines(buffer.lines);
@@ -990,6 +1263,7 @@ function undo(buffer: VimBuffer): VimBuffer {
     pending: { kind: "none" },
     status: { kind: "none" },
     goalColumn: { kind: "none" },
+    insertSession: { kind: "ordinary" },
   };
 }
 
@@ -1010,6 +1284,7 @@ function redo(buffer: VimBuffer): VimBuffer {
     pending: { kind: "none" },
     status: { kind: "none" },
     goalColumn: { kind: "none" },
+    insertSession: { kind: "ordinary" },
   };
 }
 
@@ -1082,6 +1357,7 @@ export function createVimBuffer({
     goalColumn: { kind: "none" },
     lastFind: { kind: "none" },
     marks: [],
+    insertSession: { kind: "ordinary" },
   };
 }
 
@@ -1129,33 +1405,125 @@ export function moveVimInsertCursorToTextOffset(
   );
 }
 
+type VimInsertion = Readonly<{
+  textState: VimTextState;
+  interval: VimEditInterval;
+}>;
+
+function insertAtVimCursor(buffer: VimBuffer, text: string): VimInsertion {
+  const currentText = vimBufferText(buffer);
+  const cursorOffset = vimBufferCursorOffset(buffer);
+  const lines = splitText(
+    currentText.slice(0, cursorOffset) + text + currentText.slice(cursorOffset),
+  );
+
+  return {
+    textState: createTextState(
+      lines,
+      positionForTextOffset(lines, cursorOffset + text.length, VimMode.Insert),
+      VimMode.Insert,
+      { kind: "none" },
+    ),
+    interval: {
+      oldStart: cursorOffset,
+      oldEnd: cursorOffset,
+      newEnd: cursorOffset + text.length,
+    },
+  };
+}
+
+function continueBlockChange(
+  buffer: VimBuffer,
+  insertedText: string,
+): VimBuffer {
+  if (buffer.insertSession.kind === "ordinary" || insertedText.length === 0) {
+    return buffer;
+  }
+
+  if (buffer.insertSession.kind === "block-change-ended") {
+    const insertion = insertAtVimCursor(buffer, insertedText);
+
+    return {
+      ...buffer,
+      ...insertion.textState,
+      marks: adjustMarks(buffer, insertion.textState.lines, [insertion.interval]),
+      insertSession: { kind: "block-change-ended" },
+    };
+  }
+
+  if (insertedText.includes("\n")) {
+    const change = buffer.insertSession.change;
+    const cleared = editVimBlockChange(
+      buffer.lines,
+      change,
+      { kind: "clear" },
+    );
+    const intermediate: VimBuffer = {
+      ...buffer,
+      lines: cleared.lines,
+      cursor: cleared.cursor,
+      marks: adjustLineMarks(
+        buffer,
+        cleared.lines,
+        change.startLine,
+        change.eligibleLines.at(-1) ?? change.startLine,
+      ),
+    };
+    const replacement = change.insertedText + insertedText;
+    const insertion = insertAtVimCursor(intermediate, replacement);
+
+    return {
+      ...intermediate,
+      ...insertion.textState,
+      marks: adjustMarks(
+        intermediate,
+        insertion.textState.lines,
+        [insertion.interval],
+      ),
+      insertSession: { kind: "block-change-ended" },
+    };
+  }
+
+  const result = editVimBlockChange(
+    buffer.lines,
+    buffer.insertSession.change,
+    { kind: "insert", text: insertedText },
+  );
+
+  return {
+    ...buffer,
+    ...createTextState(
+      result.lines,
+      result.cursor,
+      VimMode.Insert,
+      { kind: "none" },
+    ),
+    marks: adjustLineMarks(
+      buffer,
+      result.lines,
+      result.change.startLine,
+      result.change.eligibleLines.at(-1) ?? result.change.startLine,
+    ),
+    insertSession: { kind: "block-change", change: result.change },
+  };
+}
+
 export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
   if (buffer.mode.kind !== "insert" || text.length === 0) {
     return buffer;
   }
 
-  const currentText = vimBufferText(buffer);
-  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-  const nextText =
-    currentText.slice(0, cursorOffset) +
-    text +
-    currentText.slice(cursorOffset);
-  const lines = splitText(nextText);
-  const cursor = positionForTextOffset(
-    lines,
-    cursorOffset + text.length,
-    VimMode.Insert,
-  );
+  if (buffer.insertSession.kind !== "ordinary") {
+    return continueBlockChange(buffer, text);
+  }
+
+  const insertion = insertAtVimCursor(buffer, text);
 
   return commitEdit(
     buffer,
-    createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
+    insertion.textState,
     buffer.register,
-    {
-      oldStart: cursorOffset,
-      oldEnd: cursorOffset,
-      newEnd: cursorOffset + text.length,
-    },
+    insertion.interval,
   );
 }
 
@@ -1234,6 +1602,29 @@ export function replaceVimInsertText(
 ): VimBuffer {
   if (buffer.mode.kind !== "insert") {
     return buffer;
+  }
+
+  if (buffer.insertSession.kind === "block-change") {
+    const interval = editInterval(vimBufferText(buffer), text);
+    return continueBlockChange(
+      buffer,
+      text.slice(interval.oldStart, interval.newEnd),
+    );
+  }
+
+  if (buffer.insertSession.kind === "block-change-ended") {
+    const lines = splitText(text);
+    const cursor = positionForTextOffset(lines, cursorOffset, VimMode.Insert);
+
+    return {
+      ...buffer,
+      ...createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
+      marks: adjustMarks(
+        buffer,
+        lines,
+        [editInterval(vimBufferText(buffer), text)],
+      ),
+    };
   }
 
   const lines = splitText(text);
@@ -1320,7 +1711,7 @@ function beginMark(
 function beginTextObject(buffer: VimBuffer, around: boolean, source: string): VimBuffer {
   const context = commandContext(buffer);
 
-  if (context.kind !== "operator") {
+  if (context.kind !== "operator" && context.kind !== "visual-selection") {
     return invalidInput(buffer, pendingSource(buffer) + source);
   }
 
@@ -1724,28 +2115,27 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     case "y":
       return handleOperator(buffer, "yank");
     case "x":
-      return buffer.mode.kind === "visual"
-        ? applyOperatorRange(buffer, "delete", visualRange(buffer))
+      return isVimVisualMode(buffer.mode)
+        ? applyVisualOperator(buffer, "delete")
         : deleteCharacters(buffer);
     case "p":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + value)
         : pasteRegister(buffer, true);
     case "P":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + value)
         : pasteRegister(buffer, false);
     case "u":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + value)
         : undo(buffer);
     case "v":
+      return enterVisualMode(buffer, VimMode.VisualCharacter);
     case "V":
-      return buffer.mode.kind === "visual"
-        ? enterNormalMode(buffer)
-        : enterVisualMode(buffer);
+      return enterVisualMode(buffer, VimMode.VisualLine);
     case ":":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, value)
         : {
             ...buffer,
@@ -1755,7 +2145,7 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
             status: { kind: "none" },
           };
     case "/":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, value)
         : {
             ...buffer,
@@ -1769,23 +2159,19 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     case "N":
       return moveToSearchMatch(buffer, "backward");
     case "i":
-      return buffer.pending.kind === "operator"
+      return buffer.pending.kind === "operator" || isVimVisualMode(buffer.mode)
         ? beginTextObject(buffer, false, value)
-        : buffer.mode.kind === "visual"
-        ? invalidInput(buffer, value)
         : enterInsertMode(buffer, buffer.cursor);
     case "a":
-      return buffer.pending.kind === "operator"
+      return buffer.pending.kind === "operator" || isVimVisualMode(buffer.mode)
         ? beginTextObject(buffer, true, value)
-        : buffer.mode.kind === "visual"
-        ? invalidInput(buffer, value)
         : insertAfterCursor(buffer);
     case "I":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, value)
         : enterInsertMode(buffer, { line: buffer.cursor.line, column: 0 });
     case "A":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, value)
         : insertAtLineEnd(buffer);
     default:
@@ -1800,7 +2186,7 @@ export function applyNormalVimKey(
   if (key.kind === "escape") {
     return buffer.mode.kind === "insert" ||
       buffer.mode.kind === "command" ||
-      buffer.mode.kind === "visual"
+      isVimVisualMode(buffer.mode)
       ? enterNormalMode(buffer)
       : resetPending(buffer);
   }
@@ -1835,11 +2221,15 @@ export function applyNormalVimKey(
     case "undo":
       return applyLiteral(buffer, "u");
     case "redo":
-      return buffer.mode.kind === "visual"
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + "Ctrl+r")
         : redo(buffer);
+    case "enter-visual-character":
+      return applyLiteral(buffer, "v");
     case "enter-visual-line":
       return applyLiteral(buffer, "V");
+    case "enter-visual-block":
+      return enterVisualMode(buffer, VimMode.VisualBlock);
     case "enter-command":
       return applyLiteral(buffer, ":");
     case "enter-search":
@@ -1974,6 +2364,8 @@ export function normalVimKeyFromKeyboard(
         };
       case "r":
         return { kind: "recognized", key: { kind: "redo" } };
+      case "v":
+        return { kind: "recognized", key: { kind: "enter-visual-block" } };
       default:
         return { kind: "unrecognized" };
     }
