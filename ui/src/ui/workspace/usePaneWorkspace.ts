@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
@@ -65,7 +66,10 @@ export type PaneWorkspaceController = Readonly<{
   dismissClose: () => void;
 }>;
 
-export function usePaneWorkspace(corpus: ContentCorpus): PaneWorkspaceController {
+export function usePaneWorkspace(
+  corpus: ContentCorpus,
+  onAcceptedContentOpen: (contentId: ContentId) => void,
+): PaneWorkspaceController {
   const currentDirectory = corpus.filesystem.root.path;
   const [workspace, setWorkspace] = useState<PaneWorkspace>(() =>
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
@@ -171,6 +175,10 @@ export function usePaneWorkspace(corpus: ContentCorpus): PaneWorkspaceController
         action,
       });
 
+      for (const contentId of next.acceptedContentIds) {
+        onAcceptedContentOpen(contentId);
+      }
+
       if (
         next.workspace === currentWorkspace &&
         next.runtimes === currentShellRuntimes
@@ -191,7 +199,7 @@ export function usePaneWorkspace(corpus: ContentCorpus): PaneWorkspaceController
         setShellRuntimes(next.runtimes);
       }
     },
-    [onConsumeMobileCtrl],
+    [onAcceptedContentOpen, onConsumeMobileCtrl],
   );
 
   const onCloseInlineViewer = useCallback((paneId: PaneId): void => {

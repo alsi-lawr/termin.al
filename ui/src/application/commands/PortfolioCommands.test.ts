@@ -39,6 +39,7 @@ import type {
   ViewerCollectionLeaf,
   ViewerCollectionNode,
 } from "../../content/ViewerContent.ts";
+import type { PortfolioStatsReader } from "./PortfolioCommands.ts";
 
 function collectionLeaves(
   nodes: ReadonlyArray<ViewerCollectionNode>,
@@ -71,6 +72,7 @@ function createRegistry(
   themes: ThemeController = createThemeController(),
   filesystem: VirtualFilesystem = demoContentCorpus.filesystem,
   projectReadmes = demoContentCorpus.projectReadmes,
+  readStats: PortfolioStatsReader = () => "STATISTICS\nSTATUS       UNAVAILABLE",
 ): CommandRegistry {
   return createCommandRegistry({
     commands: [
@@ -84,6 +86,7 @@ function createRegistry(
         documents,
         projectReadmes,
         themes,
+        readStats,
       }),
       createPaneCommandDefinition(createPaneId("pane-1"), () => ({
         kind: "rejected",
@@ -182,6 +185,10 @@ test("opens fixture documents inline and directory targets in requested split ef
   assert.equal(inlineEffect.viewer.kind, "document");
   if (inlineEffect.viewer.kind === "document") {
     assert.equal(inlineEffect.viewer.document.source.path, "~/about.md");
+    assert.equal(inlineEffect.viewer.statsIdentity.kind, "countable");
+    if (inlineEffect.viewer.statsIdentity.kind === "countable") {
+      assert.equal(inlineEffect.viewer.statsIdentity.contentId.value, "about");
+    }
   }
 
   assert.deepEqual(splitEffect.disposition, {
@@ -207,6 +214,10 @@ test("opens fixture documents inline and directory targets in requested split ef
     );
     assert.notEqual(project?.document.text, project?.summary);
     assert.equal(project?.path, "demonstrations/typed-applications/Sample Project");
+    assert.equal(project?.statsIdentity.kind, "countable");
+    if (project?.statsIdentity.kind === "countable") {
+      assert.equal(project.statsIdentity.contentId.value, "sample-project");
+    }
   }
 });
 
@@ -280,6 +291,8 @@ test("builds blog and note listings with document-open data", async () => {
       "determinism",
     ]);
     assert.equal(noteEntries[0]?.document.source.path, "~/notes/field-notes/filesystems/sample-note.md");
+    assert.equal(blogEntries[0]?.statsIdentity.kind, "countable");
+    assert.equal(noteEntries[0]?.statsIdentity.kind, "countable");
   }
 
   const samplePost = resolveVirtualPath(
@@ -486,14 +499,15 @@ test("lists, selects, and clears terminal theme selections", async () => {
   assert.equal(invalid.kind, "failed");
 });
 
-test("provides discoverable navigation commands and useful unavailable-feature diagnostics", async () => {
+test("provides discoverable navigation commands and remaining unavailable-feature diagnostics", async () => {
   const registry = createRegistry();
   const about = succeeded(await execute("about", registry));
   const projects = succeeded(await execute("projects", registry));
   const cv = await execute("cv", registry);
   const invalidOpen = await execute("open --split diagonal about.md", registry);
+  const stats = succeeded(await execute("stats", registry));
   const unavailable = await Promise.all(
-    ["stats", "login", "logout", "edit about.md"].map(
+    ["login", "logout", "edit about.md"].map(
       async (source) => execute(source, registry),
     ),
   );
@@ -513,8 +527,59 @@ test("provides discoverable navigation commands and useful unavailable-feature d
   assert.equal(projectsEffect.viewer.kind, "collection");
   assert.equal(cv.kind, "failed");
   assert.equal(invalidOpen.kind, "failed");
+  assert.equal(stats.outputs[0]?.kind, "text");
   assert.deepEqual(
     unavailable.map((outcome) => outcome.kind),
-    ["failed", "failed", "failed", "failed"],
+    ["failed", "failed", "failed"],
   );
+});
+
+test("reads changing statistics through the stable command dependency", async () => {
+  let current = "STATISTICS\nSTATUS       NO DATA";
+  const registry = createRegistry(
+    demoContentCorpus.documents,
+    createThemeController(),
+    demoContentCorpus.filesystem,
+    demoContentCorpus.projectReadmes,
+    () => current,
+  );
+  const first = succeeded(await execute("stats", registry));
+  current = "STATISTICS\nSTATUS       LIVE\nSESSIONS     4\nVIEWS        9";
+  const second = succeeded(await execute("stats", registry));
+
+  assert.equal(first.outputs[0]?.kind, "text");
+  assert.equal(second.outputs[0]?.kind, "text");
+  if (first.outputs[0]?.kind === "text" && second.outputs[0]?.kind === "text") {
+    assert.equal(first.outputs[0].text, "STATISTICS\nSTATUS       NO DATA");
+    assert.equal(second.outputs[0].text, current);
+  }
+});
+
+test("keeps invalid project README identity viewable but uncounted", async () => {
+  const project = demoContentCorpus.projectReadmes[0];
+
+  if (project === undefined) {
+    assert.fail("Expected a demo project.");
+  }
+
+  const registry = createRegistry(
+    demoContentCorpus.documents,
+    createThemeController(),
+    demoContentCorpus.filesystem,
+    [{ ...project, id: "invalid project id" }],
+  );
+  const outcome = succeeded(await execute("projects", registry));
+  const effect = outcome.effects[0];
+
+  if (
+    effect === undefined ||
+    effect.kind !== "open-viewer" ||
+    effect.viewer.kind !== "collection"
+  ) {
+    assert.fail("Expected a project collection.");
+  }
+
+  const leaf = collectionLeaves(effect.viewer.roots)[0];
+  assert.equal(leaf?.title, project.name);
+  assert.deepEqual(leaf?.statsIdentity, { kind: "uncounted" });
 });

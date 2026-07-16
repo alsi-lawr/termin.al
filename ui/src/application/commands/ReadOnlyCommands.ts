@@ -12,6 +12,7 @@ import {
   type VirtualTraversalResult,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
+import { ContentId } from "../../api/ContentContracts.ts";
 import {
   createShellDiagnosticId,
   createShellOutputId,
@@ -1290,6 +1291,11 @@ function createLessCommand(
         return document.outcome;
       }
 
+      const contentId = ContentId.tryCreate(
+        document.file.documentHandle,
+        "less document handle",
+      );
+
       return succeededOutcome([], [
         {
           kind: "open-viewer",
@@ -1300,6 +1306,9 @@ function createLessCommand(
               text: document.text,
               source: { path: document.sourcePath },
             },
+            statsIdentity: contentId.kind === "valid"
+              ? { kind: "countable", contentId: contentId.value }
+              : { kind: "uncounted" },
           }),
           disposition: { kind: "inline" },
         },

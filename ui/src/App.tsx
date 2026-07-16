@@ -18,6 +18,7 @@ function App({
     <ContentCorpusGate
       applicationMode={applicationMode}
       contentClient={applicationClientComposition.contentClient}
+      statsClient={applicationClientComposition.statsClient}
     />
   );
 }

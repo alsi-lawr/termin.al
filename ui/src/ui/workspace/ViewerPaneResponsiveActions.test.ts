@@ -7,6 +7,17 @@ import {
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
+import { ContentId } from "../../api/ContentContracts.ts";
+
+function contentId(value: string): ContentId {
+  const validation = ContentId.tryCreate(value, "responsive viewer test content");
+
+  if (validation.kind === "invalid") {
+    assert.fail(validation.message);
+  }
+
+  return validation.value;
+}
 
 type ViewerPaneTestProps = Readonly<{
   viewer: unknown;
@@ -21,6 +32,7 @@ type ViewerPaneTestProps = Readonly<{
     input: unknown;
     mobileCtrlApplied: boolean;
   }>;
+  onAcceptedContentOpen: (contentId: ContentId) => void;
   onClose: () => void;
 }>;
 
@@ -67,6 +79,7 @@ async function renderViewerPane(viewer: unknown): Promise<string> {
         input,
         mobileCtrlApplied: false,
       }),
+      onAcceptedContentOpen: () => undefined,
       onClose: () => undefined,
     });
 
@@ -105,6 +118,10 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
     document: {
       text,
       source: { path: "~/notes/sample-note.md" },
+    },
+    statsIdentity: {
+      kind: "countable",
+      contentId: contentId("sample-note"),
     },
   });
 
@@ -159,6 +176,10 @@ test("renders hierarchical collections as terminal rows with explicit touch cont
             documentTitle: "termin.al README",
             document: { text: "# termin.al", source: { path: "~/projects/termin.al" } },
             repositoryUrl: "https://github.com/alsi-lawr/termin.al",
+            statsIdentity: {
+              kind: "countable",
+              contentId: contentId("terminal"),
+            },
           },
         ],
       },

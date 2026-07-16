@@ -325,6 +325,10 @@ test("implements line readers, terminal history, manual pages, and pager effects
   }
   assert.equal(pagerEffect.viewer.document.source.path, "~/notes/field-notes/filesystems/sample-note.md");
   assert.equal(pagerEffect.viewer.presentation, "raw-pager");
+  assert.equal(pagerEffect.viewer.statsIdentity.kind, "countable");
+  if (pagerEffect.viewer.statsIdentity.kind === "countable") {
+    assert.equal(pagerEffect.viewer.statsIdentity.contentId.value, "note");
+  }
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
 });
 

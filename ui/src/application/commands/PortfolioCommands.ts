@@ -6,8 +6,10 @@ import {
   type ViewerCollectionLeaf,
   type ViewerCollectionNode,
   type ViewerOpenDisposition,
+  type ViewerStatsIdentity,
 } from "../../content/ViewerContent.ts";
 import type { ProjectReadme } from "../../api/ContentClient.ts";
+import { ContentId } from "../../api/ContentContracts.ts";
 import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   listVirtualDirectory,
@@ -42,7 +44,10 @@ export type CreatePortfolioCommandDefinitionsOptions = Readonly<{
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   themes: ThemeController;
+  readStats: PortfolioStatsReader;
 }>;
+
+export type PortfolioStatsReader = () => string;
 
 type OpenCommandOptions = Readonly<{
   path: string;
@@ -358,6 +363,7 @@ function projectLeaf(project: ProjectReadme): CollectionLeafSource {
       tags: project.tags,
       documentTitle: `${project.name} README`,
       document: project.document,
+      statsIdentity: statsIdentityFrom(project.id, "project README id"),
     },
   };
 }
@@ -384,8 +390,23 @@ function publicationLeaf(rootPath: string, {
       tags: publication.tags,
       documentTitle: publication.title,
       document,
+      statsIdentity: statsIdentityFrom(
+        node.documentHandle,
+        "publication document handle",
+      ),
     },
   };
+}
+
+function statsIdentityFrom(
+  value: string,
+  field: string,
+): ViewerStatsIdentity {
+  const contentId = ContentId.tryCreate(value, field);
+
+  return contentId.kind === "valid"
+    ? { kind: "countable", contentId: contentId.value }
+    : { kind: "uncounted" };
 }
 
 async function loadDirectoryDocuments(
@@ -572,6 +593,10 @@ async function openTarget(
       title: resolution.node.name,
       presentation: "inline",
       document: document.document,
+      statsIdentity: statsIdentityFrom(
+        resolution.node.documentHandle,
+        "document handle",
+      ),
     }),
   };
 }
@@ -654,7 +679,7 @@ function createOpenCommand(
 }
 
 function createUnavailableCommand(
-  name: "theme" | "stats" | "login" | "logout" | "edit",
+  name: "theme" | "login" | "logout" | "edit",
   summary: string,
   usage: string,
   example: string,
@@ -670,6 +695,28 @@ function createUnavailableCommand(
       examples: [example],
     },
     execute: async () => rejectedOutcome(name, message),
+  };
+}
+
+function createStatsCommand(readStats: PortfolioStatsReader): CommandDefinition {
+  return {
+    metadata: {
+      group: "application",
+      name: "stats",
+      aliases: [],
+      summary: "Show aggregate site statistics.",
+      usage: "stats",
+      examples: ["stats"],
+    },
+    execute: async (invocation) => {
+      const argumentError = noArguments(invocation, "stats");
+
+      if (argumentError !== undefined) {
+        return rejectedOutcome("stats", argumentError);
+      }
+
+      return themeOutput("stats-output", readStats());
+    },
   };
 }
 
@@ -812,18 +859,13 @@ export function createPortfolioCommandDefinitions({
   documents,
   projectReadmes,
   themes,
+  readStats,
 }: CreatePortfolioCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   return [
     createHelpCommand(),
     createOpenCommand(filesystem, documents, projectReadmes),
     createThemeCommand(themes),
-    createUnavailableCommand(
-      "stats",
-      "Show aggregate site statistics.",
-      "stats",
-      "stats",
-      "Statistics are unavailable until the host statistics work is implemented.",
-    ),
+    createStatsCommand(readStats),
     createUnavailableCommand(
       "login",
       "Authenticate with GitHub.",

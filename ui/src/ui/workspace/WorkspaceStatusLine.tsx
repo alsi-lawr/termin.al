@@ -1,8 +1,10 @@
 import type { ReactElement } from "react";
 import type { ApplicationMode } from "../../ApplicationComposition.ts";
+import type { WorkspaceStatsStatus } from "./WorkspaceStats.ts";
 
 type WorkspaceStatusLineProps = Readonly<{
   applicationMode: ApplicationMode;
+  stats: WorkspaceStatsStatus;
 }>;
 
 type WorkspaceModePresentation = Readonly<{
@@ -23,6 +25,7 @@ function workspaceModePresentation(
 
 export function WorkspaceStatusLine({
   applicationMode,
+  stats,
 }: WorkspaceStatusLineProps): ReactElement {
   const presentation = workspaceModePresentation(applicationMode);
 
@@ -36,7 +39,7 @@ export function WorkspaceStatusLine({
       </span>
       <span aria-label="Connectivity status">{presentation.connectivity}</span>
       <span className="ml-auto" aria-label="Statistics status">
-        STATS —
+        SESSIONS {stats.totalSessions} · VIEWS {stats.totalPageViews} · {stats.label}
       </span>
       <span aria-label="Capability status">CAPABILITIES —</span>
     </div>

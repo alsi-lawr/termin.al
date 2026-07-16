@@ -10,6 +10,8 @@ import type {
   ViewerCollectionLeaf,
   ViewerContent,
 } from "../../content/ViewerContent.ts";
+import { countableViewerContentIds } from "../../content/ViewerContent.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
@@ -40,6 +42,7 @@ type HierarchicalCollectionPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   onCancel: () => void;
+  onAcceptedContentOpen: (contentId: ContentId) => void;
   renderDocument: (
     leaf: ViewerCollectionLeaf,
     onReturn: () => void,
@@ -156,6 +159,7 @@ export function HierarchicalCollectionPane({
   onActivate,
   onPaneKeyInput,
   onCancel,
+  onAcceptedContentOpen,
   renderDocument,
 }: HierarchicalCollectionPaneProps): ReactElement {
   const selectorRef = useRef<HTMLElement | null>(null);
@@ -189,6 +193,9 @@ export function HierarchicalCollectionPane({
       const leaf = selectedCollectionLeaf(collection.roots, state);
 
       if (leaf !== undefined) {
+        for (const contentId of countableViewerContentIds(leaf.statsIdentity)) {
+          onAcceptedContentOpen(contentId);
+        }
         setOpenedLeaf(leaf);
         return;
       }
@@ -201,6 +208,9 @@ export function HierarchicalCollectionPane({
 
   const openSelectedLeaf = (): void => {
     if (selectedLeaf !== undefined) {
+      for (const contentId of countableViewerContentIds(selectedLeaf.statsIdentity)) {
+        onAcceptedContentOpen(contentId);
+      }
       setOpenedLeaf(selectedLeaf);
     }
   };

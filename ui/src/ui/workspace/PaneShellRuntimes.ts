@@ -1,5 +1,9 @@
 import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
-import type { ViewerContent } from "../../content/ViewerContent.ts";
+import {
+  countableViewerContentIds,
+  type ViewerContent,
+} from "../../content/ViewerContent.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import {
   createShellId,
   createShellSessionId,
@@ -77,6 +81,7 @@ export type ApplyPaneShellActionOptions = Readonly<{
 export type PaneShellActionResult = Readonly<{
   workspace: PaneWorkspace;
   runtimes: PaneShellRuntimes;
+  acceptedContentIds: ReadonlyArray<ContentId>;
 }>;
 
 type ActiveCommand = Readonly<{
@@ -347,11 +352,12 @@ export function applyPaneShellAction({
     action.kind !== "command.settled" ||
     action.outcome.kind !== "succeeded"
   ) {
-    return { workspace, runtimes: reducedRuntimes };
+    return { workspace, runtimes: reducedRuntimes, acceptedContentIds: [] };
   }
 
   let nextWorkspace = workspace;
   let nextRuntimes = reducedRuntimes;
+  const acceptedContentIds: ContentId[] = [];
 
   for (const effect of action.outcome.effects) {
     if (effect.kind !== "open-viewer") {
@@ -364,6 +370,11 @@ export function applyPaneShellAction({
         paneId,
         effect.viewer,
       );
+      if (effect.viewer.kind === "document") {
+        acceptedContentIds.push(
+          ...countableViewerContentIds(effect.viewer.statsIdentity),
+        );
+      }
       continue;
     }
 
@@ -376,8 +387,17 @@ export function applyPaneShellAction({
 
     if (split.kind === "applied") {
       nextWorkspace = split.workspace;
+      if (effect.viewer.kind === "document") {
+        acceptedContentIds.push(
+          ...countableViewerContentIds(effect.viewer.statsIdentity),
+        );
+      }
     }
   }
 
-  return { workspace: nextWorkspace, runtimes: nextRuntimes };
+  return {
+    workspace: nextWorkspace,
+    runtimes: nextRuntimes,
+    acceptedContentIds,
+  };
 }

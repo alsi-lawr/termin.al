@@ -1,9 +1,25 @@
 import type {
   VirtualAbsolutePath,
 } from "../domain/filesystem/VirtualFilesystem.ts";
+import type { ContentId } from "../api/ContentContracts.ts";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
 
 export type DocumentViewerPresentation = "inline" | "raw-pager";
+
+export type ViewerStatsIdentity =
+  | Readonly<{ kind: "countable"; contentId: ContentId }>
+  | Readonly<{ kind: "uncounted" }>;
+
+export function countableViewerContentIds(
+  identity: ViewerStatsIdentity,
+): ReadonlyArray<ContentId> {
+  switch (identity.kind) {
+    case "countable":
+      return [identity.contentId];
+    case "uncounted":
+      return [];
+  }
+}
 
 export type ViewerDirectoryEntry = Readonly<{
   name: string;
@@ -21,6 +37,7 @@ export type ViewerCollectionLeaf = Readonly<{
   documentTitle: string;
   document: MarkdownDocument;
   repositoryUrl: string | undefined;
+  statsIdentity: ViewerStatsIdentity;
 }>;
 
 export type ViewerCollectionBranch = Readonly<{
@@ -45,6 +62,7 @@ export type ViewerContent =
       title: string;
       presentation: DocumentViewerPresentation;
       document: MarkdownDocument;
+      statsIdentity: ViewerStatsIdentity;
     }>
   | Readonly<{
       kind: "directory";
@@ -70,6 +88,7 @@ export type CreateDocumentViewerContentOptions = Readonly<{
   title: string;
   presentation: DocumentViewerPresentation;
   document: MarkdownDocument;
+  statsIdentity: ViewerStatsIdentity;
 }>;
 
 export type CreateDirectoryViewerContentOptions = Readonly<{
@@ -99,9 +118,10 @@ export function createDocumentViewerContent({
   title,
   presentation,
   document,
+  statsIdentity,
 }: CreateDocumentViewerContentOptions): ViewerContent {
   assertViewerTitle(title);
-  return { kind: "document", title, presentation, document };
+  return { kind: "document", title, presentation, document, statsIdentity };
 }
 
 export function createDirectoryViewerContent({

@@ -1,11 +1,13 @@
 import type { ReactElement } from "react";
 import type { ProjectReadme } from "../../api/ContentClient.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
+import type { PortfolioStatsReader } from "../../application/commands/PortfolioCommands.ts";
 import type { ThemeController } from "../../theme/Theme.ts";
 import type {
   PaneId,
@@ -51,6 +53,8 @@ type PaneTreeViewProps = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
+  readStats: PortfolioStatsReader;
+  onAcceptedContentOpen: (contentId: ContentId) => void;
 }>;
 
 const firstPaneBasisClass = {
@@ -120,6 +124,8 @@ function PaneLeaf({
   filesystem,
   documents,
   projectReadmes,
+  readStats,
+  onAcceptedContentOpen,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -159,6 +165,8 @@ function PaneLeaf({
             filesystem={filesystem}
             documents={documents}
             projectReadmes={projectReadmes}
+            readStats={readStats}
+            onAcceptedContentOpen={onAcceptedContentOpen}
           />
         </div>
       );
@@ -176,6 +184,7 @@ function PaneLeaf({
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
+            onAcceptedContentOpen={onAcceptedContentOpen}
             onClose={() => {
               onOperation({ kind: "close" });
             }}
@@ -228,6 +237,8 @@ export function PaneTreeView({
   filesystem,
   documents,
   projectReadmes,
+  readStats,
+  onAcceptedContentOpen,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -249,6 +260,8 @@ export function PaneTreeView({
         filesystem={filesystem}
         documents={documents}
         projectReadmes={projectReadmes}
+        readStats={readStats}
+        onAcceptedContentOpen={onAcceptedContentOpen}
       />
     );
   }
@@ -298,6 +311,8 @@ export function PaneTreeView({
           filesystem={filesystem}
           documents={documents}
           projectReadmes={projectReadmes}
+          readStats={readStats}
+          onAcceptedContentOpen={onAcceptedContentOpen}
         />
       </div>
       <div
@@ -327,6 +342,8 @@ export function PaneTreeView({
           filesystem={filesystem}
           documents={documents}
           projectReadmes={projectReadmes}
+          readStats={readStats}
+          onAcceptedContentOpen={onAcceptedContentOpen}
         />
       </div>
     </div>

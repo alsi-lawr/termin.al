@@ -14,6 +14,7 @@ import {
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import type { ProjectReadme } from "../../api/ContentClient.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
@@ -36,6 +37,7 @@ import {
 } from "../../application/commands/Completion.ts";
 import { createReadOnlyCommandDefinitions } from "../../application/commands/ReadOnlyCommands.ts";
 import { createPortfolioCommandDefinitions } from "../../application/commands/PortfolioCommands.ts";
+import type { PortfolioStatsReader } from "../../application/commands/PortfolioCommands.ts";
 import type { SecretPromptSubmissionHandler } from "../../application/commands/SecretPromptEffectConsumption.ts";
 import {
   InputCapture,
@@ -79,6 +81,8 @@ type TerminalProps = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
+  readStats: PortfolioStatsReader;
+  onAcceptedContentOpen: (contentId: ContentId) => void;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
 }>;
 
@@ -103,6 +107,8 @@ export function Terminal({
   filesystem,
   documents,
   projectReadmes,
+  readStats,
+  onAcceptedContentOpen,
   secretPromptSubmissionHandler,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
@@ -129,6 +135,7 @@ export function Terminal({
           documents,
           projectReadmes,
           themes: themeController,
+          readStats,
         }),
         createPaneCommandDefinition(paneId, paneCommandHandler),
       ],
@@ -234,6 +241,7 @@ export function Terminal({
         onToggleMobileCtrl={onToggleMobileCtrl}
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}
+        onAcceptedContentOpen={onAcceptedContentOpen}
         onClose={() => {
           onCloseInlineViewer(paneId);
         }}
@@ -259,6 +267,7 @@ export function Terminal({
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
         onCancel={() => onCloseInlineViewer(paneId)}
+        onAcceptedContentOpen={onAcceptedContentOpen}
         renderDocument={(leaf, onReturn) => (
           <ViewerPane
             viewer={{
@@ -266,6 +275,7 @@ export function Terminal({
               title: leaf.documentTitle,
               presentation: "inline",
               document: leaf.document,
+              statsIdentity: leaf.statsIdentity,
             }}
             isActive={isActive}
             focusVersion={focusVersion}
@@ -275,6 +285,7 @@ export function Terminal({
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
+            onAcceptedContentOpen={onAcceptedContentOpen}
             onClose={onReturn}
           />
         )}

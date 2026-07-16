@@ -24,6 +24,7 @@ function leaf(id: string, title: string, path: string): ViewerCollectionLeaf {
     documentTitle: title,
     document: { text: `# ${title}`, source: { path } },
     repositoryUrl: undefined,
+    statsIdentity: { kind: "uncounted" },
   };
 }
 

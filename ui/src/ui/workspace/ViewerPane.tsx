@@ -10,6 +10,7 @@ import {
   viewerTitle,
   type ViewerContent,
 } from "../../content/ViewerContent.ts";
+import type { ContentId } from "../../api/ContentContracts.ts";
 import {
   MarkdownRenderer,
   markdownBlockCount,
@@ -64,6 +65,7 @@ type ViewerPaneProps = Readonly<{
   resolveMobileCtrlInput: (
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
+  onAcceptedContentOpen: (contentId: ContentId) => void;
   onClose?: () => void;
 }>;
 
@@ -107,6 +109,7 @@ export function ViewerPane(props: ViewerPaneProps): ReactElement {
       onActivate={props.onActivate}
       onPaneKeyInput={props.onPaneKeyInput}
       onCancel={props.onClose ?? (() => undefined)}
+      onAcceptedContentOpen={props.onAcceptedContentOpen}
       renderDocument={(leaf, onReturn) => (
         <StandardViewerPane
           {...props}
@@ -115,6 +118,7 @@ export function ViewerPane(props: ViewerPaneProps): ReactElement {
             title: leaf.documentTitle,
             presentation: "inline",
             document: leaf.document,
+            statsIdentity: leaf.statsIdentity,
           }}
           onClose={onReturn}
         />

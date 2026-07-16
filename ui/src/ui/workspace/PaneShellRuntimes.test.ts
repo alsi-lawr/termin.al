@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ContentId } from "../../api/ContentContracts.ts";
 import {
   createCollectionViewerContent,
   createDocumentViewerContent,
@@ -15,6 +16,7 @@ import type {
   CommandOutcome,
   ShellState,
 } from "../../domain/terminal/Shell.ts";
+import { createShellDiagnosticId } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
   createPaneWorkspace,
@@ -220,6 +222,16 @@ function viewerCommandOutcome(
       },
     ],
   };
+}
+
+function contentId(value: string): ContentId {
+  const validation = ContentId.tryCreate(value, "pane runtime test content");
+
+  if (validation.kind === "invalid") {
+    assert.fail(validation.message);
+  }
+
+  return validation.value;
 }
 
 function deferredCommandOutcome(): Readonly<{
@@ -498,6 +510,7 @@ test("returns an asynchronous raw pager to its moved shell runtime", async () =>
       text: "one\ntwo\nthree",
       source: { path: "~/notes/raw.txt" },
     },
+    statsIdentity: { kind: "uncounted" },
   });
 
   delayed.resolve(viewerCommandOutcome(viewer, "inline"));
@@ -608,4 +621,163 @@ test("routes an asynchronous split viewer resolution to its originating pane", a
     paneShellRuntime(settled.runtimes, originPaneId).presentation.kind,
     "shell",
   );
+});
+
+test("reports countable IDs only when inline and split document opens settle successfully", () => {
+  const createRunning = (): Readonly<{
+    workspace: PaneWorkspace;
+    runtimes: PaneShellRuntimes;
+    paneId: PaneId;
+    commandId: Extract<ShellState["lifecycle"], { kind: "running" }>["command"]["id"];
+  }> => {
+    const workspace = createPaneWorkspace({
+      initialContent: createShellPaneContent(),
+    });
+    const paneId = workspace.activePaneId;
+    const runtimes = submitRunningCommand(
+      createPaneShellRuntimes({
+        workspace,
+        currentDirectory: virtualHomeDirectory(),
+      }),
+      paneId,
+    );
+    const state = stateFor(runtimes, paneId);
+
+    if (state.lifecycle.kind !== "running") {
+      assert.fail("Expected a running command.");
+    }
+
+    return { workspace, runtimes, paneId, commandId: state.lifecycle.command.id };
+  };
+  const aboutId = contentId("about");
+  const viewer = createDocumentViewerContent({
+    title: "About",
+    presentation: "inline",
+    document: { text: "# About", source: { path: "~/about.md" } },
+    statsIdentity: { kind: "countable", contentId: aboutId },
+  });
+  const inline = createRunning();
+  const inlineResult = applyPaneShellAction({
+    workspace: inline.workspace,
+    runtimes: inline.runtimes,
+    paneId: inline.paneId,
+    action: {
+      kind: "command.settled",
+      commandId: inline.commandId,
+      outcome: viewerCommandOutcome(viewer, "inline"),
+    },
+  });
+  const split = createRunning();
+  const splitResult = applyPaneShellAction({
+    workspace: split.workspace,
+    runtimes: split.runtimes,
+    paneId: split.paneId,
+    action: {
+      kind: "command.settled",
+      commandId: split.commandId,
+      outcome: viewerCommandOutcome(viewer, "split"),
+    },
+  });
+
+  assert.deepEqual(inlineResult.acceptedContentIds, [aboutId]);
+  assert.deepEqual(splitResult.acceptedContentIds, [aboutId]);
+});
+
+test("does not report collection roots, uncounted viewers, failed commands, or cancelled commands", () => {
+  const workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  const paneId = workspace.activePaneId;
+  const initial = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const submitted = submitRunningCommand(initial, paneId);
+  const running = stateFor(submitted, paneId);
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected a running command.");
+  }
+
+  const collection = createCollectionViewerContent({
+    title: "Projects",
+    emptyMessage: "No projects.",
+    roots: [],
+  });
+  const collectionResult = applyPaneShellAction({
+    workspace,
+    runtimes: submitted,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.lifecycle.command.id,
+      outcome: viewerCommandOutcome(collection, "inline"),
+    },
+  });
+  const nextSubmitted = submitRunningCommand(collectionResult.runtimes, paneId);
+  const nextRunning = stateFor(nextSubmitted, paneId);
+
+  if (nextRunning.lifecycle.kind !== "running") {
+    assert.fail("Expected a second running command.");
+  }
+
+  const uncounted = createDocumentViewerContent({
+    title: "Synthetic",
+    presentation: "raw-pager",
+    document: { text: "synthetic", source: { path: "synthetic" } },
+    statsIdentity: { kind: "uncounted" },
+  });
+  const uncountedResult = applyPaneShellAction({
+    workspace: collectionResult.workspace,
+    runtimes: nextSubmitted,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: nextRunning.lifecycle.command.id,
+      outcome: viewerCommandOutcome(uncounted, "inline"),
+    },
+  });
+
+  assert.deepEqual(collectionResult.acceptedContentIds, []);
+  assert.deepEqual(uncountedResult.acceptedContentIds, []);
+
+  const staleFailure = applyPaneShellAction({
+    workspace: uncountedResult.workspace,
+    runtimes: uncountedResult.runtimes,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: nextRunning.lifecycle.command.id,
+      outcome: {
+        kind: "failed",
+        failure: {
+          kind: "command-rejected",
+          commandName: "open",
+          message: "failed",
+        },
+        diagnostics: [],
+      },
+    },
+  });
+  const staleCancellation = applyPaneShellAction({
+    workspace: uncountedResult.workspace,
+    runtimes: uncountedResult.runtimes,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: nextRunning.lifecycle.command.id,
+      outcome: {
+        kind: "cancelled",
+        diagnostic: {
+          kind: "runtime",
+          id: createShellDiagnosticId("runtime-test-cancelled"),
+          code: "runtime.cancelled",
+          message: "cancelled",
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(staleFailure.acceptedContentIds, []);
+  assert.deepEqual(staleCancellation.acceptedContentIds, []);
 });
