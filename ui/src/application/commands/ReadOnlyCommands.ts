@@ -1391,7 +1391,7 @@ function createGrepCommand(
             continue;
           }
 
-          const result = compilation.pattern.findMatch(line, context.signal);
+          const result = await compilation.pattern.findMatch(line, context.signal);
 
           if (result.kind === "cancelled") {
             return cancelledOutcome();

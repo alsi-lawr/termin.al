@@ -874,6 +874,36 @@ test("cancellation discards accumulated grep output", async () => {
   assert.equal(outcome.kind, "cancelled");
 });
 
+test("queued cancellation interrupts pathological grep matching without output", async () => {
+  const controller = new AbortController();
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("prior", "~/prior.txt", "prior"),
+      grepFileEntry("pathological", "~/pathological.txt", "pathological"),
+    ],
+    [
+      { handle: "prior", path: "~/prior.txt", text: "b" },
+      {
+        handle: "pathological",
+        path: "~/pathological.txt",
+        text: "a".repeat(20_000),
+      },
+    ],
+  );
+  setTimeout(() => {
+    controller.abort();
+  }, 0);
+
+  const outcome = await executeWithSignal(
+    "grep -E '((a?){255})*b' prior.txt pathological.txt",
+    fixture.registry,
+    controller.signal,
+  );
+
+  assert.equal(outcome.kind, "cancelled");
+  assert.equal("outputs" in outcome, false);
+});
+
 test("reports empty, missing, unsupported-option, and cancelled command outcomes", async () => {
   const registry = createRegistry();
   const emptyRequest = { ...commandRequest("echo"), source: "" };

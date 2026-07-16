@@ -26,13 +26,16 @@ function compile(
   return result.pattern;
 }
 
-function match(
+async function match(
   source: string,
   input: string,
   dialect: ConstrainedPosixPatternDialect = "basic",
   caseSensitivity: "sensitive" | "ascii-insensitive" = "sensitive",
-): ConstrainedPosixMatchSpan | undefined {
-  const result = compile(source, dialect, caseSensitivity).findMatch(input, activeSignal);
+): Promise<ConstrainedPosixMatchSpan | undefined> {
+  const result = await compile(source, dialect, caseSensitivity).findMatch(
+    input,
+    activeSignal,
+  );
 
   if (result.kind === "cancelled") {
     assert.fail("Pattern matching was cancelled.");
@@ -58,15 +61,15 @@ function invalidMessage(
   return result.message;
 }
 
-test("matches fixed patterns literally with Unicode-scalar spans", () => {
-  assert.deepEqual(match(".*[x]", "before .*[x] after", "fixed"), { start: 7, end: 12 });
-  assert.deepEqual(match("😀😀", "x😀😀y", "fixed"), { start: 1, end: 3 });
-  assert.deepEqual(match("", "😀", "fixed"), { start: 0, end: 0 });
-  assert.equal(match("Ä", "ä", "fixed", "ascii-insensitive"), undefined);
-  assert.deepEqual(match("A", "a", "fixed", "ascii-insensitive"), { start: 0, end: 1 });
+test("matches fixed patterns literally with Unicode-scalar spans", async () => {
+  assert.deepEqual(await match(".*[x]", "before .*[x] after", "fixed"), { start: 7, end: 12 });
+  assert.deepEqual(await match("😀😀", "x😀😀y", "fixed"), { start: 1, end: 3 });
+  assert.deepEqual(await match("", "😀", "fixed"), { start: 0, end: 0 });
+  assert.equal(await match("Ä", "ä", "fixed", "ascii-insensitive"), undefined);
+  assert.deepEqual(await match("A", "a", "fixed", "ascii-insensitive"), { start: 0, end: 1 });
 });
 
-test("supports the constrained BRE grammar", () => {
+test("supports the constrained BRE grammar", async () => {
   const cases: ReadonlyArray<readonly [string, string, ConstrainedPosixMatchSpan]> = [
     ["a.c", "xxa😀czz", { start: 2, end: 5 }],
     ["^abc$", "abc", { start: 0, end: 3 }],
@@ -83,14 +86,14 @@ test("supports the constrained BRE grammar", () => {
   ];
 
   for (const [source, input, expected] of cases) {
-    assert.deepEqual(match(source, input), expected, source);
+    assert.deepEqual(await match(source, input), expected, source);
   }
 
-  assert.equal(match("^abc$", "xabc"), undefined);
-  assert.equal(match("a.b", "a\nb"), undefined);
+  assert.equal(await match("^abc$", "xabc"), undefined);
+  assert.equal(await match("a.b", "a\nb"), undefined);
 });
 
-test("supports ERE alternation, precedence, grouping, intervals, and epsilon", () => {
+test("supports ERE alternation, precedence, grouping, intervals, and epsilon", async () => {
   const cases: ReadonlyArray<readonly [string, string, ConstrainedPosixMatchSpan]> = [
     ["a+", "zaaa", { start: 1, end: 4 }],
     ["ba?", "b", { start: 0, end: 1 }],
@@ -105,30 +108,30 @@ test("supports ERE alternation, precedence, grouping, intervals, and epsilon", (
   ];
 
   for (const [source, input, expected] of cases) {
-    assert.deepEqual(match(source, input, "extended"), expected, source);
+    assert.deepEqual(await match(source, input, "extended"), expected, source);
   }
 });
 
-test("returns leftmost-longest matches without exponential backtracking", () => {
-  assert.deepEqual(match("(a|aa)", "zaa", "extended"), { start: 1, end: 3 });
-  assert.deepEqual(match("ab|a", "ab", "extended"), { start: 0, end: 2 });
-  assert.deepEqual(match("😀+", "x😀😀y", "extended"), { start: 1, end: 3 });
+test("returns leftmost-longest matches without exponential backtracking", async () => {
+  assert.deepEqual(await match("(a|aa)", "zaa", "extended"), { start: 1, end: 3 });
+  assert.deepEqual(await match("ab|a", "ab", "extended"), { start: 0, end: 2 });
+  assert.deepEqual(await match("😀+", "x😀😀y", "extended"), { start: 1, end: 3 });
 
   const pathological = `${"a".repeat(20_000)}c`;
-  assert.equal(match("^(a|aa)*b$", pathological, "extended"), undefined);
+  assert.equal(await match("^(a|aa)*b$", pathological, "extended"), undefined);
 });
 
-test("applies case-insensitive matching to ASCII only", () => {
-  assert.deepEqual(match("[A-Z]+", "xxaBc", "extended", "ascii-insensitive"), {
+test("applies case-insensitive matching to ASCII only", async () => {
+  assert.deepEqual(await match("[A-Z]+", "xxaBc", "extended", "ascii-insensitive"), {
     start: 0,
     end: 5,
   });
-  assert.deepEqual(match("abc", "xxABc", "basic", "ascii-insensitive"), {
+  assert.deepEqual(await match("abc", "xxABc", "basic", "ascii-insensitive"), {
     start: 2,
     end: 5,
   });
-  assert.equal(match("ä", "Ä", "basic", "ascii-insensitive"), undefined);
-  assert.deepEqual(match("[^A]", "aB", "basic", "ascii-insensitive"), {
+  assert.equal(await match("ä", "Ä", "basic", "ascii-insensitive"), undefined);
+  assert.deepEqual(await match("[^A]", "aB", "basic", "ascii-insensitive"), {
     start: 1,
     end: 2,
   });
@@ -181,7 +184,7 @@ test("enforces pattern, program, and interval limits", () => {
   );
 });
 
-test("honours cancellation before pattern and NFA work", () => {
+test("honours cancellation before pattern and NFA work", async () => {
   const controller = new AbortController();
   controller.abort();
   assert.deepEqual(
@@ -192,5 +195,18 @@ test("honours cancellation before pattern and NFA work", () => {
     ),
     { kind: "cancelled" },
   );
-  assert.deepEqual(compile("a").findMatch("a", controller.signal), { kind: "cancelled" });
+  assert.deepEqual(await compile("a").findMatch("a", controller.signal), { kind: "cancelled" });
+});
+
+test("yields a host task so queued cancellation interrupts pathological NFA work", async () => {
+  const controller = new AbortController();
+  const pattern = compile("((a?){255})*b", "extended");
+  const input = "a".repeat(20_000);
+  setTimeout(() => {
+    controller.abort();
+  }, 0);
+
+  assert.deepEqual(await pattern.findMatch(input, controller.signal), {
+    kind: "cancelled",
+  });
 });

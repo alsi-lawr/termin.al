@@ -2,6 +2,7 @@ const maximumPatternScalars = 256;
 const maximumPatternCodeUnits = 1024;
 const maximumProgramInstructions = 2048;
 const maximumIntervalBound = 255;
+const matcherWorkQuantum = 262_144;
 
 export type ConstrainedPosixPatternDialect = "basic" | "extended" | "fixed";
 
@@ -145,6 +146,10 @@ type Thread = Readonly<{
   instruction: number;
   start: number;
 }>;
+
+type MatcherWorkBudget = {
+  units: number;
+};
 
 function invalid(offset: number, reason: string): InvalidResult {
   return { kind: "invalid", offset, reason };
@@ -1157,6 +1162,7 @@ function addThread(
   position: number,
   inputLength: number,
   signal: AbortSignal,
+  work: MatcherWorkBudget,
 ): "added" | "cancelled" {
   const pending: Thread[] = [initial];
 
@@ -1171,6 +1177,21 @@ function addThread(
       continue;
     }
 
+    const instruction = instructions[thread.instruction];
+
+    if (instruction === undefined) {
+      throw new Error("Compiled pattern threads must reference emitted instructions.");
+    }
+
+    if (
+      instruction.kind === "jump" ||
+      instruction.kind === "split" ||
+      instruction.kind === "start-anchor" ||
+      instruction.kind === "end-anchor"
+    ) {
+      work.units += 1;
+    }
+
     const existingStart = threads.get(thread.instruction);
 
     if (existingStart !== undefined && existingStart <= thread.start) {
@@ -1178,11 +1199,6 @@ function addThread(
     }
 
     threads.set(thread.instruction, thread.start);
-    const instruction = instructions[thread.instruction];
-
-    if (instruction === undefined) {
-      throw new Error("Compiled pattern threads must reference emitted instructions.");
-    }
 
     switch (instruction.kind) {
       case "jump":
@@ -1209,6 +1225,18 @@ function addThread(
   }
 
   return "added";
+}
+
+function matcherHostTaskPause(
+  work: MatcherWorkBudget,
+): Promise<void> | undefined {
+  if (work.units < matcherWorkQuantum) {
+    return undefined;
+  }
+
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
 }
 
 function scalarInput(value: string): ReadonlyArray<string> {
@@ -1290,7 +1318,10 @@ export class ConstrainedPosixPattern {
     };
   }
 
-  findMatch(input: string, signal: AbortSignal): ConstrainedPosixMatchResult {
+  async findMatch(
+    input: string,
+    signal: AbortSignal,
+  ): Promise<ConstrainedPosixMatchResult> {
     if (signal.aborted) {
       return { kind: "cancelled" };
     }
@@ -1298,6 +1329,7 @@ export class ConstrainedPosixPattern {
     const scalars = scalarInput(input);
     let active = new Map<number, number>();
     let best: ConstrainedPosixMatchSpan | undefined;
+    const work: MatcherWorkBudget = { units: 0 };
 
     for (let position = 0; position <= scalars.length; position += 1) {
       if (signal.aborted) {
@@ -1312,10 +1344,23 @@ export class ConstrainedPosixPattern {
           position,
           scalars.length,
           signal,
+          work,
         );
 
         if (added === "cancelled") {
           return { kind: "cancelled" };
+        }
+
+        const pause = matcherHostTaskPause(work);
+
+        if (pause !== undefined) {
+          await pause;
+
+          if (signal.aborted) {
+            return { kind: "cancelled" };
+          }
+
+          work.units = 0;
         }
       }
 
@@ -1326,13 +1371,31 @@ export class ConstrainedPosixPattern {
 
         const instruction = this.#instructions[instructionIndex];
 
-        if (instruction?.kind !== "match") {
+        if (instruction?.kind !== "match" && instruction?.kind !== "character") {
+          continue;
+        }
+
+        work.units += 1;
+
+        if (instruction.kind !== "match") {
           continue;
         }
 
         if (best === undefined || start < best.start || (start === best.start && position > best.end)) {
           best = { start, end: position };
         }
+      }
+
+      const matchPause = matcherHostTaskPause(work);
+
+      if (matchPause !== undefined) {
+        await matchPause;
+
+        if (signal.aborted) {
+          return { kind: "cancelled" };
+        }
+
+        work.units = 0;
       }
 
       if (position === scalars.length) {
@@ -1352,13 +1415,22 @@ export class ConstrainedPosixPattern {
           return { kind: "cancelled" };
         }
 
+        const instruction = this.#instructions[instructionIndex];
+
+        if (instruction?.kind !== "match" && instruction?.kind !== "character") {
+          continue;
+        }
+
+        work.units += 1;
+
         if (best !== undefined && start > best.start) {
           continue;
         }
 
-        const instruction = this.#instructions[instructionIndex];
-
-        if (instruction?.kind !== "character" || !atomMatches(instruction.atom, value, this.#asciiInsensitive)) {
+        if (
+          instruction.kind !== "character" ||
+          !atomMatches(instruction.atom, value, this.#asciiInsensitive)
+        ) {
           continue;
         }
 
@@ -1369,11 +1441,36 @@ export class ConstrainedPosixPattern {
           position + 1,
           scalars.length,
           signal,
+          work,
         );
 
         if (added === "cancelled") {
           return { kind: "cancelled" };
         }
+
+        const addPause = matcherHostTaskPause(work);
+
+        if (addPause !== undefined) {
+          await addPause;
+
+          if (signal.aborted) {
+            return { kind: "cancelled" };
+          }
+
+          work.units = 0;
+        }
+      }
+
+      const characterPause = matcherHostTaskPause(work);
+
+      if (characterPause !== undefined) {
+        await characterPause;
+
+        if (signal.aborted) {
+          return { kind: "cancelled" };
+        }
+
+        work.units = 0;
       }
 
       active = next;
