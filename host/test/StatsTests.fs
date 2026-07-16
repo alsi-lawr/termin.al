@@ -358,8 +358,7 @@ module StatsTests =
             | Stats.RateLimited -> ()
             | result -> failwithf "Duplicate attempts must consume the per-session rate budget, received %A." result
 
-            let reader, subscriptionId, _ =
-                store.Subscribe(CancellationToken.None).GetAwaiter().GetResult()
+            let reader, subscriptionId, _ = store.Subscribe().GetAwaiter().GetResult()
 
             record store "published-session" "about" |> expectAccepted |> ignore
             record store "published-session" "sample-project" |> expectAccepted |> ignore
@@ -493,7 +492,12 @@ module StatsTests =
             client.BaseAddress <- Uri(address)
             action client address
         finally
-            application.StopAsync().GetAwaiter().GetResult()
+            application
+                .StopAsync()
+                .WaitAsync(TimeSpan.FromSeconds(5.0))
+                .GetAwaiter()
+                .GetResult()
+
             application.DisposeAsync().AsTask().GetAwaiter().GetResult()
 
     let private request
@@ -728,16 +732,32 @@ module StatsTests =
                     let heartbeat =
                         reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
 
+                    let heartbeatSeparator =
+                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
+
                     if
                         retry <> "retry: 5000"
                         || not (data.StartsWith("data: {", StringComparison.Ordinal))
                         || separator <> ""
                         || heartbeat <> ": heartbeat"
+                        || heartbeatSeparator <> ""
                     then
                         failwith
                             "The statistics SSE stream must send retry guidance, its current snapshot, and heartbeats."
 
-                    cancellation.Cancel()))
+                    cancellation.Cancel()
+
+                    try
+                        reader
+                            .ReadLineAsync(cancellation.Token)
+                            .AsTask()
+                            .WaitAsync(TimeSpan.FromSeconds(5.0))
+                            .GetAwaiter()
+                            .GetResult()
+                        |> ignore
+
+                        failwith "A cancelled statistics SSE request must stop reading promptly."
+                    with :? OperationCanceledException -> ()))
 
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)

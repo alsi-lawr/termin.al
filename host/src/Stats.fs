@@ -571,7 +571,7 @@ module Stats =
             agent.PostAndAsyncReply(fun reply -> RecordView(sessionId, contentId, allowedContentIds, timestamp, reply))
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-        member _.Subscribe(cancellationToken: CancellationToken) =
+        member _.Subscribe() : Task<ChannelReader<string> * Guid * Snapshot option> =
             let id = Guid.NewGuid()
             let options = BoundedChannelOptions(1)
             options.FullMode <- BoundedChannelFullMode.DropOldest
@@ -580,7 +580,7 @@ module Stats =
             task {
                 let! initial =
                     agent.PostAndAsyncReply(fun reply -> Subscribe(id, channel.Writer, reply))
-                    |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
+                    |> Async.StartAsTask
 
                 return channel.Reader, id, initial
             }
@@ -854,7 +854,7 @@ module Stats =
                     context.Response.ContentType <- "text/event-stream"
                     context.Response.Headers.CacheControl <- "no-store"
                     context.Response.Headers.Append("X-Accel-Buffering", "no")
-                    let! reader, subscriptionId, initial = store.Subscribe(cancellationToken)
+                    let! reader, subscriptionId, initial = store.Subscribe()
 
                     try
                         try
