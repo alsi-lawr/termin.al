@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { ContentId } from "./ContentContracts.ts";
 import {
   DemoStatsClient,
   HttpStatsClient,
-  StatsContentId,
   demoStatsSnapshot,
   validateStatsSnapshot,
 } from "./StatsClient.ts";
@@ -23,8 +23,8 @@ function wireSnapshot(): unknown {
   };
 }
 
-function contentId(value: string): StatsContentId {
-  const validation = StatsContentId.tryCreate(value, "test content");
+function contentId(value: string): ContentId {
+  const validation = ContentId.tryCreate(value, "test content");
 
   if (validation.kind === "invalid") {
     assert.fail(validation.message);

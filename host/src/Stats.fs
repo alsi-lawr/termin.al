@@ -50,6 +50,7 @@ module Stats =
     type RecordResult =
         | Accepted of Snapshot
         | Duplicate of Snapshot
+        | InvalidContent
         | RateLimited
         | Unavailable
 
@@ -338,11 +339,11 @@ module Stats =
                 let mainPath = Path.Combine(directory, "statistics.json")
                 let temporaryPath = Path.Combine(directory, "statistics.json.tmp")
                 let mainExists = File.Exists mainPath
-                let temporaryExists = File.Exists temporaryPath
+                let temporaryExists = File.Exists temporaryPath || Directory.Exists temporaryPath
                 let main = if mainExists then tryParsePersisted mainPath else None
 
                 let temporary =
-                    if temporaryExists then
+                    if File.Exists temporaryPath then
                         tryParsePersisted temporaryPath
                     else
                         None
@@ -352,6 +353,9 @@ module Stats =
                     let normalized = normalizeState (utcDate now) valid
 
                     try
+                        if temporaryExists then
+                            File.Delete temporaryPath
+
                         if normalized <> valid then
                             persist mainPath temporaryPath normalized
 
@@ -476,9 +480,6 @@ module Stats =
                             | Some persisted when not state.Writable ->
                                 reply.Reply Unavailable
                                 return! loop state
-                            | Some persisted when not (allowedContentIds.Contains contentId) ->
-                                reply.Reply Unavailable
-                                return! loop state
                             | Some persisted ->
                                 let minute = utcMinute timestamp
 
@@ -496,7 +497,13 @@ module Stats =
                                         SessionRates = Map.add sessionId sessionWindow currentSessionRates
                                         ProcessRate = Some processWindow }
 
-                                if sessionAllowed && processAllowed then
+                                if not sessionAllowed || not processAllowed then
+                                    reply.Reply RateLimited
+                                    return! loop ratedState
+                                elif not (allowedContentIds.Contains contentId) then
+                                    reply.Reply InvalidContent
+                                    return! loop ratedState
+                                else
 
                                     let seenContent =
                                         ratedState.SeenContentBySession
@@ -543,9 +550,6 @@ module Stats =
                                                     { ratedState with
                                                         Writable = false
                                                         Subscribers = subscribers }
-                                else
-                                    reply.Reply RateLimited
-                                    return! loop ratedState
                     }
 
                 loop initialState)
@@ -567,15 +571,18 @@ module Stats =
             agent.PostAndAsyncReply(fun reply -> RecordView(sessionId, contentId, allowedContentIds, timestamp, reply))
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-        member _.Subscribe(writer: ChannelWriter<string>, cancellationToken: CancellationToken) =
+        member _.Subscribe(cancellationToken: CancellationToken) =
             let id = Guid.NewGuid()
+            let options = BoundedChannelOptions(1)
+            options.FullMode <- BoundedChannelFullMode.DropOldest
+            let channel = Channel.CreateBounded<string>(options)
 
             task {
                 let! initial =
-                    agent.PostAndAsyncReply(fun reply -> Subscribe(id, writer, reply))
+                    agent.PostAndAsyncReply(fun reply -> Subscribe(id, channel.Writer, reply))
                     |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-                return id, initial
+                return channel.Reader, id, initial
             }
 
         member _.Unsubscribe(id: Guid) = agent.Post(Unsubscribe id)
@@ -764,6 +771,7 @@ module Stats =
                             "invalid-request"
                             "The statistics request is invalid."
                 | Some validContentId ->
+                    let sessionId = setSessionCookie allowLocalHttp randomBytes context
                     let! allowed = contentAllowlist contentClient cancellationToken
 
                     match allowed with
@@ -774,15 +782,7 @@ module Stats =
                                 StatusCodes.Status503ServiceUnavailable
                                 "stats-unavailable"
                                 "Statistics are unavailable."
-                    | Some allowedIds when not (allowedIds.Contains validContentId) ->
-                        return
-                            problem
-                                context
-                                StatusCodes.Status400BadRequest
-                                "invalid-content"
-                                "The content identifier is not countable."
                     | Some allowedIds ->
-                        let sessionId = setSessionCookie allowLocalHttp randomBytes context
                         let! result = store.RecordView(sessionId, validContentId, allowedIds, now (), cancellationToken)
 
                         return
@@ -803,6 +803,12 @@ module Stats =
                                     StatusCodes.Status429TooManyRequests
                                     "stats-rate-limited"
                                     "Statistics submissions are rate limited."
+                            | InvalidContent ->
+                                problem
+                                    context
+                                    StatusCodes.Status400BadRequest
+                                    "invalid-content"
+                                    "The content identifier is not countable."
                             | Unavailable ->
                                 problem
                                     context
@@ -848,8 +854,7 @@ module Stats =
                     context.Response.ContentType <- "text/event-stream"
                     context.Response.Headers.CacheControl <- "no-store"
                     context.Response.Headers.Append("X-Accel-Buffering", "no")
-                    let channel = Channel.CreateUnbounded<string>()
-                    let! subscriptionId, initial = store.Subscribe(channel.Writer, cancellationToken)
+                    let! reader, subscriptionId, initial = store.Subscribe(cancellationToken)
 
                     try
                         try
@@ -864,7 +869,7 @@ module Stats =
                             let mutable connected = true
 
                             while connected && not cancellationToken.IsCancellationRequested do
-                                let available = channel.Reader.WaitToReadAsync(cancellationToken).AsTask()
+                                let available = reader.WaitToReadAsync(cancellationToken).AsTask()
                                 let heartbeat = Task.Delay(heartbeatInterval, cancellationToken)
                                 let! completed = Task.WhenAny(available, heartbeat)
 
@@ -874,7 +879,7 @@ module Stats =
                                 elif available.Result then
                                     let mutable payload = Unchecked.defaultof<string>
 
-                                    while channel.Reader.TryRead(&payload) do
+                                    while reader.TryRead(&payload) do
                                         do! context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken)
 
                                     do! context.Response.Body.FlushAsync(cancellationToken)

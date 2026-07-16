@@ -7,7 +7,6 @@ open System.Net.Http
 open System.Text
 open System.Text.Json
 open System.Threading
-open System.Threading.Channels
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting.Server
@@ -258,7 +257,27 @@ module StatsTests =
                 if (snapshot preferredMain).TotalPageViews <> 1L then
                     failwith "A valid main statistics file must be preferred over a valid sibling temporary file."
 
+                if File.Exists(Path.Combine(mainDirectory, "statistics.json.tmp")) then
+                    failwith "A valid main statistics file must remove its stale valid sibling temporary file."
+
                 preferredMain.Shutdown()))
+
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+            record store "session" "about" |> expectAccepted |> ignore
+            store.Shutdown()
+
+            let temporaryPath = Path.Combine(path, "statistics.json.tmp")
+            File.WriteAllText(temporaryPath, "{not-json")
+            let recovered = Stats.createStoreAt path (fun () -> now)
+
+            if (snapshot recovered).TotalPageViews <> 1L then
+                failwith "A malformed sibling temporary file must not replace a valid main statistics file."
+
+            if File.Exists temporaryPath then
+                failwith "A valid main statistics file must remove its malformed sibling temporary file."
+
+            recovered.Shutdown())
 
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
@@ -302,6 +321,29 @@ module StatsTests =
 
             store.Shutdown())
 
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+            record store "session" "about" |> expectAccepted |> ignore
+            store.Shutdown()
+
+            let mainPath = Path.Combine(path, "statistics.json")
+            let persisted = File.ReadAllText mainPath
+            Directory.CreateDirectory(Path.Combine(path, "statistics.json.tmp")) |> ignore
+            let readOnlyStore = Stats.createStoreAt path (fun () -> now)
+            let readOnly = snapshot readOnlyStore
+
+            if readOnly.StorageState <> Stats.ReadOnly || readOnly.TotalPageViews <> 1L then
+                failwith "An unremovable temporary sibling must leave the valid main snapshot available read-only."
+
+            match record readOnlyStore "another-session" "sample-project" with
+            | Stats.Unavailable -> ()
+            | result -> failwithf "A cleanup-failed store must reject writes as unavailable, received %A." result
+
+            if File.ReadAllText(mainPath) <> persisted then
+                failwith "Temporary-sibling cleanup failure must not damage the valid main statistics file."
+
+            readOnlyStore.Shutdown())
+
     let private runRateAndSubscriptionChecks () =
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
@@ -316,22 +358,63 @@ module StatsTests =
             | Stats.RateLimited -> ()
             | result -> failwithf "Duplicate attempts must consume the per-session rate budget, received %A." result
 
-            let channel = Channel.CreateUnbounded<string>()
+            let reader, subscriptionId, _ =
+                store.Subscribe(CancellationToken.None).GetAwaiter().GetResult()
 
-            let subscriptionId, _ =
-                store.Subscribe(channel.Writer, CancellationToken.None).GetAwaiter().GetResult()
-
+            record store "published-session" "about" |> expectAccepted |> ignore
             record store "published-session" "sample-project" |> expectAccepted |> ignore
 
             let mutable publication = ""
 
             if
-                not (channel.Reader.TryRead(&publication))
-                || not (publication.Contains("\"totalPageViews\":2", StringComparison.Ordinal))
+                not (reader.TryRead(&publication))
+                || not (publication.Contains("\"totalPageViews\":3", StringComparison.Ordinal))
             then
-                failwith "Accepted mutations must publish a validated snapshot to subscribers."
+                failwith "A slow subscriber must retain only the latest accepted aggregate snapshot."
+
+            let mutable superseded = ""
+
+            if reader.TryRead(&superseded) then
+                failwith "A slow subscriber must not retain superseded aggregate snapshots."
 
             store.Unsubscribe subscriptionId
+            store.Shutdown())
+
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+
+            for attempt in 1..15 do
+                match
+                    store.RecordView(
+                        "invalid-session",
+                        "lexically-valid",
+                        allowedContent,
+                        now,
+                        CancellationToken.None
+                    )
+                    |> _.GetAwaiter().GetResult()
+                with
+                | Stats.InvalidContent -> ()
+                | result -> failwithf "Unexpected invalid-content result for attempt %d: %A." attempt result
+
+            match
+                store.RecordView(
+                    "invalid-session",
+                    "lexically-valid",
+                    allowedContent,
+                    now,
+                    CancellationToken.None
+                )
+                |> _.GetAwaiter().GetResult()
+            with
+            | Stats.RateLimited -> ()
+            | result -> failwithf "Invalid content must consume the session rate budget, received %A." result
+
+            let unchanged = snapshot store
+
+            if unchanged.TotalSessions <> 0L || unchanged.TotalPageViews <> 0L then
+                failwith "Invalid content must not change aggregate totals."
+
             store.Shutdown())
 
         withTemporaryDirectory (fun path ->
@@ -341,27 +424,55 @@ module StatsTests =
                 let sessionId = $"process-session-{sessionIndex}"
 
                 for attempt in 1..15 do
-                    match record store sessionId "about" with
-                    | Stats.Accepted _ when attempt = 1 -> ()
-                    | Stats.Duplicate _ when attempt > 1 -> ()
+                    match
+                        store.RecordView(
+                            sessionId,
+                            "lexically-valid",
+                            allowedContent,
+                            now,
+                            CancellationToken.None
+                        )
+                        |> _.GetAwaiter().GetResult()
+                    with
+                    | Stats.InvalidContent -> ()
                     | result ->
                         failwithf
-                            "Unexpected process-rate result for session %d attempt %d: %A."
+                            "Unexpected invalid-content process-rate result for session %d attempt %d: %A."
                             sessionIndex
                             attempt
                             result
 
-            match record store "process-session-21" "about" with
+            match
+                store.RecordView(
+                    "process-session-21",
+                    "lexically-valid",
+                    allowedContent,
+                    now,
+                    CancellationToken.None
+                )
+                |> _.GetAwaiter().GetResult()
+            with
             | Stats.RateLimited -> ()
-            | result -> failwithf "Expected the 301st process attempt to be rate limited, received %A." result
+            | result -> failwithf "Invalid content must consume the process rate budget, received %A." result
+
+            let unchanged = snapshot store
+
+            if unchanged.TotalSessions <> 0L || unchanged.TotalPageViews <> 0L then
+                failwith "Process-rate invalid content must not change aggregate totals."
 
             let nextMinute = now.AddMinutes(1.0)
 
             match
-                store.RecordView("process-session-21", "about", allowedContent, nextMinute, CancellationToken.None)
+                store.RecordView(
+                    "process-session-21",
+                    "lexically-valid",
+                    allowedContent,
+                    nextMinute,
+                    CancellationToken.None
+                )
                 |> _.GetAwaiter().GetResult()
             with
-            | Stats.Accepted _ -> ()
+            | Stats.InvalidContent -> ()
             | result -> failwithf "A new UTC minute must reset bounded rate windows, received %A." result
 
             store.Shutdown())
@@ -474,6 +585,24 @@ module StatsTests =
                     if arbitraryIdResponse.StatusCode <> HttpStatusCode.BadRequest then
                         failwith "Lexically valid IDs outside the catalog/project boundary must be rejected."
 
+                    let unchangedAfterInvalid = snapshot store
+
+                    if unchangedAfterInvalid.TotalSessions <> 0L || unchangedAfterInvalid.TotalPageViews <> 0L then
+                        failwith "An invalid content identifier must not change API aggregate totals."
+
+                    use lexicalInvalid =
+                        request
+                            HttpMethod.Post
+                            "/api/stats/view"
+                            (Some origin)
+                            (Some "{\"contentId\":\"not countable!\"}")
+                            (Some cookie)
+
+                    use lexicalInvalidResponse = client.Send lexicalInvalid
+
+                    if lexicalInvalidResponse.StatusCode <> HttpStatusCode.BadRequest then
+                        failwith "Lexically invalid content IDs must remain invalid requests."
+
                     use validPost =
                         request
                             HttpMethod.Post
@@ -531,6 +660,46 @@ module StatsTests =
                     then
                         failwith
                             "Project IDs from the current content boundary must be countable without duplicating sessions."
+
+                    for attempt in 5..15 do
+                        use invalidContent =
+                            request
+                                HttpMethod.Post
+                                "/api/stats/view"
+                                (Some origin)
+                                (Some "{\"contentId\":\"lexically-valid\"}")
+                                (Some cookie)
+
+                        use invalidContentResponse = client.Send invalidContent
+
+                        if invalidContentResponse.StatusCode <> HttpStatusCode.BadRequest then
+                            failwithf
+                                "Expected invalid-content attempt %d to remain 400, received %O."
+                                attempt
+                                invalidContentResponse.StatusCode
+
+                    use rateLimitedInvalidContent =
+                        request
+                            HttpMethod.Post
+                            "/api/stats/view"
+                            (Some origin)
+                            (Some "{\"contentId\":\"lexically-valid\"}")
+                            (Some cookie)
+
+                    use rateLimitedInvalidContentResponse = client.Send rateLimitedInvalidContent
+
+                    if rateLimitedInvalidContentResponse.StatusCode <> HttpStatusCode.TooManyRequests then
+                        failwith
+                            "Lexically valid invalid content must consume the API session budget before allowlist rejection."
+
+                    let unchangedAfterRateLimit = snapshot store
+
+                    if
+                        unchangedAfterRateLimit.TotalSessions <> 1L
+                        || unchangedAfterRateLimit.TotalPageViews <> 2L
+                        || unchangedAfterRateLimit.PageViewsByContent.ContainsKey "lexically-valid"
+                    then
+                        failwith "Invalid API content must never aggregate or enter persisted content counts."
 
                     use cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5.0))
                     use sseRequest = request HttpMethod.Get "/api/stats/events" None None (Some cookie)

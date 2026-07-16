@@ -1,27 +1,7 @@
 import { apiPathPrefix } from "./ApiPath.ts";
+import { ContentId, type ContentValidation } from "./ContentContracts.ts";
 
-export type StatsValidation<Value> =
-  | Readonly<{ kind: "valid"; value: Value }>
-  | Readonly<{ kind: "invalid"; message: string }>;
-
-export class StatsContentId {
-  readonly value: string;
-
-  private constructor(value: string) {
-    this.value = value;
-  }
-
-  static tryCreate(
-    value: string,
-    field: string,
-  ): StatsValidation<StatsContentId> {
-    const stableIdentifier = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
-
-    return stableIdentifier.test(value)
-      ? { kind: "valid", value: new StatsContentId(value) }
-      : { kind: "invalid", message: `${field} must be a stable identifier.` };
-  }
-}
+export type StatsValidation<Value> = ContentValidation<Value>;
 
 export type StatsDailyCount = Readonly<{
   date: string;
@@ -30,7 +10,7 @@ export type StatsDailyCount = Readonly<{
 }>;
 
 export type StatsContentCount = Readonly<{
-  contentId: StatsContentId;
+  contentId: ContentId;
   pageViews: number;
 }>;
 
@@ -67,7 +47,7 @@ export type StatsSubscription = Readonly<{
 export type StatsClient = Readonly<{
   loadSnapshot: (signal: AbortSignal) => Promise<StatsLoadResult>;
   recordView: (
-    contentId: StatsContentId,
+    contentId: ContentId,
     signal: AbortSignal,
   ) => Promise<StatsRecordResult>;
   subscribe: (listener: (event: StatsStreamEvent) => void) => StatsSubscription;
@@ -193,7 +173,7 @@ function validateContentCounts(
   const counts: StatsContentCount[] = [];
 
   for (const contentIdValue of Object.keys(value).sort()) {
-    const contentId = StatsContentId.tryCreate(
+    const contentId = ContentId.tryCreate(
       contentIdValue,
       "pageViewsByContent key",
     );
@@ -323,7 +303,7 @@ export class HttpStatsClient implements StatsClient {
   }
 
   async recordView(
-    contentId: StatsContentId,
+    contentId: ContentId,
     signal: AbortSignal,
   ): Promise<StatsRecordResult> {
     try {
@@ -415,8 +395,8 @@ function demoDailyCounts(): ReadonlyArray<StatsDailyCount> {
   return counts;
 }
 
-function requiredStatsContentId(value: string): StatsContentId {
-  const validation = StatsContentId.tryCreate(value, "demo content");
+function requiredContentId(value: string): ContentId {
+  const validation = ContentId.tryCreate(value, "demo content");
 
   if (validation.kind === "invalid") {
     throw new Error(validation.message);
@@ -430,7 +410,7 @@ export const demoStatsSnapshot: StatsSnapshot = Object.freeze({
   totalPageViews: 512,
   pageViewsByContent: Object.freeze([
     Object.freeze({
-      contentId: requiredStatsContentId("about"),
+      contentId: requiredContentId("about"),
       pageViews: 512,
     }),
   ]),
@@ -448,7 +428,7 @@ export class DemoStatsClient implements StatsClient {
   }
 
   recordView(
-    _contentId: StatsContentId,
+    _contentId: ContentId,
     signal: AbortSignal,
   ): Promise<StatsRecordResult> {
     return Promise.resolve(
