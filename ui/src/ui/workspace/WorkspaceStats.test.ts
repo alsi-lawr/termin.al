@@ -85,6 +85,16 @@ const recordedSnapshot = snapshot({
   counts: [{ id: "about", views: 5 }],
   storageState: "writable",
 });
+const olderBootstrapSnapshot = snapshot({
+  totalSessions: 1,
+  counts: [{ id: "about", views: 1 }],
+  storageState: "writable",
+});
+const newerStreamSnapshot = snapshot({
+  totalSessions: 1,
+  counts: [{ id: "about", views: 2 }],
+  storageState: "writable",
+});
 
 test("presents live, reconnecting, stale, no-data, loading, and unavailable states", () => {
   const live = workspaceStatsFromSnapshot(liveSnapshot);
@@ -231,6 +241,46 @@ test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP 
     }
     cleanup();
   }
+});
+
+test("preserves a newer reconnecting stream snapshot when delayed bootstrap HTTP completes", async () => {
+  let listener: (event: StatsStreamEvent) => void = () => undefined;
+  let resolveLoad: (result: StatsLoadResult) => void = () => undefined;
+  const loadResult = new Promise<StatsLoadResult>((resolve) => {
+    resolveLoad = resolve;
+  });
+  const client: StatsClient = {
+    loadSnapshot: () => loadResult,
+    recordView: () => Promise.resolve({
+      kind: "recorded",
+      snapshot: newerStreamSnapshot,
+    }),
+    subscribe: (nextListener) => {
+      listener = nextListener;
+      return { close: () => undefined };
+    },
+  };
+  let state: WorkspaceStatsState = { kind: "loading" };
+  const dispatch = (
+    transition: (current: WorkspaceStatsState) => WorkspaceStatsState,
+  ): void => {
+    state = transition(state);
+  };
+  const currentState = (): WorkspaceStatsState => state;
+  const cleanup = connectWorkspaceStats(client, dispatch);
+
+  listener({ kind: "snapshot", snapshot: newerStreamSnapshot });
+  listener({ kind: "disconnected" });
+  resolveLoad({ kind: "available", snapshot: olderBootstrapSnapshot });
+  await Promise.resolve();
+
+  const afterBootstrap = currentState();
+  assert.equal(afterBootstrap.kind, "reconnecting");
+  if (afterBootstrap.kind === "reconnecting") {
+    assert.strictEqual(afterBootstrap.snapshot, newerStreamSnapshot);
+    assert.equal(afterBootstrap.snapshot.totalPageViews, 2);
+  }
+  cleanup();
 });
 
 test("record responses update retained data without promoting reconnecting or stale lifecycle", async () => {

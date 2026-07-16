@@ -41,10 +41,9 @@ function applyLoadResult(
   switch (state.kind) {
     case "loading":
     case "unavailable":
-    case "reconnecting":
       return { kind: "reconnecting", snapshot: result.snapshot };
+    case "reconnecting":
     case "stale":
-      return { kind: "stale", snapshot: result.snapshot };
     case "live":
     case "no-data":
       return state;
