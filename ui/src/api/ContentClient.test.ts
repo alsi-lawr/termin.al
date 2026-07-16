@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   resolveVirtualPath,
@@ -7,31 +6,24 @@ import {
 } from "../domain/filesystem/VirtualFilesystem.ts";
 import { HttpContentClient } from "./ContentClient.ts";
 
-function fixture(name: string): unknown {
-  const path = new URL(`../../../contracts/fixtures/${name}`, import.meta.url);
-
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-
 function responseForPath(path: string): Response {
   switch (path) {
     case "/api/content/catalog":
-      return Response.json(fixture("catalog.json"));
+      return Response.json({"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"projects","path":"~/projects","updatedAt":"2026-07-15T00:00:01.000Z","size":0},{"kind":"directory","id":"blog","path":"~/blog","updatedAt":"2026-07-15T00:00:02.000Z","size":0},{"kind":"file","id":"about-document","path":"~/about.md","updatedAt":"2026-07-15T00:00:03.000Z","size":42,"documentHandle":"about"},{"kind":"file","id":"publication-document","path":"~/blog/validated-metadata.md","updatedAt":"2026-07-15T00:00:04.000Z","size":128,"documentHandle":"blog-validated-metadata"}],"source":{"repository":"example-owner/content","path":"content/catalog.json","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/catalog.json"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/projects":
-      return Response.json(fixture("projects.json"));
+      return Response.json({"projects":[{"id":"sample-project","slug":"sample-project","name":"Sample Project","summary":"A validated project fixture.","url":"https://github.com/example-owner/sample-project","repository":"example-owner/sample-project","collectionPath":"validated/core","updatedAt":"2026-07-15T00:00:03.000Z","tags":["fsharp","typescript"],"readme":"# Sample Project README\n\nThis is the supplied README body, not the project summary."},{"id":"second-project","slug":"second-project","name":"Second Project","summary":"A second validated project fixture.","url":"https://github.com/example-owner/second-project","repository":"example-owner/second-project","collectionPath":"validated/examples","updatedAt":"2026-07-15T00:00:04.000Z","tags":["typescript"],"readme":"# Second Project README\n\nThis is a second supplied README body."}],"source":{"repository":"example-owner/content","path":"content/projects.json","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/projects.json"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/now":
-      return Response.json(fixture("now.json"));
+      return Response.json({"title":"Now","body":"# Now\n\nA validated current-status fixture.","updatedAt":"2026-07-15T00:00:04.000Z","source":{"repository":"example-owner/content","path":"content/now.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/now.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/changelog":
-      return Response.json(fixture("changelog.json"));
+      return Response.json({"unreleased":[{"sha":"0123456789abcdef0123456789abcdef01234567","summary":"Add validated content contracts","authoredAt":"2026-07-15T00:00:05.000Z","url":"https://github.com/example-owner/application/commit/0123456789abcdef0123456789abcdef01234567"}],"releases":[{"tag":"v1.0.0","name":"1.0.0","publishedAt":"2026-07-14T00:00:00.000Z","body":"Initial validated release.","url":"https://github.com/example-owner/application/releases/tag/v1.0.0","commits":[{"sha":"89abcdef0123456789abcdef0123456789abcdef","summary":"Initial release","authoredAt":"2026-07-14T00:00:00.000Z","url":"https://github.com/example-owner/application/commit/89abcdef0123456789abcdef0123456789abcdef"}]}],"source":{"repository":"example-owner/application","path":"releases","revision":"main","url":"https://github.com/example-owner/application/releases"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/document/about":
-      return Response.json(fixture("document-about.json"));
+      return Response.json({"kind":"page","id":"about","path":"~/about.md","title":"About","updatedAt":"2026-07-15T00:00:03.000Z","body":"# About\n\nA validated shared content fixture.","source":{"repository":"example-owner/content","path":"content/about.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/about.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/document/blog-validated-metadata":
-      return Response.json(fixture("document-publication.json"));
+      return Response.json({"kind":"blog","id":"blog-validated-metadata","slug":"validated-metadata","path":"~/blog/validated-metadata.md","title":"Validated Metadata","summary":"The supplied publication summary.","publishedAt":"2026-07-10T00:00:00.000Z","updatedAt":"2026-07-15T00:00:04.000Z","tags":["fsharp","content"],"body":"# Body Heading\n\nThis first body paragraph is not the supplied summary.","source":{"repository":"example-owner/content","path":"blog/validated-metadata.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/blog/validated-metadata.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     default:
       throw new Error(`Unexpected content API request: ${path}`);
   }
 }
-
 function requestPath(input: RequestInfo | URL): string {
   if (typeof input === "string") {
     return input;

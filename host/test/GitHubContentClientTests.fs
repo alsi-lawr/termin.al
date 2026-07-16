@@ -2,12 +2,10 @@ namespace Termin.Al.Host.Tests
 
 open System
 open System.Collections.Generic
-open System.IO
 open System.Net
 open System.Net.Http
 open System.Net.Http.Headers
 open System.Text
-open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Configuration
@@ -153,14 +151,6 @@ module GitHubContentClientTests =
 
     let private catalogManifest =
         "{\"entries\":[{\"kind\":\"directory\",\"id\":\"home\",\"path\":\"~\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":0},{\"kind\":\"file\",\"id\":\"about-document\",\"path\":\"~/about.md\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":64,\"documentHandle\":\"about\",\"sourcePath\":\"content/about.md\"}]}"
-
-    let private fractionalCatalogManifest () =
-        let path =
-            Path.Combine(AppContext.BaseDirectory, "contracts", "fixtures", "catalog-fractional-size.json")
-
-        use document = JsonDocument.Parse(File.ReadAllText path)
-        let entries = document.RootElement.GetProperty("entries").GetRawText()
-        "{\"entries\":" + entries + "}"
 
     let private projectsManifest =
         "{\"projects\":[{\"id\":\"curated-project\",\"slug\":\"curated-project\",\"name\":\"Curated Project\",\"summary\":\"Curated project summary.\",\"url\":\"https://github.com/example-owner/curated-project\",\"repository\":\"example-owner/curated-project\",\"collectionPath\":\"curated/featured\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"fsharp\"]}]}"
@@ -1039,7 +1029,10 @@ module GitHubContentClientTests =
                 | "/repos/example-owner/content" ->
                     response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
                 | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
-                    response HttpStatusCode.OK (fractionalCatalogManifest ()) None
+                    response
+                        HttpStatusCode.OK
+                        "{\"entries\":[{\"kind\":\"directory\",\"id\":\"home\",\"path\":\"~\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":0.5}]}"
+                        None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =

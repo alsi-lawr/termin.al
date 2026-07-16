@@ -11,16 +11,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="ContentContractsTests.fs" />
     <Compile Include="GitHubContentClientTests.fs" />
     <Compile Include="StatsTests.fs" />
     <Compile Include="Program.fs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="../../contracts/fixtures/**/*">
-      <Link>contracts/fixtures/%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 </Project>

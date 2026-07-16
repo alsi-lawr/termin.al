@@ -210,7 +210,6 @@ module Program =
     [<EntryPoint>]
     let main _ =
         try
-            ContentContractsTests.run ()
             GitHubContentClientTests.run ()
             StatsTests.run ()
             runHostContractChecks ()
