@@ -3,15 +3,19 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "bun@1.3.13",
+  "engines": {
+    "bun": "1.3.13"
+  },
   "scripts": {
-    "dev": "vite --mode demo --port 5173 --strictPort",
-    "dev:live": "vite --mode live --port 5173 --strictPort",
-    "build": "npm run manpages:check && tsc -b && vite build",
-    "lint": "oxlint .",
-    "manpages:generate": "node --experimental-strip-types ../scripts/generate-manpages.ts",
-    "manpages:check": "node --experimental-strip-types ../scripts/generate-manpages.ts --check",
-    "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "preview": "vite preview --port 5175 --strictPort"
+    "dev": "bun run vite --mode demo --port 5173 --strictPort",
+    "dev:live": "bun run vite --mode live --port 5173 --strictPort",
+    "build": "bun run manpages:check && bun run tsc -b && bun run vite build",
+    "lint": "bun run oxlint .",
+    "manpages:generate": "bun ../scripts/generate-manpages.ts",
+    "manpages:check": "bun ../scripts/generate-manpages.ts --check",
+    "test": "bun test --max-concurrency 1 ./src",
+    "preview": "bun run vite preview --port 5175 --strictPort"
   },
   "dependencies": {
     "@tailwindcss/vite": "4.3.2",
