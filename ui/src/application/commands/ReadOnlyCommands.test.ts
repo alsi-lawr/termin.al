@@ -89,6 +89,18 @@ async function execute(
   });
 }
 
+async function executeWithSignal(
+  source: string,
+  registry: CommandRegistry,
+  signal: AbortSignal,
+): Promise<CommandOutcome> {
+  return executeCommandLine({
+    registry,
+    request: commandRequest(source),
+    signal,
+  });
+}
+
 function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "succeeded" }> {
   if (outcome.kind !== "succeeded") {
     assert.fail("Expected a successful command outcome.");
@@ -106,6 +118,20 @@ function outputText(outcome: CommandOutcome): string {
   }
 
   return output.text;
+}
+
+function failureMessage(outcome: CommandOutcome): string {
+  if (outcome.kind !== "failed") {
+    assert.fail("Expected a failed command outcome.");
+  }
+
+  const diagnostic = outcome.diagnostics[0];
+
+  if (diagnostic === undefined) {
+    assert.fail("Expected a failure diagnostic.");
+  }
+
+  return diagnostic.message;
 }
 
 test("registers the accepted read-only GNU-like corpus without list", () => {
@@ -132,6 +158,96 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
     ],
   );
   assert.equal(resolveCommand(registry, "list").kind, "missing");
+});
+
+test("adds exact ls tree parsing, metadata, and tree output parity", async () => {
+  const registry = createRegistry();
+  const tree = outputText(await execute("tree projects", registry));
+  const lsTree = outputText(await execute("ls --tree projects", registry));
+  const reordered = outputText(await execute("ls projects --tree", registry));
+  const repeated = outputText(
+    await execute("ls --tree --tree projects", registry),
+  );
+  const allTree = outputText(await execute("tree -a", registry));
+  const lsAllTree = outputText(await execute("ls -a --tree", registry));
+  const ordinary = outputText(await execute("ls", registry));
+  const repeatedAll = outputText(await execute("ls -aa", registry));
+  const all = outputText(await execute("ls -a", registry));
+  const repeatedLong = outputText(await execute("ls -ll about.md", registry));
+  const longFile = outputText(await execute("ls -l about.md", registry));
+  const ordinaryFile = outputText(await execute("ls about.md", registry));
+  const treeFileFailure = failureMessage(
+    await execute("tree about.md", registry),
+  );
+  const lsTreeFileFailure = failureMessage(
+    await execute("ls --tree about.md", registry),
+  );
+  const terminatedLs = failureMessage(await execute("ls -- --tree", registry));
+  const terminatedTree = failureMessage(
+    await execute("ls --tree -- --tree", registry),
+  );
+  const terminatedLongTree = failureMessage(
+    await execute("ls -l -- --tree", registry),
+  );
+  const terminatedTreeLong = failureMessage(
+    await execute("ls --tree -- -l", registry),
+  );
+  const manual = outputText(await execute("man ls", registry));
+  const resolution = resolveCommand(registry, "ls");
+
+  if (resolution.kind === "missing") {
+    assert.fail("Expected ls command metadata.");
+  }
+
+  assert.equal(lsTree, tree);
+  assert.equal(reordered, tree);
+  assert.equal(repeated, tree);
+  assert.equal(lsAllTree, allTree);
+  assert.equal(ordinary.length > 0, true);
+  assert.equal(repeatedAll, all);
+  assert.equal(repeatedLong, longFile);
+  assert.equal(ordinaryFile, "about.md");
+  assert.equal(lsTreeFileFailure, treeFileFailure);
+  assert.equal(terminatedLs, "Path not found: ~/--tree");
+  assert.equal(terminatedTree, "Path not found: ~/--tree");
+  assert.equal(terminatedLongTree, "Path not found: ~/--tree");
+  assert.equal(terminatedTreeLong, "Path not found: ~/-l");
+  assert.equal(resolution.command.metadata.usage, "ls [-a] [-l] [--tree] [path]");
+  assert.deepEqual(resolution.command.metadata.examples, [
+    "ls",
+    "ls -l projects",
+    "ls --tree projects",
+    "ls -a --tree",
+  ]);
+  assert.match(
+    manual,
+    /\nSYNOPSIS\n       ls \[-a\] \[-l\] \[--tree\] \[path\]/u,
+  );
+  assert.match(manual, /\n       \$ ls --tree projects/u);
+  assert.match(manual, /\n       \$ ls -a --tree/u);
+});
+
+test("rejects every ls long-tree combination independently of ordering", async () => {
+  const registry = createRegistry();
+  const invocations = [
+    "ls -l --tree",
+    "ls --tree -l",
+    "ls -al --tree",
+    "ls --tree -la",
+    "ls -a -l --tree",
+    "ls --tree -a -l",
+    "ls -ll --tree",
+    "ls --tree -l -l",
+    "ls projects -l --tree",
+    "ls --tree projects -l",
+  ];
+
+  for (const invocation of invocations) {
+    assert.equal(
+      failureMessage(await execute(invocation, registry)),
+      "Unsupported option combination: -l and --tree.",
+    );
+  }
 });
 
 test("executes virtual readers for quoted, relative, and current-directory paths", async () => {
@@ -271,6 +387,24 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   const longListing = outputText(await execute("ls -al", registry));
   const normalListing = outputText(await execute("ls", registry));
   const emptyListing = outputText(await execute("ls empty", registry));
+  const tree = outputText(await execute("tree", registry));
+  const lsTree = outputText(await execute("ls --tree", registry));
+  const allTree = outputText(await execute("tree -a", registry));
+  const lsAllTree = outputText(await execute("ls -a --tree", registry));
+  const boundedRegistry = createCommandRegistry({
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents: demoContentCorpus.documents,
+      recursiveEntryLimit: 1,
+    }),
+  });
+  const boundedTree = succeeded(await execute("ls --tree", boundedRegistry));
+  const boundedText = boundedTree.outputs.find(
+    (output) => output.kind === "text",
+  );
+  const boundedDiagnostic = boundedTree.outputs.find(
+    (output) => output.kind === "diagnostic",
+  );
 
   assert.match(longListing, /^dr-xr-xr-x\s+0\s+2026-02-01T00:00:00 UTC \.\/$/mu);
   assert.match(longListing, /^----------\s+144\s+2026-02-05T00:00:00 UTC cv\.md \[locked\]$/mu);
@@ -278,6 +412,22 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   assert.match(longListing, /a-very-long-unicode-name-長い😀\.md$/mu);
   assert.equal(normalListing.includes(".hidden.md"), false);
   assert.equal(emptyListing, "");
+  assert.equal(lsTree, tree);
+  assert.equal(lsAllTree, allTree);
+  assert.equal(tree.includes(".hidden.md"), false);
+  assert.equal(allTree.includes(".hidden.md"), true);
+
+  if (boundedText === undefined || boundedText.kind !== "text") {
+    assert.fail("Expected bounded ls tree text.");
+  }
+
+  if (boundedDiagnostic === undefined || boundedDiagnostic.kind !== "diagnostic") {
+    assert.fail("Expected bounded ls tree truncation diagnostic.");
+  }
+
+  assert.equal(boundedText.text, "~");
+  assert.equal(boundedDiagnostic.diagnostic.code, "runtime.truncated");
+  assert.equal(boundedDiagnostic.diagnostic.message, "ls stopped after 1 entries.");
 });
 
 test("searches with documented flags and marks bounded recursive results", async () => {
@@ -319,11 +469,19 @@ test("reports empty, missing, unsupported-option, and cancelled command outcomes
       read: () => Promise.resolve({ kind: "cancelled" }),
     }),
   );
+  const abortController = new AbortController();
+  abortController.abort();
+  const treeCancelled = await executeWithSignal(
+    "ls --tree",
+    registry,
+    abortController.signal,
+  );
 
   assert.equal(empty.kind, "failed");
   assert.equal(missing.kind, "failed");
   assert.equal(option.kind, "failed");
   assert.equal(cancelled.kind, "cancelled");
+  assert.equal(treeCancelled.kind, "cancelled");
 });
 
 test("routes unexpected supplier failures through the execution boundary", async () => {

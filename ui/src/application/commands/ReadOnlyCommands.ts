@@ -47,10 +47,18 @@ type OptionParseResult<Value> =
 type LsOptions = Readonly<{
   showAll: boolean;
   long: boolean;
+  tree: boolean;
   path: string;
 }>;
 
 type TreeOptions = Readonly<{
+  showAll: boolean;
+  maximumDepth: number;
+  path: string;
+}>;
+
+type TreeExecutionOptions = Readonly<{
+  commandName: "ls" | "tree";
   showAll: boolean;
   maximumDepth: number;
   path: string;
@@ -248,6 +256,7 @@ function parseLsOptions(
   const boundary = optionBoundary(invocation);
   let showAll = false;
   let long = false;
+  let tree = false;
   const operands: string[] = [];
 
   for (let index = 0; index < invocation.arguments.length; index += 1) {
@@ -259,6 +268,11 @@ function parseLsOptions(
 
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
+      continue;
+    }
+
+    if (value === "--tree") {
+      tree = true;
       continue;
     }
 
@@ -277,13 +291,23 @@ function parseLsOptions(
     }
   }
 
+  if (long && tree) {
+    return {
+      kind: "invalid",
+      message: "Unsupported option combination: -l and --tree.",
+    };
+  }
+
   if (operands.length > 1) {
-    return { kind: "invalid", message: "Usage: ls [-a] [-l] [path]" };
+    return {
+      kind: "invalid",
+      message: "Usage: ls [-a] [-l] [--tree] [path]",
+    };
   }
 
   return {
     kind: "parsed",
-    value: { showAll, long, path: operands[0] ?? "." },
+    value: { showAll, long, tree, path: operands[0] ?? "." },
   };
 }
 
@@ -715,6 +739,48 @@ function treeLines(
   return lines.join("\n");
 }
 
+function executeTree(
+  filesystem: VirtualFilesystem,
+  context: CommandExecutionContext,
+  recursiveEntryLimit: number,
+  options: TreeExecutionOptions,
+): CommandOutcome {
+  const resolution = resolveVirtualDirectory(
+    filesystem,
+    context.currentDirectory,
+    options.path,
+  );
+
+  if (resolution.kind !== "found") {
+    return failureOutcome(options.commandName, resolution);
+  }
+
+  const traversal = traverseVirtualDirectory({
+    filesystem,
+    directory: resolution.directory,
+    limit: recursiveEntryLimit,
+    maximumDepth: options.maximumDepth,
+    signal: context.signal,
+  });
+
+  if (traversal.kind === "cancelled") {
+    return cancelledOutcome();
+  }
+
+  const outputs: ShellOutput[] = [
+    textOutput(
+      `${options.commandName}-output`,
+      treeLines(resolution.directory, traversal, options.showAll),
+    ),
+  ];
+
+  if (traversal.kind === "truncated") {
+    outputs.push(truncationOutput(options.commandName, recursiveEntryLimit));
+  }
+
+  return succeededOutcome(outputs);
+}
+
 function selectedFiles(
   filesystem: VirtualFilesystem,
   context: CommandExecutionContext,
@@ -765,6 +831,7 @@ function selectedFiles(
 
 function createLsCommand(
   filesystem: VirtualFilesystem,
+  recursiveEntryLimit: number,
 ): CommandDefinition {
   return {
     metadata: {
@@ -772,14 +839,23 @@ function createLsCommand(
       name: "ls",
       aliases: [],
       summary: "List virtual files and directories.",
-      usage: "ls [-a] [-l] [path]",
-      examples: ["ls", "ls -l projects"],
+      usage: "ls [-a] [-l] [--tree] [path]",
+      examples: ["ls", "ls -l projects", "ls --tree projects", "ls -a --tree"],
     },
     execute: async (invocation, context) => {
       const parsed = parseLsOptions(invocation);
 
       if (parsed.kind === "invalid") {
         return rejectedOutcome("ls", parsed.message);
+      }
+
+      if (parsed.value.tree) {
+        return executeTree(filesystem, context, recursiveEntryLimit, {
+          commandName: "ls",
+          showAll: parsed.value.showAll,
+          maximumDepth: maximumRecursiveDepth,
+          path: parsed.value.path,
+        });
       }
 
       const resolution = resolveVirtualPath(
@@ -944,40 +1020,12 @@ function createTreeCommand(
         return rejectedOutcome("tree", parsed.message);
       }
 
-      const resolution = resolveVirtualDirectory(
-        filesystem,
-        context.currentDirectory,
-        parsed.value.path,
-      );
-
-      if (resolution.kind !== "found") {
-        return failureOutcome("tree", resolution);
-      }
-
-      const traversal = traverseVirtualDirectory({
-        filesystem,
-        directory: resolution.directory,
-        limit: recursiveEntryLimit,
+      return executeTree(filesystem, context, recursiveEntryLimit, {
+        commandName: "tree",
+        showAll: parsed.value.showAll,
         maximumDepth: parsed.value.maximumDepth,
-        signal: context.signal,
+        path: parsed.value.path,
       });
-
-      if (traversal.kind === "cancelled") {
-        return cancelledOutcome();
-      }
-
-      const outputs: ShellOutput[] = [
-        textOutput(
-          "tree-output",
-          treeLines(resolution.directory, traversal, parsed.value.showAll),
-        ),
-      ];
-
-      if (traversal.kind === "truncated") {
-        outputs.push(truncationOutput("tree", recursiveEntryLimit));
-      }
-
-      return succeededOutcome(outputs);
     },
   };
 }
@@ -1432,7 +1480,7 @@ export function createReadOnlyCommandDefinitions({
   }
 
   return [
-    createLsCommand(filesystem),
+    createLsCommand(filesystem, recursiveEntryLimit),
     createCdCommand(filesystem),
     createCatCommand(filesystem, documents),
     createPwdCommand(),
