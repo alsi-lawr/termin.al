@@ -100,6 +100,31 @@ function projectsDirectoryPath() {
   return resolution.directory.path;
 }
 
+test("derives meaningful terminal lifecycle statuses", () => {
+  const ready = createState();
+  const running = submit(ready, "echo ready");
+  const commandId = runningCommandId(running);
+  const cancelling = reduceShellState(running, { kind: "command.cancel" });
+  const secret = reduceShellState(ready, {
+    kind: "secret.begin",
+    request: createSecretPromptRequest(
+      createSecretPromptId("status-secret"),
+      "Secret",
+    ),
+  });
+
+  assert.deepEqual(getShellStatus(ready), { kind: "ready" });
+  assert.deepEqual(getShellStatus(running), {
+    kind: "running",
+    commandId,
+  });
+  assert.deepEqual(getShellStatus(cancelling), {
+    kind: "cancelling",
+    commandId,
+  });
+  assert.deepEqual(getShellStatus(secret), { kind: "secret" });
+});
+
 test("reduces command execution and captures stable command cwd history", () => {
   const firstSubmitted = submit(createState(2, 2), "first");
   const firstCommandId = runningCommandId(firstSubmitted);

@@ -1,7 +1,33 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "MesloLGS Nerd Font Mono";
+  src:
+    local("MesloLGS Nerd Font Mono Regular"),
+    local("MesloLGS Nerd Font Mono"),
+    url("/fonts/meslo/MesloLGSNerdFontMono-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "MesloLGS Nerd Font Mono";
+  src:
+    local("MesloLGS Nerd Font Mono Bold"),
+    local("MesloLGS Nerd Font Mono"),
+    url("/fonts/meslo/MesloLGSNerdFontMono-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
 /* Palette data ported from neotheme.nvim (MIT, Copyright (c) 2026 alsi-lawr). */
 @theme inline {
+  --font-mono:
+    "MesloLGS Nerd Font Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+  --animate-terminal-cursor: terminal-cursor-blink 1s step-end infinite;
   --color-surface-deepest: var(--theme-surface-deepest);
   --color-surface-dark: var(--theme-surface-dark);
   --color-surface-base: var(--theme-surface-base);
@@ -61,6 +87,18 @@
   --color-ui-current-search: var(--theme-ui-current-search);
   --color-ui-match: var(--theme-ui-match);
   --color-ui-focus: var(--theme-ui-focus);
+}
+
+@keyframes terminal-cursor-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
 }
 
 :root,

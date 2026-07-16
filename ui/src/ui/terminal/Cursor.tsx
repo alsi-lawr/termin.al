@@ -6,7 +6,7 @@ type CursorProps = Readonly<{
 
 export function Cursor({ value }: CursorProps): ReactElement {
   return (
-    <span className="inline-block animate-pulse bg-ui-cursor text-text-on-accent motion-reduce:animate-none">
+    <span className="inline-block animate-terminal-cursor bg-ui-cursor text-text-on-accent motion-reduce:animate-none">
       {value}
     </span>
   );

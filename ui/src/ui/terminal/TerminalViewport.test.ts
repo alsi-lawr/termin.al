@@ -55,6 +55,7 @@ test("grows the transcript and active prompt naturally from the top", async () =
     assert.equal(markup.includes("min-h-full"), false);
     assert.equal(markup.includes("mt-auto"), false);
     assert.equal(markup.includes("anonymous@termin.al"), true);
+    assert.equal(markup.includes("READY"), false);
   } finally {
     await vite.close();
   }

@@ -9,7 +9,10 @@ type TerminalStatusProps = Readonly<{
   completion: ShellCompletion;
 }>;
 
-function statusMessage(status: ShellStatus, completion: ShellCompletion): string {
+function statusMessage(
+  status: ShellStatus,
+  completion: ShellCompletion,
+): string | undefined {
   if (completion.kind === "pending") {
     return "COMPLETING";
   }
@@ -20,7 +23,7 @@ function statusMessage(status: ShellStatus, completion: ShellCompletion): string
 
   switch (status.kind) {
     case "ready":
-      return "READY";
+      return undefined;
     case "secret":
       return "SECRET INPUT";
     case "running":
@@ -43,12 +46,16 @@ function isSelectedCandidate(
 export function TerminalStatus({
   status,
   completion,
-}: TerminalStatusProps): ReactElement {
+}: TerminalStatusProps): ReactElement | null {
+  const message = statusMessage(status, completion);
+
+  if (message === undefined) {
+    return null;
+  }
+
   return (
     <div className="mt-2 text-text-muted">
-      <div role="status" aria-live="polite">
-        {statusMessage(status, completion)}
-      </div>
+      <div role="status" aria-live="polite">{message}</div>
       {completion.kind === "suggestions" ? (
         <ul
           className="mt-1 space-y-1"

@@ -44,7 +44,8 @@ test("renders a non-collapsing cursor cell at an empty prompt", async () => {
     const markup = renderToStaticMarkup(rendered);
 
     assert.equal(markup.includes("\u00a0"), true);
-    assert.equal(markup.includes("animate-pulse"), true);
+    assert.equal(markup.includes("animate-terminal-cursor"), true);
+    assert.equal(markup.includes("animate-pulse"), false);
     assert.equal(markup.includes("motion-reduce:animate-none"), true);
   } finally {
     await vite.close();
