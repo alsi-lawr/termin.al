@@ -885,13 +885,13 @@ module Stats =
                             cancellationToken
                         )
                 | Subscribed(reader, subscriptionId, initial) ->
-                    setSessionCookie allowLocalHttp randomBytes context |> ignore
-                    context.Response.StatusCode <- StatusCodes.Status200OK
-                    context.Response.ContentType <- "text/event-stream"
-                    context.Response.Headers.CacheControl <- "no-store"
-                    context.Response.Headers.Append("X-Accel-Buffering", "no")
-
                     try
+                        setSessionCookie allowLocalHttp randomBytes context |> ignore
+                        context.Response.StatusCode <- StatusCodes.Status200OK
+                        context.Response.ContentType <- "text/event-stream"
+                        context.Response.Headers.CacheControl <- "no-store"
+                        context.Response.Headers.Append("X-Accel-Buffering", "no")
+
                         try
                             do! context.Response.WriteAsync("retry: 5000\n", cancellationToken)
 

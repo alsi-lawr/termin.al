@@ -607,7 +607,60 @@ module StatsTests =
 
         message
 
+    let private assertFailedSseSetupCleanupScope () =
+        let sourcePath = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../src/Stats.fs"))
+        let lines = File.ReadAllLines sourcePath
+
+        let branchIndex =
+            lines
+            |> Array.tryFindIndex (fun line ->
+                line.Contains("| Subscribed(reader, subscriptionId, initial) ->", StringComparison.Ordinal))
+            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch was not found.")
+
+        let firstStatementIndex =
+            lines
+            |> Array.skip (branchIndex + 1)
+            |> Array.tryFindIndex (String.IsNullOrWhiteSpace >> not)
+            |> Option.map ((+) (branchIndex + 1))
+            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch is empty.")
+
+        if lines[firstStatementIndex] <> "                    try" then
+            failwith "The statistics SSE subscribed branch must enter its cleanup scope before response setup."
+
+        let branchEndIndex =
+            lines
+            |> Array.skip (branchIndex + 1)
+            |> Array.tryFindIndex (fun line -> line.StartsWith("    let mapEndpoints", StringComparison.Ordinal))
+            |> Option.map ((+) (branchIndex + 1))
+            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch boundary was not found.")
+
+        let branchLines = lines[branchIndex..branchEndIndex - 1]
+
+        let requireOrderedLine (fragment: string) =
+            branchLines
+            |> Array.tryFindIndex (fun line -> line.Contains(fragment, StringComparison.Ordinal))
+            |> Option.defaultWith (fun () -> failwithf "The statistics SSE setup line '%s' was not found." fragment)
+
+        let cleanupFinally = requireOrderedLine "                    finally"
+        let unsubscribe = requireOrderedLine "store.Unsubscribe subscriptionId"
+
+        for setup in
+            [ "setSessionCookie allowLocalHttp randomBytes context"
+              "context.Response.StatusCode <- StatusCodes.Status200OK"
+              "context.Response.ContentType <- \"text/event-stream\""
+              "context.Response.Headers.CacheControl <- \"no-store\""
+              "context.Response.Headers.Append(\"X-Accel-Buffering\", \"no\")" ] do
+            let setupIndex = requireOrderedLine setup
+
+            if setupIndex >= cleanupFinally then
+                failwithf "Statistics SSE setup '%s' must remain inside the unsubscribe cleanup scope." setup
+
+        if unsubscribe <= cleanupFinally then
+            failwith "Statistics SSE unsubscribe must remain in the cleanup finally block."
+
     let private runApiChecks () =
+        assertFailedSseSetupCleanupScope ()
+
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
 
@@ -848,6 +901,43 @@ module StatsTests =
 
                         failwith "A cancelled statistics SSE request must stop reading promptly."
                     with :? OperationCanceledException -> ()))
+
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+            let mutable setupAttempts = 0
+
+            let wrongLengthRandomBytes count =
+                setupAttempts <- setupAttempts + 1
+                Array.zeroCreate (count - 1)
+
+            HostApplication.createWithContentClientAndStats
+                [||]
+                (countableContentClient ())
+                store
+                true
+                wrongLengthRandomBytes
+                (fun () -> now)
+                (TimeSpan.FromSeconds(30.0))
+            |> fun application ->
+                withRunningHost application (fun client _ ->
+                    use sseRequest = request HttpMethod.Get "/api/stats/events" None None None
+
+                    try
+                        use response =
+                            client
+                                .SendAsync(sseRequest, HttpCompletionOption.ResponseHeadersRead)
+                                .WaitAsync(TimeSpan.FromSeconds(5.0))
+                                .GetAwaiter()
+                                .GetResult()
+
+                        if response.IsSuccessStatusCode then
+                            failwith "Failed statistics SSE setup must not establish a successful stream."
+                    with :? HttpRequestException -> ()
+
+                    if setupAttempts <> 1 then
+                        failwithf
+                            "Expected one post-registration statistics cookie setup attempt, received %d."
+                            setupAttempts))
 
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
