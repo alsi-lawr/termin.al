@@ -1,7 +1,7 @@
 MAN(1)                          termin.al Manual                          MAN(1)
 
 NAME
-     man - Show command metadata.
+     man - Show a command manual.
 
 SYNOPSIS
      man <command>

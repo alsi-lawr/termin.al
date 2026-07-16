@@ -14,7 +14,7 @@ OPTIONS
      -a     Include hidden entries.
 
      -L depth
-            Limit traversal to the positive depth value.
+            Limit traversal to a depth from 0 to 8.
 
 EXAMPLES
      $ tree

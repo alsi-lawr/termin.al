@@ -550,6 +550,18 @@ test("searches with documented flags and marks bounded recursive results", async
   const registry = createRegistry(2);
   const find = succeeded(await execute("find -name '*.md'", registry));
   const grep = succeeded(await execute("grep -in typed", createRegistry()));
+  const unicodeGrep = outputText(
+    await execute(
+      "grep -i ä about.md",
+      createRegistry(100, {
+        read: () => Promise.resolve({
+          kind: "available",
+          document: { text: "Ä", source: { path: "~/about.md" } },
+          classification: { kind: "page" },
+        }),
+      }),
+    ),
+  );
   const shallowTree = outputText(await execute("tree -L 0", createRegistry()));
 
   const findText = find.outputs.find((output) => output.kind === "text");
@@ -566,6 +578,7 @@ test("searches with documented flags and marks bounded recursive results", async
   assert.match(findText.text, /about\.md/u);
   assert.equal(truncation.diagnostic.code, "runtime.truncated");
   assert.match(outputText(grep), /:3:Typed domain modelling/u);
+  assert.equal(unicodeGrep, "~/about.md:Ä");
   assert.equal(shallowTree, "~");
 });
 

@@ -7,8 +7,9 @@ SYNOPSIS
      theme [list|set <name>|system]
 
 DESCRIPTION
-     Displays  or changes the terminal colour theme for the current browser ses‐
-     sion. System mode follows the active operating-system preference.
+     Displays  or changes the terminal colour theme. Explicit selections persist
+     in browser storage; system mode follows the active operating-system prefer‐
+     ence and clears the stored selection.
 
 OPTIONS
      list   List available theme names.

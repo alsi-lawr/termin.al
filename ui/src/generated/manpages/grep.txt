@@ -12,7 +12,7 @@ DESCRIPTION
      the traversal bound.
 
 OPTIONS
-     -i     Compare text without ASCII letter case.
+     -i     Compare text after Unicode lowercase conversion.
 
      -n     Prefix matching lines with their line number.
 

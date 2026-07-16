@@ -1452,7 +1452,7 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
       group: "gnu-like",
       name: "man",
       aliases: [],
-      summary: "Show command metadata.",
+      summary: "Show a command manual.",
       usage: "man <command>",
       examples: ["man grep"],
     },
