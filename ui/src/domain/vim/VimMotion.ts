@@ -1336,13 +1336,12 @@ function resolveWordObject(
 
   let selectedFirst = first;
   let selectedLast = first;
+  const spanIsBlank = (index: number): boolean => {
+    const span = spans[index];
+    return span === undefined || wordClass(characterAt(text, span.start), size) === "blank";
+  };
 
   if (around) {
-    const spanIsBlank = (index: number): boolean => {
-      const span = spans[index];
-      return span === undefined || wordClass(characterAt(text, span.start), size) === "blank";
-    };
-
     while (selectedFirst < spans.length && spanIsBlank(selectedFirst)) {
       selectedFirst += 1;
     }
@@ -1355,25 +1354,24 @@ function resolveWordObject(
       }
     }
 
-    selectedLast = selectedFirst;
-    let selectedObjects = 1;
+  }
 
-    while (selectedObjects < options.count) {
-      let next = selectedLast + 1;
+  selectedLast = selectedFirst;
+  let selectedObjects = 1;
 
-      while (next < spans.length && spanIsBlank(next)) {
-        next += 1;
-      }
+  while (selectedObjects < options.count) {
+    let next = selectedLast + 1;
 
-      if (next >= spans.length) {
-        break;
-      }
-
-      selectedLast = next;
-      selectedObjects += 1;
+    while (next < spans.length && spanIsBlank(next)) {
+      next += 1;
     }
-  } else {
-    selectedLast = Math.min(spans.length - 1, first + options.count - 1);
+
+    if (next >= spans.length) {
+      break;
+    }
+
+    selectedLast = next;
+    selectedObjects += 1;
   }
 
   const firstSpan = spans[selectedFirst];
@@ -1651,6 +1649,8 @@ function scanTagEnd(text: string, start: number): number | undefined {
     if (quote !== undefined) {
       if (character === quote) {
         quote = undefined;
+      } else if (character === "<") {
+        return undefined;
       }
     } else if (character === "\"" || character === "'") {
       quote = character;
@@ -1680,7 +1680,8 @@ function tagTokens(text: string): ReadonlyArray<TagToken> {
       const commentEnd = text.indexOf("-->", offset + 4);
 
       if (commentEnd < 0) {
-        break;
+        offset += 4;
+        continue;
       }
 
       offset = commentEnd + 3;

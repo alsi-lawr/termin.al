@@ -15,6 +15,7 @@ import {
   vimBufferText,
   type VimBuffer,
   type VimNormalKey,
+  type VimRegister,
 } from "./VimBuffer.ts";
 
 function mappedKey(
@@ -704,6 +705,74 @@ test("executes word and WORD objects through the shared delete change and yank p
     "d", "i", "W",
   );
   assert.equal(vimBufferText(surrogate), " word");
+
+  const countedText = "one  two three";
+  const countedDelete = press(
+    createVimBuffer({ text: countedText, mode: VimMode.Normal }),
+    "2", "d", "i", "w",
+  );
+  const countedChange = press(
+    createVimBuffer({ text: countedText, mode: VimMode.Normal }),
+    "2", "c", "i", "w",
+  );
+  const countedYank = press(
+    createVimBuffer({ text: countedText, mode: VimMode.Normal }),
+    "2", "y", "i", "w",
+  );
+
+  assert.equal(vimBufferText(countedDelete), " three");
+  assert.equal(vimBufferText(countedChange), " three");
+  assert.equal(vimBufferText(countedYank), countedText);
+  assert.deepEqual(countedDelete.register, { kind: "character", text: "one  two" });
+  assert.deepEqual(countedChange.register, countedDelete.register);
+  assert.deepEqual(countedYank.register, countedDelete.register);
+  assert.equal(countedDelete.mode.kind, "normal");
+  assert.equal(countedChange.mode.kind, "insert");
+  assert.equal(countedYank.mode.kind, "normal");
+  assert.deepEqual(countedDelete.status, { kind: "none" });
+  assert.deepEqual(countedChange.status, { kind: "none" });
+  assert.deepEqual(countedYank.status, { kind: "none" });
+
+  const countedWORDText = "one\n\ntwo three";
+  const countedWORDDelete = press(
+    createVimBuffer({ text: countedWORDText, mode: VimMode.Normal }),
+    "2", "d", "i", "W",
+  );
+  const countedWORDChange = press(
+    createVimBuffer({ text: countedWORDText, mode: VimMode.Normal }),
+    "2", "c", "i", "W",
+  );
+  const countedWORDYank = press(
+    createVimBuffer({ text: countedWORDText, mode: VimMode.Normal }),
+    "2", "y", "i", "W",
+  );
+
+  assert.equal(vimBufferText(countedWORDDelete), " three");
+  assert.equal(vimBufferText(countedWORDChange), " three");
+  assert.equal(vimBufferText(countedWORDYank), countedWORDText);
+  assert.deepEqual(countedWORDDelete.register, { kind: "character", text: "one\n\ntwo" });
+  assert.deepEqual(countedWORDChange.register, countedWORDDelete.register);
+  assert.deepEqual(countedWORDYank.register, countedWORDDelete.register);
+  assert.equal(countedWORDChange.mode.kind, "insert");
+  assert.deepEqual(countedWORDDelete.status, { kind: "none" });
+
+  const blankStart = press(
+    press(createVimBuffer({ text: "one  two", mode: VimMode.Normal }), "3", "l"),
+    "d", "i", "w",
+  );
+  assert.equal(vimBufferText(blankStart), "onetwo");
+  assert.deepEqual(blankStart.register, { kind: "character", text: "  " });
+
+  const countedSurrogate = press(
+    createVimBuffer({ text: "😀😀\n\nβeta tail", mode: VimMode.Normal }),
+    "2", "y", "i", "W",
+  );
+  assert.deepEqual(countedSurrogate.register, {
+    kind: "character",
+    text: "😀😀\n\nβeta",
+  });
+  assert.deepEqual(countedSurrogate.cursor, { line: 0, column: 0 });
+  assert.deepEqual(countedSurrogate.status, { kind: "none" });
 });
 
 test("selects sentence and paragraph objects with their fixed separators", () => {
@@ -713,6 +782,34 @@ test("selects sentence and paragraph objects with their fixed separators", () =>
 
   assert.equal(vimBufferText(inner), "  Two!  Three");
   assert.equal(vimBufferText(around), "Two!  Three");
+
+  const countedSentenceText = "One.  Two!  Three?  Four";
+  const countedSentenceDelete = press(
+    createVimBuffer({ text: countedSentenceText, mode: VimMode.Normal }),
+    "2", "d", "i", "s",
+  );
+  const countedSentenceChange = press(
+    createVimBuffer({ text: countedSentenceText, mode: VimMode.Normal }),
+    "2", "c", "i", "s",
+  );
+  const countedSentenceYank = press(
+    createVimBuffer({ text: countedSentenceText, mode: VimMode.Normal }),
+    "2", "y", "i", "s",
+  );
+
+  assert.equal(vimBufferText(countedSentenceDelete), "  Three?  Four");
+  assert.equal(vimBufferText(countedSentenceChange), "  Three?  Four");
+  assert.equal(vimBufferText(countedSentenceYank), countedSentenceText);
+  assert.deepEqual(countedSentenceDelete.register, {
+    kind: "character",
+    text: "One.  Two!",
+  });
+  assert.deepEqual(countedSentenceChange.register, countedSentenceDelete.register);
+  assert.deepEqual(countedSentenceYank.register, countedSentenceDelete.register);
+  assert.equal(countedSentenceDelete.mode.kind, "normal");
+  assert.equal(countedSentenceChange.mode.kind, "insert");
+  assert.equal(countedSentenceYank.mode.kind, "normal");
+  assert.deepEqual(countedSentenceDelete.status, { kind: "none" });
 
   const paragraphText = "one\nline\n   \ntwo\n\nthree";
   const innerParagraph = press(
@@ -727,6 +824,35 @@ test("selects sentence and paragraph objects with their fixed separators", () =>
   assert.equal(vimBufferText(innerParagraph), "   \ntwo\n\nthree");
   assert.equal(vimBufferText(aroundParagraph), "two\n\nthree");
   assert.deepEqual(aroundParagraph.register, { kind: "line", lines: ["one", "line", "   "] });
+
+  const countedParagraphText = "one\nline\n\ntwo\nline\n\nthree";
+  const countedParagraphDelete = press(
+    createVimBuffer({ text: countedParagraphText, mode: VimMode.Normal }),
+    "2", "d", "i", "p",
+  );
+  const countedParagraphChange = press(
+    createVimBuffer({ text: countedParagraphText, mode: VimMode.Normal }),
+    "2", "c", "i", "p",
+  );
+  const countedParagraphYank = press(
+    createVimBuffer({ text: countedParagraphText, mode: VimMode.Normal }),
+    "2", "y", "i", "p",
+  );
+  const countedParagraphRegister: VimRegister = {
+    kind: "line",
+    lines: ["one", "line", "", "two", "line"],
+  };
+
+  assert.equal(vimBufferText(countedParagraphDelete), "\nthree");
+  assert.equal(vimBufferText(countedParagraphChange), "\nthree");
+  assert.equal(vimBufferText(countedParagraphYank), countedParagraphText);
+  assert.deepEqual(countedParagraphDelete.register, countedParagraphRegister);
+  assert.deepEqual(countedParagraphChange.register, countedParagraphRegister);
+  assert.deepEqual(countedParagraphYank.register, countedParagraphRegister);
+  assert.equal(countedParagraphDelete.mode.kind, "normal");
+  assert.equal(countedParagraphChange.mode.kind, "insert");
+  assert.equal(countedParagraphYank.mode.kind, "normal");
+  assert.deepEqual(countedParagraphYank.status, { kind: "none" });
 });
 
 test("handles quote objects, documented quote counts, and odd backslash escapes", () => {
@@ -735,10 +861,21 @@ test("handles quote objects, documented quote counts, and odd backslash escapes"
   const inner = press(cursor, "d", "i", "\"");
   const around = press(cursor, "2", "d", "a", "\"");
   const innerTwo = press(cursor, "2", "d", "i", "\"");
+  const changed = press(cursor, "c", "a", "\"");
+  const yanked = press(cursor, "y", "a", "\"");
 
   assert.equal(vimBufferText(inner), "pre  \"\"  post");
   assert.equal(vimBufferText(around), "pre  post");
   assert.equal(vimBufferText(innerTwo), "pre    post");
+  assert.equal(vimBufferText(changed), "pre  post");
+  assert.equal(vimBufferText(yanked), text);
+  assert.deepEqual(around.register, { kind: "character", text: "\"a\\\"b\"  " });
+  assert.deepEqual(changed.register, around.register);
+  assert.deepEqual(yanked.register, around.register);
+  assert.equal(around.mode.kind, "normal");
+  assert.equal(changed.mode.kind, "insert");
+  assert.equal(yanked.mode.kind, "normal");
+  assert.deepEqual(changed.status, { kind: "none" });
 
   const singles = press(
     press(createVimBuffer({ text: "x 'y' `z`", mode: VimMode.Normal }), "3", "l"),
@@ -750,6 +887,53 @@ test("handles quote objects, documented quote counts, and odd backslash escapes"
   );
   assert.deepEqual(singles.register, { kind: "character", text: "'y' " });
   assert.deepEqual(backticks.register, { kind: "character", text: "z" });
+
+  const escapedQuotes: ReadonlyArray<Readonly<{
+    text: string;
+    object: "'" | "`";
+    inner: string;
+    delimited: string;
+  }>> = [
+    {
+      text: "pre 'a\\'b'  post",
+      object: "'",
+      inner: "a\\'b",
+      delimited: "'a\\'b'",
+    },
+    {
+      text: "pre `a\\`b`  post",
+      object: "`",
+      inner: "a\\`b",
+      delimited: "`a\\`b`",
+    },
+  ];
+
+  for (const fixture of escapedQuotes) {
+    const inside = press(
+      createVimBuffer({ text: fixture.text, mode: VimMode.Normal }),
+      "6", "l",
+    );
+    const escapedInner = press(inside, "y", "i", fixture.object);
+    const countedInner = press(inside, "2", "d", "i", fixture.object);
+    const aroundOnce = press(inside, "y", "a", fixture.object);
+    const aroundCounted = press(inside, "2", "y", "a", fixture.object);
+
+    assert.deepEqual(escapedInner.register, {
+      kind: "character",
+      text: fixture.inner,
+    });
+    assert.deepEqual(countedInner.register, {
+      kind: "character",
+      text: fixture.delimited,
+    });
+    assert.equal(vimBufferText(countedInner), "pre   post");
+    assert.deepEqual(aroundOnce.register, {
+      kind: "character",
+      text: fixture.delimited + "  ",
+    });
+    assert.deepEqual(aroundCounted.register, aroundOnce.register);
+    assert.deepEqual(aroundCounted.status, { kind: "none" });
+  }
 
   const empty = press(createVimBuffer({ text: "\"\"", mode: VimMode.Normal }), "d", "i", "\"");
   assert.deepEqual(empty.status, { kind: "invalid-input", source: "di\"" });
@@ -763,9 +947,36 @@ test("resolves nested escaped delimiter objects and every standard alias", () =>
   assert.equal(vimBufferText(inner), "(a()c) tail");
   assert.equal(vimBufferText(outer), " tail");
 
+  const delimiterText = "(x) tail";
+  const delimiterCursor = press(
+    createVimBuffer({ text: delimiterText, mode: VimMode.Normal }),
+    "l",
+  );
+  const delimiterDelete = press(delimiterCursor, "d", "a", "b");
+  const delimiterChange = press(delimiterCursor, "c", "a", "b");
+  const delimiterYank = press(delimiterCursor, "y", "a", "b");
+
+  assert.equal(vimBufferText(delimiterDelete), " tail");
+  assert.equal(vimBufferText(delimiterChange), " tail");
+  assert.equal(vimBufferText(delimiterYank), delimiterText);
+  assert.deepEqual(delimiterDelete.register, { kind: "character", text: "(x)" });
+  assert.deepEqual(delimiterChange.register, delimiterDelete.register);
+  assert.deepEqual(delimiterYank.register, delimiterDelete.register);
+  assert.equal(delimiterDelete.mode.kind, "normal");
+  assert.equal(delimiterChange.mode.kind, "insert");
+  assert.equal(delimiterYank.mode.kind, "normal");
+  assert.deepEqual(delimiterYank.status, { kind: "none" });
+
   const cases: ReadonlyArray<Readonly<{ text: string; object: string; expected: string }>> = [
+    { text: "[x]", object: "[", expected: "[]" },
     { text: "[x]", object: "]", expected: "[]" },
+    { text: "(x)", object: "(", expected: "()" },
+    { text: "(x)", object: ")", expected: "()" },
+    { text: "(x)", object: "b", expected: "()" },
+    { text: "{x}", object: "{", expected: "{}" },
+    { text: "{x}", object: "}", expected: "{}" },
     { text: "{x}", object: "B", expected: "{}" },
+    { text: "<x>", object: "<", expected: "<>" },
     { text: "<x>", object: ">", expected: "<>" },
   ];
 
@@ -773,6 +984,15 @@ test("resolves nested escaped delimiter objects and every standard alias", () =>
     const result = press(createVimBuffer({ text: fixture.text, mode: VimMode.Normal }), "l", "d", "i", fixture.object);
     assert.equal(vimBufferText(result), fixture.expected);
   }
+
+  assert.equal(
+    vimBufferText(press(createVimBuffer({ text: "(x)tail", mode: VimMode.Normal }), "l", "d", "a", "b")),
+    "tail",
+  );
+  assert.equal(
+    vimBufferText(press(createVimBuffer({ text: "{x}tail", mode: VimMode.Normal }), "l", "d", "a", "B")),
+    "tail",
+  );
 
   const escaped = press(
     press(createVimBuffer({ text: "(a\\)b) tail", mode: VimMode.Normal }), "l"),
@@ -794,9 +1014,23 @@ test("uses the fixed tolerant case-insensitive tag object profile", () => {
   const insideOuter = press(createVimBuffer({ text, mode: VimMode.Normal }), "2", "l");
   const inner = press(insideOuter, "d", "i", "t");
   const around = press(insideOuter, "d", "a", "t");
+  const changed = press(insideOuter, "c", "a", "t");
+  const yanked = press(insideOuter, "y", "a", "t");
 
   assert.equal(vimBufferText(inner), "<A data-x='>'></a> tail");
   assert.equal(vimBufferText(around), " tail");
+  assert.equal(vimBufferText(changed), " tail");
+  assert.equal(vimBufferText(yanked), text);
+  assert.deepEqual(around.register, {
+    kind: "character",
+    text: "<A data-x='>'><b>hi</b><br/><!--x--></a>",
+  });
+  assert.deepEqual(changed.register, around.register);
+  assert.deepEqual(yanked.register, around.register);
+  assert.equal(around.mode.kind, "normal");
+  assert.equal(changed.mode.kind, "insert");
+  assert.equal(yanked.mode.kind, "normal");
+  assert.deepEqual(yanked.status, { kind: "none" });
 
   const nested = press(
     press(createVimBuffer({ text: "<a><b>x</b></a>", mode: VimMode.Normal }), "7", "l"),
@@ -817,6 +1051,46 @@ test("uses the fixed tolerant case-insensitive tag object profile", () => {
     press(createVimBuffer({ text: "<a><b></a></b>", mode: VimMode.Normal }), "d", "a", "t").status,
     { kind: "invalid-input", source: "dat" },
   );
+
+  const incompletePrefixes = [
+    "<!-- unfinished ",
+    "<!unfinished ",
+    "<?unfinished ",
+    "<broken value=' ",
+  ];
+
+  for (const prefix of incompletePrefixes) {
+    const recoverableText = prefix + "<a><x>ok</x></a>";
+    const cursorColumn = recoverableText.lastIndexOf("ok");
+    const recovered = press(
+      press(
+        createVimBuffer({ text: recoverableText, mode: VimMode.Normal }),
+        ...Array.from("l".repeat(cursorColumn)),
+      ),
+      "2", "y", "a", "t",
+    );
+
+    assert.equal(vimBufferText(recovered), recoverableText);
+    assert.deepEqual(recovered.register, {
+      kind: "character",
+      text: "<a><x>ok</x></a>",
+    });
+    assert.deepEqual(recovered.status, { kind: "none" });
+  }
+
+  const malformedAfterText = "<x>ok</x><broken value=' <tail";
+  const malformedAfter = press(
+    press(
+      createVimBuffer({ text: malformedAfterText, mode: VimMode.Normal }),
+      "l", "l", "l",
+    ),
+    "y", "a", "t",
+  );
+  assert.deepEqual(malformedAfter.register, {
+    kind: "character",
+    text: "<x>ok</x>",
+  });
+  assert.deepEqual(malformedAfter.status, { kind: "none" });
 });
 
 test("keeps structural visual movement linewise and defers characterwise object adoption", () => {
