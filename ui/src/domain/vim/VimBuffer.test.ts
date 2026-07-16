@@ -126,6 +126,29 @@ test("resolves line anchors and count-addressed line-end behavior explicitly", (
   });
 });
 
+test("anchors empty and all-blank lines at column zero with exclusive ranges", () => {
+  const empty = createVimBuffer({ text: "", mode: VimMode.Normal });
+  const emptyAnchor = press(empty, "^");
+  const emptyYank = press(empty, "y", "^");
+  const allBlank = press(
+    createVimBuffer({ text: "   ", mode: VimMode.Normal }),
+    "l",
+    "l",
+  );
+  const allBlankAnchor = press(allBlank, "^");
+  const allBlankDelete = press(allBlank, "d", "^");
+
+  assert.deepEqual(emptyAnchor.cursor, { line: 0, column: 0 });
+  assert.deepEqual(emptyYank.register, { kind: "character", text: "" });
+  assert.equal(vimBufferText(emptyYank), "");
+  assert.deepEqual(allBlankAnchor.cursor, { line: 0, column: 0 });
+  assert.equal(vimBufferText(allBlankDelete), " ");
+  assert.deepEqual(allBlankDelete.register, {
+    kind: "character",
+    text: "  ",
+  });
+});
+
 test("implements gg and G with addressed lines, saturation, and invalid prefixes", () => {
   const start = createVimBuffer({
     text: "zero\n one\n  two\n   three\n    four\n     five",
@@ -257,6 +280,12 @@ test("finds and tills counted targets and repeats accepted finds", () => {
   const repeated = press(press(start, "f", "a"), ";");
   const reversed = press(repeated, ",");
   const sameAfterReverse = press(reversed, ";");
+  const repeatStart = createVimBuffer({
+    text: "a1a2a3a4a",
+    mode: VimMode.Normal,
+  });
+  const countedRepeated = press(press(repeatStart, "f", "a"), "3", ";");
+  const countedReversed = press(countedRepeated, "2", ",");
   const till = press(start, "t", "a");
   const backwardTill = press(press(start, "$"), "2", "T", "a");
   const missed = press(press(start, "f", "a"), "f", "z");
@@ -266,6 +295,8 @@ test("finds and tills counted targets and repeats accepted finds", () => {
   assert.deepEqual(repeated.cursor, { line: 0, column: 4 });
   assert.deepEqual(reversed.cursor, { line: 0, column: 2 });
   assert.deepEqual(sameAfterReverse.cursor, { line: 0, column: 4 });
+  assert.deepEqual(countedRepeated.cursor, { line: 0, column: 8 });
+  assert.deepEqual(countedReversed.cursor, { line: 0, column: 4 });
   assert.deepEqual(till.cursor, { line: 0, column: 1 });
   assert.deepEqual(backwardTill.cursor, { line: 0, column: 3 });
   assert.deepEqual(missed.cursor, { line: 0, column: 2 });
@@ -275,10 +306,22 @@ test("finds and tills counted targets and repeats accepted finds", () => {
   const deletedFind = press(start, "d", "f", "a");
   const deletedTill = press(start, "d", "t", "a");
   const backwardFind = press(press(start, "$"), "d", "F", "a");
+  const backwardExclusiveTill = press(
+    press(start, "$"),
+    "d",
+    "2",
+    "T",
+    "a",
+  );
 
   assert.equal(vimBufferText(deletedFind), "cad");
   assert.equal(vimBufferText(deletedTill), "acad");
   assert.equal(vimBufferText(backwardFind), "abaca");
+  assert.equal(vimBufferText(backwardExclusiveTill), "aba");
+  assert.deepEqual(backwardExclusiveTill.register, {
+    kind: "character",
+    text: "cad",
+  });
 
   const crossLine = press(
     createVimBuffer({ text: "abc\na", mode: VimMode.Normal }),
@@ -334,6 +377,34 @@ test("matches nested fixed delimiters and treats counted percent as a file perce
   });
   assert.equal(vimBufferText(deletedHalf), "c\nd");
   assert.equal(vimBufferText(explicitOperatorOne), "c");
+});
+
+test("applies matched-delimiter ranges through delete, change, and yank", () => {
+  const text = "(a[b]c) tail";
+  const deleted = press(
+    createVimBuffer({ text, mode: VimMode.Normal }),
+    "d",
+    "%",
+  );
+  const changed = press(
+    createVimBuffer({ text, mode: VimMode.Normal }),
+    "c",
+    "%",
+  );
+  const yanked = press(
+    createVimBuffer({ text, mode: VimMode.Normal }),
+    "y",
+    "%",
+  );
+  const matchedRegister = { kind: "character", text: "(a[b]c)" };
+
+  assert.equal(vimBufferText(deleted), " tail");
+  assert.deepEqual(deleted.register, matchedRegister);
+  assert.equal(vimBufferText(changed), " tail");
+  assert.equal(changed.mode.kind, "insert");
+  assert.deepEqual(changed.register, matchedRegister);
+  assert.equal(vimBufferText(yanked), text);
+  assert.deepEqual(yanked.register, matchedRegister);
 });
 
 test("Escape cancels every pending stage and invalid input mutates only status and pending", () => {
