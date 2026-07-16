@@ -44,10 +44,16 @@ type OptionParseResult<Value> =
       message: string;
     }>;
 
+type LsDisplayMode =
+  | Readonly<{
+      kind: "list";
+      format: "short" | "long";
+    }>
+  | Readonly<{ kind: "tree" }>;
+
 type LsOptions = Readonly<{
   showAll: boolean;
-  long: boolean;
-  tree: boolean;
+  mode: LsDisplayMode;
   path: string;
 }>;
 
@@ -305,9 +311,14 @@ function parseLsOptions(
     };
   }
 
+  const listFormat: "short" | "long" = long ? "long" : "short";
+  const mode: LsDisplayMode = tree
+    ? { kind: "tree" }
+    : { kind: "list", format: listFormat };
+
   return {
     kind: "parsed",
-    value: { showAll, long, tree, path: operands[0] ?? "." },
+    value: { showAll, mode, path: operands[0] ?? "." },
   };
 }
 
@@ -849,58 +860,60 @@ function createLsCommand(
         return rejectedOutcome("ls", parsed.message);
       }
 
-      if (parsed.value.tree) {
-        return executeTree(filesystem, context, recursiveEntryLimit, {
-          commandName: "ls",
-          showAll: parsed.value.showAll,
-          maximumDepth: maximumRecursiveDepth,
-          path: parsed.value.path,
-        });
-      }
-
-      const resolution = resolveVirtualPath(
-        filesystem,
-        context.currentDirectory,
-        parsed.value.path,
-      );
-
-      if (resolution.kind !== "found") {
-        return failureOutcome("ls", resolution);
-      }
-
-      if (resolution.node.kind === "locked-file") {
-        return rejectedOutcome("ls", `Access is locked: ${resolution.path}`);
-      }
-
-      const entries =
-        resolution.node.kind === "directory"
-          ? listVirtualDirectory(
-              filesystem,
-              context.currentDirectory,
-              parsed.value.path,
-            )
-          : undefined;
-
-      if (entries !== undefined && entries.kind !== "found") {
-        return failureOutcome("ls", entries);
-      }
-
-      const display =
-        resolution.node.kind === "directory"
-          ? displayEntries(
-              resolution.node,
-              entries?.entries ?? [],
-              parsed.value.showAll,
-            )
-          : [displayEntry(resolution.node)];
-      const output = parsed.value.long
-        ? textOutput("ls-output", formatLongListing(display))
-        : textOutput(
-            "ls-output",
-            display.map((entry) => entry.name).join("\n"),
+      switch (parsed.value.mode.kind) {
+        case "tree":
+          return executeTree(filesystem, context, recursiveEntryLimit, {
+            commandName: "ls",
+            showAll: parsed.value.showAll,
+            maximumDepth: maximumRecursiveDepth,
+            path: parsed.value.path,
+          });
+        case "list": {
+          const resolution = resolveVirtualPath(
+            filesystem,
+            context.currentDirectory,
+            parsed.value.path,
           );
 
-      return succeededOutcome([output]);
+          if (resolution.kind !== "found") {
+            return failureOutcome("ls", resolution);
+          }
+
+          if (resolution.node.kind === "locked-file") {
+            return rejectedOutcome("ls", `Access is locked: ${resolution.path}`);
+          }
+
+          const entries =
+            resolution.node.kind === "directory"
+              ? listVirtualDirectory(
+                  filesystem,
+                  context.currentDirectory,
+                  parsed.value.path,
+                )
+              : undefined;
+
+          if (entries !== undefined && entries.kind !== "found") {
+            return failureOutcome("ls", entries);
+          }
+
+          const display =
+            resolution.node.kind === "directory"
+              ? displayEntries(
+                  resolution.node,
+                  entries?.entries ?? [],
+                  parsed.value.showAll,
+                )
+              : [displayEntry(resolution.node)];
+          const output = parsed.value.mode.format === "long"
+            ? textOutput("ls-output", formatLongListing(display))
+            : textOutput(
+                "ls-output",
+                display.map((entry) => entry.name).join("\n"),
+              );
+
+          return succeededOutcome([output]);
+        }
+      }
     },
   };
 }
