@@ -96,6 +96,10 @@ function paneNumber(key: string): number | undefined {
   return Number(key);
 }
 
+function isModifierKey(key: string): boolean {
+  return key === "Control" || key === "Shift" || key === "Alt" || key === "Meta";
+}
+
 export function applyPaneKeyInput(
   state: PanePrefixState,
   input: PaneKeyInput,
@@ -113,6 +117,10 @@ export function applyPaneKeyInput(
       };
     }
 
+    return { kind: "ignored", state };
+  }
+
+  if (isModifierKey(input.key)) {
     return { kind: "ignored", state };
   }
 
