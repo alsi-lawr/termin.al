@@ -17,13 +17,21 @@ async function createApplicationClientComposition(
   switch (applicationMode) {
     case "demo": {
       const { DemoContentClient } = await import("./content/DemoContentClient.ts");
+      const { DemoStatsClient } = await import("./api/StatsClient.ts");
 
-      return Object.freeze({ contentClient: new DemoContentClient() });
+      return Object.freeze({
+        contentClient: new DemoContentClient(),
+        statsClient: new DemoStatsClient(),
+      });
     }
     case "live": {
       const { HttpContentClient } = await import("./api/ContentClient.ts");
+      const { HttpStatsClient } = await import("./api/StatsClient.ts");
 
-      return Object.freeze({ contentClient: new HttpContentClient() });
+      return Object.freeze({
+        contentClient: new HttpContentClient(),
+        statsClient: new HttpStatsClient(),
+      });
     }
   }
 }

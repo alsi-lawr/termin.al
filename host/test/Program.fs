@@ -212,6 +212,7 @@ module Program =
         try
             ContentContractsTests.run ()
             GitHubContentClientTests.run ()
+            StatsTests.run ()
             runHostContractChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()

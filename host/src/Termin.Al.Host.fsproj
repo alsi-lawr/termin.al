@@ -9,6 +9,7 @@
     <Compile Include="ContentWire.fs" />
     <Compile Include="ContentClient.fs" />
     <Compile Include="GitHubContentClient.fs" />
+    <Compile Include="Stats.fs" />
     <Compile Include="Api.fs" />
     <Compile Include="HostApplication.fs" />
     <Compile Include="Program.fs" />

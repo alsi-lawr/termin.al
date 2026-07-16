@@ -6,6 +6,7 @@ open System.Net.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.Hosting
 
 [<RequireQualifiedAccess>]
 module HostApplication =
@@ -17,7 +18,15 @@ module HostApplication =
         else
             WebApplicationOptions(Args = args)
 
-    let private configureApplication (application: WebApplication) (contentClient: ContentClient) : WebApplication =
+    let private configureApplication
+        (application: WebApplication)
+        (contentClient: ContentClient)
+        (statsStore: Stats.Store)
+        (allowLocalHttpStatsCookie: bool)
+        (randomBytes: int -> byte array)
+        (now: unit -> DateTimeOffset)
+        (statsHeartbeatInterval: TimeSpan)
+        : WebApplication =
         application.UseDefaultFiles() |> ignore
         application.UseStaticFiles() |> ignore
 
@@ -28,6 +37,15 @@ module HostApplication =
                 Results.Text("{\"status\":\"ok\"}", "application/json", null, StatusCodes.Status200OK))
         )
         |> ignore
+
+        Stats.mapEndpoints
+            application
+            statsStore
+            contentClient
+            allowLocalHttpStatsCookie
+            randomBytes
+            now
+            statsHeartbeatInterval
 
         Api.mapEndpoints application contentClient
 
@@ -46,14 +64,48 @@ module HostApplication =
 
             contentClient, Some httpClient
 
-    let createWithContentClient (args: string array) (contentClient: ContentClient) : WebApplication =
+    let createWithContentClientAndStats
+        (args: string array)
+        (contentClient: ContentClient)
+        (statsStore: Stats.Store)
+        (allowLocalHttpStatsCookie: bool)
+        (randomBytes: int -> byte array)
+        (now: unit -> DateTimeOffset)
+        (statsHeartbeatInterval: TimeSpan)
+        : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
         let application = builder.Build()
-        configureApplication application contentClient
+
+        application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
+        |> ignore
+
+        configureApplication
+            application
+            contentClient
+            statsStore
+            allowLocalHttpStatsCookie
+            randomBytes
+            now
+            statsHeartbeatInterval
+
+    let createWithContentClient (args: string array) (contentClient: ContentClient) : WebApplication =
+        let now () = DateTimeOffset.UtcNow
+        let statsStore = Stats.unavailableStore now
+
+        createWithContentClientAndStats
+            args
+            contentClient
+            statsStore
+            false
+            Stats.randomBytes
+            now
+            (TimeSpan.FromSeconds(30.0))
 
     let create (args: string array) : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
         let contentClient, httpClient = liveContentClient builder.Configuration
+        let now () = DateTimeOffset.UtcNow
+        let statsStore = Stats.createStore builder.Configuration now
         let application = builder.Build()
 
         match httpClient with
@@ -62,4 +114,14 @@ module HostApplication =
             |> ignore
         | None -> ()
 
-        configureApplication application contentClient
+        application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
+        |> ignore
+
+        configureApplication
+            application
+            contentClient
+            statsStore
+            (builder.Environment.IsDevelopment())
+            Stats.randomBytes
+            now
+            (TimeSpan.FromSeconds(30.0))
