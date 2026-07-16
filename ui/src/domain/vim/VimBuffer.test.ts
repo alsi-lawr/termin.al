@@ -720,10 +720,10 @@ test("executes word and WORD objects through the shared delete change and yank p
     "2", "y", "i", "w",
   );
 
-  assert.equal(vimBufferText(countedDelete), " three");
-  assert.equal(vimBufferText(countedChange), " three");
+  assert.equal(vimBufferText(countedDelete), "two three");
+  assert.equal(vimBufferText(countedChange), "two three");
   assert.equal(vimBufferText(countedYank), countedText);
-  assert.deepEqual(countedDelete.register, { kind: "character", text: "one  two" });
+  assert.deepEqual(countedDelete.register, { kind: "character", text: "one  " });
   assert.deepEqual(countedChange.register, countedDelete.register);
   assert.deepEqual(countedYank.register, countedDelete.register);
   assert.equal(countedDelete.mode.kind, "normal");
@@ -747,10 +747,10 @@ test("executes word and WORD objects through the shared delete change and yank p
     "2", "y", "i", "W",
   );
 
-  assert.equal(vimBufferText(countedWORDDelete), " three");
-  assert.equal(vimBufferText(countedWORDChange), " three");
+  assert.equal(vimBufferText(countedWORDDelete), "two three");
+  assert.equal(vimBufferText(countedWORDChange), "two three");
   assert.equal(vimBufferText(countedWORDYank), countedWORDText);
-  assert.deepEqual(countedWORDDelete.register, { kind: "character", text: "one\n\ntwo" });
+  assert.deepEqual(countedWORDDelete.register, { kind: "character", text: "one\n\n" });
   assert.deepEqual(countedWORDChange.register, countedWORDDelete.register);
   assert.deepEqual(countedWORDYank.register, countedWORDDelete.register);
   assert.equal(countedWORDChange.mode.kind, "insert");
@@ -763,16 +763,63 @@ test("executes word and WORD objects through the shared delete change and yank p
   assert.equal(vimBufferText(blankStart), "onetwo");
   assert.deepEqual(blankStart.register, { kind: "character", text: "  " });
 
+  const countedBlankStart = press(
+    press(
+      createVimBuffer({ text: "one  two three", mode: VimMode.Normal }),
+      "3", "l",
+    ),
+    "2", "d", "i", "w",
+  );
+  assert.equal(vimBufferText(countedBlankStart), "one three");
+  assert.deepEqual(countedBlankStart.register, {
+    kind: "character",
+    text: "  two",
+  });
+
+  const emptyLineStart = press(
+    press(
+      createVimBuffer({ text: "one\n\ntwo", mode: VimMode.Normal }),
+      "j",
+    ),
+    "2", "d", "i", "W",
+  );
+  assert.equal(vimBufferText(emptyLineStart), "one");
+  assert.deepEqual(emptyLineStart.register, {
+    kind: "character",
+    text: "\n\ntwo",
+  });
+
+  const punctuationStart = press(
+    press(
+      createVimBuffer({ text: "one,!?  two", mode: VimMode.Normal }),
+      "3", "l",
+    ),
+    "2", "y", "i", "w",
+  );
+  assert.deepEqual(punctuationStart.register, {
+    kind: "character",
+    text: ",!?  ",
+  });
+
   const countedSurrogate = press(
     createVimBuffer({ text: "😀😀\n\nβeta tail", mode: VimMode.Normal }),
     "2", "y", "i", "W",
   );
   assert.deepEqual(countedSurrogate.register, {
     kind: "character",
-    text: "😀😀\n\nβeta",
+    text: "😀😀\n\n",
   });
   assert.deepEqual(countedSurrogate.cursor, { line: 0, column: 0 });
   assert.deepEqual(countedSurrogate.status, { kind: "none" });
+
+  const countedAroundWORD = press(
+    createVimBuffer({ text: "one\n\ntwo three", mode: VimMode.Normal }),
+    "2", "y", "a", "W",
+  );
+  assert.deepEqual(countedAroundWORD.register, {
+    kind: "character",
+    text: "one\n\ntwo ",
+  });
 });
 
 test("selects sentence and paragraph objects with their fixed separators", () => {
@@ -1032,6 +1079,28 @@ test("uses the fixed tolerant case-insensitive tag object profile", () => {
   assert.equal(yanked.mode.kind, "normal");
   assert.deepEqual(yanked.status, { kind: "none" });
 
+  const quotedAngles = [
+    "<a data-x='<inner>' data-y='>'>ok</a>",
+    '<a data-x="<inner>" data-y=">">ok</a>',
+  ];
+
+  for (const quotedText of quotedAngles) {
+    const cursorColumn = quotedText.indexOf("ok");
+    const quotedTag = press(
+      press(
+        createVimBuffer({ text: quotedText, mode: VimMode.Normal }),
+        ...Array.from("l".repeat(cursorColumn)),
+      ),
+      "y", "a", "t",
+    );
+
+    assert.deepEqual(quotedTag.register, {
+      kind: "character",
+      text: quotedText,
+    });
+    assert.deepEqual(quotedTag.status, { kind: "none" });
+  }
+
   const nested = press(
     press(createVimBuffer({ text: "<a><b>x</b></a>", mode: VimMode.Normal }), "7", "l"),
     "2", "y", "a", "t",
@@ -1091,6 +1160,42 @@ test("uses the fixed tolerant case-insensitive tag object profile", () => {
     text: "<x>ok</x>",
   });
   assert.deepEqual(malformedAfter.status, { kind: "none" });
+});
+
+test("keeps adversarial delimiter and malformed-comment object scans bounded", () => {
+  const backslashes = "\\".repeat(40_000);
+  const delimiterText = "(" + backslashes + "x)";
+  const delimiter = press(
+    createVimBuffer({ text: delimiterText, mode: VimMode.Normal }),
+    "y", "i", "(",
+  );
+
+  assert.equal(vimBufferText(delimiter), delimiterText);
+  assert.deepEqual(delimiter.status, { kind: "none" });
+
+  if (delimiter.register.kind !== "character") {
+    throw new Error("Expected the adversarial delimiter object to yank characters.");
+  }
+
+  assert.equal(delimiter.register.text.length, backslashes.length + 1);
+  assert.equal(delimiter.register.text.endsWith("x"), true);
+
+  const incompleteComments = "<!--".repeat(10_000);
+  const tagText = "<x>ok</x>" + incompleteComments;
+  const tag = press(
+    press(
+      createVimBuffer({ text: tagText, mode: VimMode.Normal }),
+      "l", "l", "l",
+    ),
+    "y", "a", "t",
+  );
+
+  assert.equal(vimBufferText(tag), tagText);
+  assert.deepEqual(tag.register, {
+    kind: "character",
+    text: "<x>ok</x>",
+  });
+  assert.deepEqual(tag.status, { kind: "none" });
 });
 
 test("keeps structural visual movement linewise and defers characterwise object adoption", () => {

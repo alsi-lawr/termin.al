@@ -999,6 +999,9 @@ type TagToken = Readonly<{
   start: number;
   end: number;
 }>;
+type TagEndScan =
+  | Readonly<{ kind: "complete"; end: number }>
+  | Readonly<{ kind: "malformed"; next: number }>;
 
 function sortedUnique(values: ReadonlyArray<number>): ReadonlyArray<number> {
   return [...new Set(values)].sort((left, right) => left - right);
@@ -1353,25 +1356,28 @@ function resolveWordObject(
         selectedFirst -= 1;
       }
     }
-
   }
 
-  selectedLast = selectedFirst;
-  let selectedObjects = 1;
+  if (around) {
+    selectedLast = selectedFirst;
+    let selectedObjects = 1;
 
-  while (selectedObjects < options.count) {
-    let next = selectedLast + 1;
+    while (selectedObjects < options.count) {
+      let next = selectedLast + 1;
 
-    while (next < spans.length && spanIsBlank(next)) {
-      next += 1;
+      while (next < spans.length && spanIsBlank(next)) {
+        next += 1;
+      }
+
+      if (next >= spans.length) {
+        break;
+      }
+
+      selectedLast = next;
+      selectedObjects += 1;
     }
-
-    if (next >= spans.length) {
-      break;
-    }
-
-    selectedLast = next;
-    selectedObjects += 1;
+  } else {
+    selectedLast = Math.min(spans.length - 1, first + options.count - 1);
   }
 
   const firstSpan = spans[selectedFirst];
@@ -1508,24 +1514,6 @@ function resolveParagraphObject(
   return { kind: "line", startLine, endLine };
 }
 
-function isEscaped(text: string, offset: number): boolean {
-  let backslashes = 0;
-  let position = offset;
-
-  while (position > 0) {
-    const previous = previousUnicodeCursorOffset(text, position);
-
-    if (characterAt(text, previous) !== "\\") {
-      break;
-    }
-
-    backslashes += 1;
-    position = previous;
-  }
-
-  return backslashes % 2 === 1;
-}
-
 function resolveQuoteObject(
   options: ResolveVimMotionOptions,
   quote: string,
@@ -1535,10 +1523,19 @@ function resolveQuoteObject(
   const lineStart = vimLineStartOffset(options.lines, options.cursor.line);
   const quotes: Array<number> = [];
   let column = 0;
+  let escaped = false;
 
   while (column < line.length) {
-    if (characterAt(line, column) === quote && !isEscaped(line, column)) {
-      quotes.push(column);
+    const character = characterAt(line, column);
+
+    if (character === "\\") {
+      escaped = !escaped;
+    } else {
+      if (character === quote && !escaped) {
+        quotes.push(column);
+      }
+
+      escaped = false;
     }
 
     column = nextUnicodeCursorOffset(line, column);
@@ -1581,39 +1578,47 @@ function resolveDelimiterObject(
   const objectOpenings = "([{<";
   const objectClosings = ")]}>";
   let offset = 0;
+  let escaped = false;
 
   while (offset < text.length) {
     const character = characterAt(text, offset);
 
-    if (!isEscaped(text, offset)) {
-      const openingIndex = objectOpenings.indexOf(character);
-      const closingIndex = objectClosings.indexOf(character);
+    if (character === "\\") {
+      escaped = !escaped;
+    } else {
+      const delimiterIsEscaped = escaped;
+      escaped = false;
 
-      if (openingIndex >= 0) {
-        stack.push({ character, offset });
-      } else if (closingIndex >= 0) {
-        const expectedOpening = objectOpenings.slice(closingIndex, closingIndex + 1);
-        const candidate = stack.at(-1);
+      if (!delimiterIsEscaped) {
+        const openingIndex = objectOpenings.indexOf(character);
+        const closingIndex = objectClosings.indexOf(character);
 
-        if (candidate?.character === expectedOpening) {
-          stack.pop();
+        if (openingIndex >= 0) {
+          stack.push({ character, offset });
+        } else if (closingIndex >= 0) {
+          const expectedOpening = objectOpenings.slice(closingIndex, closingIndex + 1);
+          const candidate = stack.at(-1);
 
-          if (
-            candidate.character === opening &&
-            character === closing &&
-            cursor >= candidate.offset &&
-            cursor <= offset
-          ) {
-            enclosing.push({
-              start: candidate.offset,
-              end: nextUnicodeCursorOffset(text, offset),
-            });
-          }
-        } else {
-          const crossed = stack.findIndex((entry) => entry.character === expectedOpening);
+          if (candidate?.character === expectedOpening) {
+            stack.pop();
 
-          if (crossed >= 0) {
-            stack.splice(crossed);
+            if (
+              candidate.character === opening &&
+              character === closing &&
+              cursor >= candidate.offset &&
+              cursor <= offset
+            ) {
+              enclosing.push({
+                start: candidate.offset,
+                end: nextUnicodeCursorOffset(text, offset),
+              });
+            }
+          } else {
+            const crossed = stack.findIndex((entry) => entry.character === expectedOpening);
+
+            if (crossed >= 0) {
+              stack.splice(crossed);
+            }
           }
         }
       }
@@ -1639,8 +1644,9 @@ function resolveDelimiterObject(
   return span.start === span.end ? undefined : span;
 }
 
-function scanTagEnd(text: string, start: number): number | undefined {
+function scanTagEnd(text: string, start: number): TagEndScan {
   let quote: string | undefined;
+  let quotedRecovery: number | undefined;
   let offset = start;
 
   while (offset < text.length) {
@@ -1649,26 +1655,27 @@ function scanTagEnd(text: string, start: number): number | undefined {
     if (quote !== undefined) {
       if (character === quote) {
         quote = undefined;
-      } else if (character === "<") {
-        return undefined;
+      } else if (character === "<" && quotedRecovery === undefined) {
+        quotedRecovery = offset;
       }
     } else if (character === "\"" || character === "'") {
       quote = character;
     } else if (character === "<") {
-      return undefined;
+      return { kind: "malformed", next: offset };
     } else if (character === ">") {
-      return nextUnicodeCursorOffset(text, offset);
+      return { kind: "complete", end: nextUnicodeCursorOffset(text, offset) };
     }
 
     offset = nextUnicodeCursorOffset(text, offset);
   }
 
-  return undefined;
+  return { kind: "malformed", next: quotedRecovery ?? start };
 }
 
 function tagTokens(text: string): ReadonlyArray<TagToken> {
   const tokens: Array<TagToken> = [];
   let offset = 0;
+  let commentsCannotClose = false;
 
   while (offset < text.length) {
     if (characterAt(text, offset) !== "<") {
@@ -1677,9 +1684,12 @@ function tagTokens(text: string): ReadonlyArray<TagToken> {
     }
 
     if (text.startsWith("<!--", offset)) {
-      const commentEnd = text.indexOf("-->", offset + 4);
+      const commentEnd = commentsCannotClose
+        ? -1
+        : text.indexOf("-->", offset + 4);
 
       if (commentEnd < 0) {
+        commentsCannotClose = true;
         offset += 4;
         continue;
       }
@@ -1688,12 +1698,14 @@ function tagTokens(text: string): ReadonlyArray<TagToken> {
       continue;
     }
 
-    const end = scanTagEnd(text, nextUnicodeCursorOffset(text, offset));
+    const scanned = scanTagEnd(text, nextUnicodeCursorOffset(text, offset));
 
-    if (end === undefined) {
-      offset = nextUnicodeCursorOffset(text, offset);
+    if (scanned.kind === "malformed") {
+      offset = scanned.next;
       continue;
     }
+
+    const end = scanned.end;
 
     const source = text.slice(offset + 1, end - 1).trim();
     const skipped = source.length === 0 || source.startsWith("!") || source.startsWith("?") || source.endsWith("/");
