@@ -1,0 +1,23 @@
+EDIT(1)                         termin.al Manual                         EDIT(1)
+
+NAME
+     edit - Edit published content.
+
+SYNOPSIS
+     edit <path>
+
+DESCRIPTION
+     Names  the future published-content editing entry point. The current public
+     corpus remains read-only.
+
+EXAMPLES
+     $ edit notes/sample-note.md
+
+NOTES
+     The command currently returns a stable unavailable-feature  diagnostic  and
+     does not modify content.
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                EDIT(1)

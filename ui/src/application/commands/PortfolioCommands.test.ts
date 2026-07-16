@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
+import { createManpageCorpus } from "../../content/ManpageCorpus.ts";
 import {
   createVirtualTimestamp,
   createVirtualFilesystem,
@@ -41,6 +43,27 @@ import type {
 } from "../../content/ViewerContent.ts";
 import type { PortfolioStatsReader } from "./PortfolioCommands.ts";
 
+const generatedManifestUrl = new URL(
+  "../../generated/manpages-manifest.json",
+  import.meta.url,
+);
+const generatedArtifactsUrl = new URL("../../generated/manpages/", import.meta.url);
+const generatedManifest: unknown = JSON.parse(
+  readFileSync(generatedManifestUrl, "utf8"),
+);
+const generatedArtifacts = new Map(
+  readdirSync(generatedArtifactsUrl, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".txt"))
+    .map((entry) => [
+      entry.name.slice(0, -".txt".length),
+      readFileSync(new URL(entry.name, generatedArtifactsUrl), "utf8"),
+    ]),
+);
+const generatedManpages = createManpageCorpus({
+  manifest: generatedManifest,
+  artifacts: generatedArtifacts,
+});
+
 function collectionLeaves(
   nodes: ReadonlyArray<ViewerCollectionNode>,
 ): ReadonlyArray<ViewerCollectionLeaf> {
@@ -79,6 +102,7 @@ function createRegistry(
       ...createReadOnlyCommandDefinitions({
         filesystem,
         documents,
+        manpages: generatedManpages,
         recursiveEntryLimit: 100,
       }),
       ...createPortfolioCommandDefinitions({
@@ -133,6 +157,18 @@ function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "su
   return outcome;
 }
 
+function outputText(outcome: CommandOutcome): string {
+  const output = succeeded(outcome).outputs.find(
+    (candidate) => candidate.kind === "text",
+  );
+
+  if (output === undefined || output.kind !== "text") {
+    assert.fail("Expected text output.");
+  }
+
+  return output.text;
+}
+
 test("renders help and manual metadata as terminal-native text", async () => {
   const registry = createRegistry();
   const help = succeeded(await execute("help", registry));
@@ -158,12 +194,44 @@ test("renders help and manual metadata as terminal-native text", async () => {
   assert.match(manualOutput.text, /^OPEN\(1\).*OPEN\(1\)$/mu);
   assert.match(
     manualOutput.text,
-    /\nSYNOPSIS\n       open \[--split horizontal\|vertical\] <target>/u,
+    /\nSYNOPSIS\n     open \[--split horizontal\|vertical\] <target>/u,
   );
   assert.match(
     manualOutput.text,
-    /\nEXAMPLES\n       \$ open about\.md\n       \$ open --split vertical projects/u,
+    /\nEXAMPLES\n     \$ open about\.md\n     \$ open --split vertical projects/u,
   );
+});
+
+test("keeps the actual registry and generated manuals in exact metadata agreement", async () => {
+  const registry = createRegistry();
+  const registryMetadata = [...registry.commands]
+    .map((command) => command.metadata)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  assert.equal(registryMetadata.length, 32);
+  assert.deepEqual(
+    generatedManpages.entries.map((entry) => entry.name),
+    registryMetadata.map((metadata) => metadata.name),
+  );
+
+  for (const metadata of registryMetadata) {
+    const manual = generatedManpages.lookup(metadata.name);
+
+    if (manual.kind === "missing") {
+      assert.fail(`Expected generated manual for ${metadata.name}.`);
+    }
+
+    assert.equal(manual.manpage.metadata.usage, metadata.usage);
+    assert.equal(manual.manpage.metadata.summary, metadata.summary);
+    assert.equal(
+      outputText(await execute(`man ${metadata.name}`, registry)),
+      manual.manpage.text,
+    );
+
+    for (const alias of metadata.aliases) {
+      assert.equal(generatedManpages.lookup(alias).kind, "missing");
+    }
+  }
 });
 
 test("opens fixture documents inline and directory targets in requested split effects", async () => {

@@ -1,0 +1,18 @@
+CHANGELOG(1)                    termin.al Manual                    CHANGELOG(1)
+
+NAME
+     changelog - Open changelog content.
+
+SYNOPSIS
+     changelog
+
+DESCRIPTION
+     Opens the published changelog document in the inline viewer.
+
+EXAMPLES
+     $ changelog
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                           CHANGELOG(1)

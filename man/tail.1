@@ -1,0 +1,25 @@
+.\" termin.al-name: tail
+.\" termin.al-usage: tail [-n count] <path>
+.\" termin.al-summary: Print final raw document lines.
+.TH TAIL 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+tail \- Print final raw document lines.
+.SH SYNOPSIS
+.nf
+tail [-n count] <path>
+.fi
+.SH DESCRIPTION
+Prints the last requested lines of one virtual document. The document is read as raw text rather than rendered Markdown.
+.SH OPTIONS
+.TP
+.B -n count
+Print count final lines. Count must be a supported positive integer.
+.SH EXAMPLES
+.nf
+$ tail -n 3 about.md
+.fi
+.SH SEE ALSO
+help(1), man(1)

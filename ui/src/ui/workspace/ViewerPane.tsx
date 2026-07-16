@@ -147,13 +147,18 @@ function StandardViewerPane({
   const isRawPager =
     activeViewer.kind === "document" &&
     activeViewer.presentation === "raw-pager";
+  const isVimManpager =
+    activeViewer.kind === "document" &&
+    activeViewer.presentation === "vim-manpager";
+  const isTextPager = isRawPager || isVimManpager;
   const markdownDocument =
     activeViewer.kind === "document" && activeViewer.presentation === "inline"
       ? activeViewer.document
       : undefined;
   const rawText =
     activeViewer.kind === "document" &&
-    activeViewer.presentation === "raw-pager"
+    (activeViewer.presentation === "raw-pager" ||
+      activeViewer.presentation === "vim-manpager")
       ? activeViewer.document.text
       : "";
   const markdownBlocks = markdownDocument === undefined
@@ -316,7 +321,7 @@ function StandardViewerPane({
     let defaultPrevented = false;
 
     handleViewerPaneKeyInput({
-      input: isRawPager
+      input: isTextPager
         ? {
             kind: "raw-pager",
             key: input.key,
@@ -388,7 +393,7 @@ function StandardViewerPane({
       return;
     }
 
-    if (isRawPager) {
+    if (isTextPager) {
       switch (control) {
         case "escape":
           applyPagerOperation({ kind: "quit" });
@@ -467,6 +472,67 @@ function StandardViewerPane({
         >
           {lessPrompt(title, status)}
         </div>
+        <MobilePaneControls
+          ctrlPressed={mobileCtrlPressed}
+          onCtrlToggle={onToggleMobileCtrl}
+          onCtrlConsumed={onConsumeMobileCtrl}
+          onControl={handleMobileControl}
+          onPrefix={triggerPrefix}
+        />
+      </section>
+    );
+  }
+
+  if (
+    activeViewer.kind === "document" &&
+    activeViewer.presentation === "vim-manpager"
+  ) {
+    const status = rawPagerStatus(rawPagerState);
+    const position = status.kind === "empty"
+      ? "No lines"
+      : `Line ${status.currentLine}/${status.totalLines}`;
+    const pageLines = rawPagerPageLines(
+      activeViewer.document.text,
+      rawPagerState,
+    );
+
+    return (
+      <section
+        ref={viewerRef}
+        className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary outline-none"
+        tabIndex={0}
+        aria-label={title + " viewer"}
+        onFocus={onActivate}
+        onKeyDown={handleKeyDown}
+        onClick={handleClick}
+      >
+        <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
+          <pre
+            className="min-h-full whitespace-pre-wrap wrap-break-words text-text-bright"
+            aria-label="Current Vim manpage"
+          >
+            {pageLines.map((line) => (
+              <span
+                key={line.lineNumber}
+                className={line.isCurrent
+                  ? "block bg-surface-highlight text-text-bright"
+                  : "block"}
+                aria-current={line.isCurrent ? "true" : undefined}
+              >
+                <span className="text-ui-accent" aria-hidden="true">
+                  {line.isCurrent ? "> " : "  "}
+                </span>
+                {line.text}
+              </span>
+            ))}
+          </pre>
+        </div>
+        <ViewerNavigationStatusLine
+          mode="NORMAL"
+          documentIdentity={title}
+          position={position}
+          match=""
+        />
         <MobilePaneControls
           ctrlPressed={mobileCtrlPressed}
           onCtrlToggle={onToggleMobileCtrl}

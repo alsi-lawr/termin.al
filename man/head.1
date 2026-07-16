@@ -1,0 +1,25 @@
+.\" termin.al-name: head
+.\" termin.al-usage: head [-n count] <path>
+.\" termin.al-summary: Print initial raw document lines.
+.TH HEAD 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+head \- Print initial raw document lines.
+.SH SYNOPSIS
+.nf
+head [-n count] <path>
+.fi
+.SH DESCRIPTION
+Prints the first requested lines of one virtual document. The document is read as raw text rather than rendered Markdown.
+.SH OPTIONS
+.TP
+.B -n count
+Print count initial lines. Count must be a supported positive integer.
+.SH EXAMPLES
+.nf
+$ head -n 3 about.md
+.fi
+.SH SEE ALSO
+help(1), man(1)

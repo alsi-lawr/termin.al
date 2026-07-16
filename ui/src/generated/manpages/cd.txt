@@ -1,0 +1,20 @@
+CD(1)                           termin.al Manual                           CD(1)
+
+NAME
+     cd - Change this shell pane's virtual directory.
+
+SYNOPSIS
+     cd [path]
+
+DESCRIPTION
+     Changes  the  working  directory owned by the current shell pane. Each pane
+     keeps its own directory, so moving in one pane does not move another.
+
+EXAMPLES
+     $ cd projects
+     $ cd ..
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                  CD(1)

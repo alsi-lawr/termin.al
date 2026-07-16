@@ -1,0 +1,20 @@
+HELP(1)                         termin.al Manual                         HELP(1)
+
+NAME
+     help - Show commands grouped by purpose.
+
+SYNOPSIS
+     help
+
+DESCRIPTION
+     Lists  registered  commands by purpose using the live command registry. Use
+     man(1) for the full manual of one command.
+
+EXAMPLES
+     $ help
+     $ man open
+
+SEE ALSO
+     man(1)
+
+termin.al                                                                HELP(1)

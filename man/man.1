@@ -1,0 +1,34 @@
+.\" termin.al-name: man
+.\" termin.al-usage: man <command>
+.\" termin.al-summary: Show command metadata.
+.TH MAN 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+man \- Show command metadata.
+.SH SYNOPSIS
+.nf
+man <command>
+man -P vim <command>
+man --pager=vim <command>
+.fi
+.SH DESCRIPTION
+Reads a project-authored section-1 manual for a registered command. Ordinary mode prints the generated text; Vim mode opens the same text in a keyboard pager.
+.SH OPTIONS
+.TP
+.B -P vim
+Open the selected manual in the Vim manpager.
+.TP
+.B --pager=vim
+Open the selected manual in the Vim manpager.
+.SH EXAMPLES
+.nf
+$ man grep
+$ man -P vim grep
+$ man --pager=vim pane
+.fi
+.SH NOTES
+Manual sources are roff files generated to checked UTF-8 artifacts during the production build. Aliases resolve through the command registry to the canonical manual.
+.SH SEE ALSO
+help(1), less(1)

@@ -1,0 +1,23 @@
+.\" termin.al-name: logout
+.\" termin.al-usage: logout
+.\" termin.al-summary: End the authenticated session.
+.TH LOGOUT 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+logout \- End the authenticated session.
+.SH SYNOPSIS
+.nf
+logout
+.fi
+.SH DESCRIPTION
+Names the future session-ending entry point. Authentication is intentionally unavailable in the current public application.
+.SH EXAMPLES
+.nf
+$ logout
+.fi
+.SH NOTES
+The command currently returns a stable unavailable-feature diagnostic and does not alter session state.
+.SH SEE ALSO
+help(1), man(1)

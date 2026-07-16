@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
+import { createManpageCorpus } from "../../content/ManpageCorpus.ts";
 import {
   createVirtualFilesystem,
   virtualHomeDirectory,
@@ -25,6 +27,27 @@ import {
   createReadOnlyCommandDefinitions,
 } from "./ReadOnlyCommands.ts";
 
+const generatedManifestUrl = new URL(
+  "../../generated/manpages-manifest.json",
+  import.meta.url,
+);
+const generatedArtifactsUrl = new URL("../../generated/manpages/", import.meta.url);
+const generatedManifest: unknown = JSON.parse(
+  readFileSync(generatedManifestUrl, "utf8"),
+);
+const generatedArtifacts = new Map(
+  readdirSync(generatedArtifactsUrl, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".txt"))
+    .map((entry) => [
+      entry.name.slice(0, -".txt".length),
+      readFileSync(new URL(entry.name, generatedArtifactsUrl), "utf8"),
+    ]),
+);
+const generatedManpages = createManpageCorpus({
+  manifest: generatedManifest,
+  artifacts: generatedArtifacts,
+});
+
 function createRegistry(
   recursiveEntryLimit = 100,
   documents: VirtualDocumentSupplier = demoContentCorpus.documents,
@@ -33,6 +56,7 @@ function createRegistry(
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents,
+      manpages: generatedManpages,
       recursiveEntryLimit,
     }),
   });
@@ -221,10 +245,10 @@ test("adds exact ls tree parsing, metadata, and tree output parity", async () =>
   ]);
   assert.match(
     manual,
-    /\nSYNOPSIS\n       ls \[-a\] \[-l\] \[--tree\] \[path\]/u,
+    /\nSYNOPSIS\n     ls \[-a\] \[-l\] \[--tree\] \[path\]/u,
   );
-  assert.match(manual, /\n       \$ ls --tree projects/u);
-  assert.match(manual, /\n       \$ ls -a --tree/u);
+  assert.match(manual, /\n     \$ ls --tree projects/u);
+  assert.match(manual, /\n     \$ ls -a --tree/u);
 });
 
 test("rejects every ls long-tree combination independently of ordering", async () => {
@@ -308,11 +332,11 @@ test("implements line readers, terminal history, manual pages, and pager effects
 
   assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
   assert.match(manual, /^GREP\(1\).*GREP\(1\)$/mu);
-  assert.match(manual, /\nNAME\n       grep - Search raw virtual document text\./u);
-  assert.match(manual, /\nSYNOPSIS\n       grep \[-i\] \[-n\] <pattern> \[path\]/u);
-  assert.match(manual, /\nOPTIONS\n       Supported options are shown in SYNOPSIS\./u);
-  assert.match(manual, /\nEXAMPLES\n       \$ grep -n fixture about\.md/u);
-  assert.match(manual, /\nSEE ALSO\n       help\(1\), man\(1\)/u);
+  assert.match(manual, /\nNAME\n     grep - Search raw virtual document text\./u);
+  assert.match(manual, /\nSYNOPSIS\n     grep \[-i\] \[-n\] <pattern> \[path\]/u);
+  assert.match(manual, /\nOPTIONS\n     -i/u);
+  assert.match(manual, /\nEXAMPLES\n     \$ grep -n fixture about\.md/u);
+  assert.match(manual, /\nSEE ALSO\n     help\(1\), man\(1\)/u);
 
   const pagerEffect = pager.effects.find(
     (effect) => effect.kind === "open-viewer",
@@ -330,6 +354,92 @@ test("implements line readers, terminal history, manual pages, and pager effects
     assert.equal(pagerEffect.viewer.statsIdentity.contentId.value, "note");
   }
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
+});
+
+test("uses one canonical artifact for ordinary, Vim, and alias manual requests", async () => {
+  const definitions = createReadOnlyCommandDefinitions({
+    filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
+    manpages: generatedManpages,
+    recursiveEntryLimit: 100,
+  });
+  const registry = createCommandRegistry({
+    commands: definitions.map((command) =>
+      command.metadata.name === "ls"
+        ? {
+            ...command,
+            metadata: { ...command.metadata, aliases: ["dir"] },
+          }
+        : command
+    ),
+  });
+  const manual = generatedManpages.lookup("ls");
+
+  if (manual.kind === "missing") {
+    assert.fail("Expected the generated ls manual.");
+  }
+
+  const ordinary = outputText(await execute("man ls", registry));
+  const alias = outputText(await execute("man dir", registry));
+  const shortPager = succeeded(await execute("man -P vim ls", registry));
+  const longPager = succeeded(await execute("man --pager=vim ls", registry));
+
+  assert.equal(ordinary, manual.manpage.text);
+  assert.equal(alias, manual.manpage.text);
+
+  for (const outcome of [shortPager, longPager]) {
+    const effect = outcome.effects.find((candidate) => candidate.kind === "open-viewer");
+
+    if (effect === undefined || effect.kind !== "open-viewer") {
+      assert.fail("Expected Vim manpager viewer effect.");
+    }
+
+    if (effect.viewer.kind !== "document") {
+      assert.fail("Expected a Vim manpage document.");
+    }
+
+    assert.equal(effect.viewer.title, "ls(1)");
+    assert.equal(effect.viewer.presentation, "vim-manpager");
+    assert.equal(effect.viewer.document.text, manual.manpage.text);
+    assert.equal(effect.viewer.document.source.path, "man/ls.1");
+    assert.deepEqual(effect.viewer.statsIdentity, { kind: "uncounted" });
+  }
+});
+
+test("reports stable diagnostics for malformed and unavailable manual requests", async () => {
+  const registry = createRegistry();
+  const invalidRequests: ReadonlyArray<readonly [string, string]> = [
+    ["man", "Usage: man [-P vim|--pager=vim] <command>"],
+    ["man ls grep", "Usage: man [-P vim|--pager=vim] <command>"],
+    ["man -P", "Usage: man [-P vim|--pager=vim] <command>"],
+    ["man -P less ls", "Unsupported man pager: less."],
+    ["man --pager=less ls", "Unsupported man pager: less."],
+    ["man --pager= ls", "Man pager must be specified."],
+    ["man --pager vim ls", "Unsupported man option: --pager."],
+    ["man -Pvim ls", "Unsupported man option: -Pvim."],
+    ["man absent", "No manual entry for absent."],
+  ];
+
+  for (const [source, message] of invalidRequests) {
+    assert.equal(failureMessage(await execute(source, registry)), message);
+  }
+
+  const noManuals = createCommandRegistry({
+    commands: createReadOnlyCommandDefinitions({
+      filesystem: demoContentCorpus.filesystem,
+      documents: demoContentCorpus.documents,
+      manpages: createManpageCorpus({
+        manifest: { entries: [] },
+        artifacts: new Map(),
+      }),
+      recursiveEntryLimit: 100,
+    }),
+  });
+
+  assert.equal(
+    failureMessage(await execute("man ls", noManuals)),
+    "No manual entry for ls.",
+  );
 });
 
 test("renders hidden, locked, directory, and long Unicode listings as text", async () => {
@@ -385,6 +495,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
+      manpages: generatedManpages,
       recursiveEntryLimit: 100,
     }),
   });
@@ -399,6 +510,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
+      manpages: generatedManpages,
       recursiveEntryLimit: 1,
     }),
   });

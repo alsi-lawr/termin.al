@@ -1,0 +1,32 @@
+LS(1)                           termin.al Manual                           LS(1)
+
+NAME
+     ls - List virtual files and directories.
+
+SYNOPSIS
+     ls [-a] [-l] [--tree] [path]
+
+DESCRIPTION
+     Lists entries in the current or selected virtual directory. Output is drawn
+     from  termin.al's  read-only  content  tree;  it  does not inspect the host
+     filesystem.
+
+OPTIONS
+     -a     Include hidden entries.
+
+     -l     Use the long listing with type, size and timestamp.
+
+     --tree
+            Render the selected directory as a tree;  this  cannot  be  combined
+            with -l.
+
+EXAMPLES
+     $ ls
+     $ ls -l projects
+     $ ls --tree projects
+     $ ls -a --tree
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                  LS(1)

@@ -1,0 +1,19 @@
+WHOAMI(1)                       termin.al Manual                       WHOAMI(1)
+
+NAME
+     whoami - Show the current development capability.
+
+SYNOPSIS
+     whoami
+
+DESCRIPTION
+     Reports  the  anonymous development capability used by the public termin.al
+     session.
+
+EXAMPLES
+     $ whoami
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                              WHOAMI(1)

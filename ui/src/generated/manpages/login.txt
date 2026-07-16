@@ -1,0 +1,23 @@
+LOGIN(1)                        termin.al Manual                        LOGIN(1)
+
+NAME
+     login - Authenticate with GitHub.
+
+SYNOPSIS
+     login
+
+DESCRIPTION
+     Names  the  future authentication entry point. Authentication is intention‐
+     ally unavailable in the current public application.
+
+EXAMPLES
+     $ login
+
+NOTES
+     The command currently returns a stable unavailable-feature  diagnostic  and
+     does not begin an authentication flow.
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               LOGIN(1)

@@ -1,0 +1,25 @@
+FIND(1)                         termin.al Manual                         FIND(1)
+
+NAME
+     find - Find virtual paths by a simple wildcard name pattern.
+
+SYNOPSIS
+     find [path] [-name pattern]
+
+DESCRIPTION
+     Searches virtual entry names beneath a starting directory. The name expres‐
+     sion supports the simple wildcard matching documented below.
+
+OPTIONS
+     -name pattern
+            Match  entry  names with * and ? wildcards. The option may follow or
+            precede the path.
+
+EXAMPLES
+     $ find -name '*.md'
+     $ find projects -name '*project*'
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                FIND(1)

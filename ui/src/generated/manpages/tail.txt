@@ -1,0 +1,23 @@
+TAIL(1)                         termin.al Manual                         TAIL(1)
+
+NAME
+     tail - Print final raw document lines.
+
+SYNOPSIS
+     tail [-n count] <path>
+
+DESCRIPTION
+     Prints  the  last  requested lines of one virtual document. The document is
+     read as raw text rather than rendered Markdown.
+
+OPTIONS
+     -n count
+            Print count final lines. Count must be a supported positive integer.
+
+EXAMPLES
+     $ tail -n 3 about.md
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                TAIL(1)

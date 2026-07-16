@@ -1,0 +1,23 @@
+LOGOUT(1)                       termin.al Manual                       LOGOUT(1)
+
+NAME
+     logout - End the authenticated session.
+
+SYNOPSIS
+     logout
+
+DESCRIPTION
+     Names  the  future session-ending entry point. Authentication is intention‐
+     ally unavailable in the current public application.
+
+EXAMPLES
+     $ logout
+
+NOTES
+     The command currently returns a stable unavailable-feature  diagnostic  and
+     does not alter session state.
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                              LOGOUT(1)

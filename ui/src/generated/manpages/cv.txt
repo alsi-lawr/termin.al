@@ -1,0 +1,19 @@
+CV(1)                           termin.al Manual                           CV(1)
+
+NAME
+     cv - Open cv content.
+
+SYNOPSIS
+     cv
+
+DESCRIPTION
+     Requests  the published CV document. Access may be denied when that virtual
+     entry is locked.
+
+EXAMPLES
+     $ cv
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                  CV(1)

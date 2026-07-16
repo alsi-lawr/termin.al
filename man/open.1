@@ -1,0 +1,29 @@
+.\" termin.al-name: open
+.\" termin.al-usage: open [--split horizontal|vertical] <target>
+.\" termin.al-summary: Open virtual content inline or in a split viewer pane.
+.TH OPEN 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+open \- Open virtual content inline or in a split viewer pane.
+.SH SYNOPSIS
+.nf
+open [--split horizontal|vertical] <target>
+.fi
+.SH DESCRIPTION
+Opens a virtual document or collection in a viewer. A split disposition requests a new pane without changing how the target is resolved.
+.SH OPTIONS
+.TP
+.B --split horizontal
+Open the target in a new horizontal split.
+.TP
+.B --split vertical
+Open the target in a new vertical split.
+.SH EXAMPLES
+.nf
+$ open about.md
+$ open --split vertical projects
+.fi
+.SH SEE ALSO
+help(1), man(1)

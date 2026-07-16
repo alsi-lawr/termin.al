@@ -1,0 +1,24 @@
+PANE(1)                         termin.al Manual                         PANE(1)
+
+NAME
+     pane - Manage terminal panes.
+
+SYNOPSIS
+     pane split|focus|select|resize|close|zoom|swap|rotate|layout
+
+DESCRIPTION
+     Applies  an  explicit operation to the terminal workspace's pane tree. Pane
+     focus, layout and content remain owned by existing workspace behavior.
+
+EXAMPLES
+     $ pane split horizontal viewer
+     $ pane focus next
+
+NOTES
+     Ctrl+b keyboard prefix behavior and responsive pane layout are not  changed
+     by this command's manual or by the Vim manpager.
+
+SEE ALSO
+     open(1)
+
+termin.al                                                                PANE(1)

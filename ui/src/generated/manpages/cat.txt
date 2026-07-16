@@ -1,0 +1,19 @@
+CAT(1)                          termin.al Manual                          CAT(1)
+
+NAME
+     cat - Print raw virtual document content.
+
+SYNOPSIS
+     cat <path> [path ...]
+
+DESCRIPTION
+     Writes  one  or more virtual documents to terminal scrollback without Mark‐
+     down rendering. Documents are read in argument order.
+
+EXAMPLES
+     $ cat about.md
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                 CAT(1)

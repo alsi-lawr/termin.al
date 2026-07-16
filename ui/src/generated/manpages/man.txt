@@ -1,0 +1,36 @@
+MAN(1)                          termin.al Manual                          MAN(1)
+
+NAME
+     man - Show command metadata.
+
+SYNOPSIS
+     man <command>
+     man -P vim <command>
+     man --pager=vim <command>
+
+DESCRIPTION
+     Reads  a  project-authored section-1 manual for a registered command. Ordi‐
+     nary mode prints the generated text; Vim mode opens the same text in a key‐
+     board pager.
+
+OPTIONS
+     -P vim
+            Open the selected manual in the Vim manpager.
+
+     --pager=vim
+            Open the selected manual in the Vim manpager.
+
+EXAMPLES
+     $ man grep
+     $ man -P vim grep
+     $ man --pager=vim pane
+
+NOTES
+     Manual sources are roff files generated to checked UTF-8  artifacts  during
+     the  production  build. Aliases resolve through the command registry to the
+     canonical manual.
+
+SEE ALSO
+     help(1), less(1)
+
+termin.al                                                                 MAN(1)

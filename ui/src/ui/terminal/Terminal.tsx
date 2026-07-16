@@ -55,6 +55,7 @@ import {
 import type { MobileCtrlInputResolution } from "../workspace/MobileCtrlModifier.ts";
 import { ViewerPane } from "../workspace/ViewerPane";
 import { HierarchicalCollectionPane } from "../workspace/HierarchicalCollectionPane.tsx";
+import { generatedManpageCorpus } from "../../content/ManpageCorpusVite.ts";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
@@ -128,6 +129,7 @@ export function Terminal({
         ...createReadOnlyCommandDefinitions({
           filesystem,
           documents,
+          manpages: generatedManpageCorpus,
           recursiveEntryLimit: 100,
         }),
         ...createPortfolioCommandDefinitions({

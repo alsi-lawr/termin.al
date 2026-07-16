@@ -1,0 +1,18 @@
+ABOUT(1)                        termin.al Manual                        ABOUT(1)
+
+NAME
+     about - Open about content.
+
+SYNOPSIS
+     about
+
+DESCRIPTION
+     Opens the published about document in the inline viewer.
+
+EXAMPLES
+     $ about
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               ABOUT(1)

@@ -1,0 +1,19 @@
+PWD(1)                          termin.al Manual                          PWD(1)
+
+NAME
+     pwd - Print this shell pane's virtual directory.
+
+SYNOPSIS
+     pwd
+
+DESCRIPTION
+     Prints  the  virtual working directory of the current shell pane using ter‐
+     min.al path notation.
+
+EXAMPLES
+     $ pwd
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                 PWD(1)

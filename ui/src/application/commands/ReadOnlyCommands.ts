@@ -12,6 +12,7 @@ import {
   type VirtualTraversalResult,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
+import type { ManpageCorpus } from "../../content/ManpageCorpus.ts";
 import { ContentId } from "../../api/ContentContracts.ts";
 import {
   createShellDiagnosticId,
@@ -26,12 +27,12 @@ import {
   type CommandDefinition,
   type CommandExecutionContext,
   type CommandInvocation,
-  type CommandMetadata,
 } from "./CommandRegistry.ts";
 
 export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
+  manpages: ManpageCorpus;
   recursiveEntryLimit: number;
 }>;
 
@@ -1350,52 +1351,75 @@ function formatHistoryEntries(
     .join("\n");
 }
 
-function manualHeader(name: string): string {
-  const label = `${name.toUpperCase()}(1)`;
+type ManPresentation = "scrollback" | "vim-manpager";
 
-  return `${label.padEnd(28)}TERMIN.AL${label.padStart(28)}`;
-}
+type ManInvocationParseResult =
+  | Readonly<{
+      kind: "parsed";
+      presentation: ManPresentation;
+      requestedName: string;
+    }>
+  | Readonly<{ kind: "invalid"; message: string }>;
 
-function manualSection(
-  title: string,
-  lines: ReadonlyArray<string>,
-): string {
-  return [title, ...lines.map((line) => `       ${line}`)].join("\n");
-}
+const manUsage = "Usage: man [-P vim|--pager=vim] <command>";
 
-function formatTerminalManualPage(metadata: CommandMetadata): string {
-  const sections = [
-    manualSection("NAME", [`${metadata.name} - ${metadata.summary}`]),
-    manualSection("SYNOPSIS", [metadata.usage]),
-    manualSection("DESCRIPTION", [metadata.summary]),
-  ];
+function parseManInvocation(invocation: CommandInvocation): ManInvocationParseResult {
+  const [first, second, third, ...remaining] = invocation.arguments;
 
-  if (metadata.usage.includes("[")) {
-    sections.push(
-      manualSection("OPTIONS", ["Supported options are shown in SYNOPSIS."]),
-    );
+  if (first === undefined) {
+    return { kind: "invalid", message: manUsage };
   }
 
-  if (metadata.aliases.length > 0) {
-    sections.push(manualSection("ALIASES", [metadata.aliases.join(", ")]));
+  if (first === "-P") {
+    if (second === undefined || third === undefined || remaining.length > 0) {
+      return { kind: "invalid", message: manUsage };
+    }
+
+    if (second !== "vim") {
+      return { kind: "invalid", message: `Unsupported man pager: ${second}.` };
+    }
+
+    return {
+      kind: "parsed",
+      presentation: "vim-manpager",
+      requestedName: third,
+    };
   }
 
-  if (metadata.examples.length > 0) {
-    sections.push(
-      manualSection(
-        "EXAMPLES",
-        metadata.examples.map((example) => `$ ${example}`),
-      ),
-    );
+  if (first.startsWith("--pager=")) {
+    if (second === undefined || third !== undefined || remaining.length > 0) {
+      return { kind: "invalid", message: manUsage };
+    }
+
+    const pager = first.slice("--pager=".length);
+
+    if (pager !== "vim") {
+      const message = pager.length === 0
+        ? "Man pager must be specified."
+        : `Unsupported man pager: ${pager}.`;
+
+      return {
+        kind: "invalid",
+        message,
+      };
+    }
+
+    return {
+      kind: "parsed",
+      presentation: "vim-manpager",
+      requestedName: second,
+    };
   }
 
-  sections.push(manualSection("SEE ALSO", ["help(1), man(1)"]));
+  if (first.startsWith("-")) {
+    return { kind: "invalid", message: `Unsupported man option: ${first}.` };
+  }
 
-  const header = manualHeader(metadata.name);
+  if (second !== undefined || third !== undefined || remaining.length > 0) {
+    return { kind: "invalid", message: manUsage };
+  }
 
-  return [header, "", ...sections.flatMap((section) => [section, ""]), header].join(
-    "\n",
-  );
+  return { kind: "parsed", presentation: "scrollback", requestedName: first };
 }
 
 function createHistoryCommand(): CommandDefinition {
@@ -1422,7 +1446,7 @@ function createHistoryCommand(): CommandDefinition {
   };
 }
 
-function createManCommand(): CommandDefinition {
+function createManCommand(manpages: ManpageCorpus): CommandDefinition {
   return {
     metadata: {
       group: "gnu-like",
@@ -1433,28 +1457,48 @@ function createManCommand(): CommandDefinition {
       examples: ["man grep"],
     },
     execute: async (invocation, context) => {
-      const parsed = parseNoOptionPaths(invocation, "man <command>", 1, 1);
+      const parsed = parseManInvocation(invocation);
 
       if (parsed.kind === "invalid") {
         return rejectedOutcome("man", parsed.message);
       }
 
-      const commandName = parsed.value[0];
-
-      if (commandName === undefined) {
-        return rejectedOutcome("man", "Usage: man <command>");
-      }
-
-      const resolution = resolveCommand(context.registry, commandName);
+      const resolution = resolveCommand(context.registry, parsed.requestedName);
 
       if (resolution.kind === "missing") {
-        return rejectedOutcome("man", `No manual entry for ${commandName}.`);
+        return rejectedOutcome(
+          "man",
+          `No manual entry for ${parsed.requestedName}.`,
+        );
       }
 
-      const metadata = resolution.command.metadata;
+      const canonicalName = resolution.command.metadata.name;
+      const manual = manpages.lookup(canonicalName);
 
-      return succeededOutcome([
-        textOutput("man-output", formatTerminalManualPage(metadata)),
+      if (manual.kind === "missing") {
+        return rejectedOutcome("man", `No manual entry for ${canonicalName}.`);
+      }
+
+      if (parsed.presentation === "scrollback") {
+        return succeededOutcome([
+          textOutput("man-output", manual.manpage.text),
+        ]);
+      }
+
+      return succeededOutcome([], [
+        {
+          kind: "open-viewer",
+          viewer: createDocumentViewerContent({
+            title: `${canonicalName}(1)`,
+            presentation: "vim-manpager",
+            document: {
+              text: manual.manpage.text,
+              source: { path: manual.manpage.metadata.sourcePath },
+            },
+            statsIdentity: { kind: "uncounted" },
+          }),
+          disposition: { kind: "inline" },
+        },
       ]);
     },
   };
@@ -1498,6 +1542,7 @@ function createWhoamiCommand(): CommandDefinition {
 export function createReadOnlyCommandDefinitions({
   filesystem,
   documents,
+  manpages,
   recursiveEntryLimit,
 }: CreateReadOnlyCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   if (!Number.isSafeInteger(recursiveEntryLimit) || recursiveEntryLimit < 1) {
@@ -1517,7 +1562,7 @@ export function createReadOnlyCommandDefinitions({
     createLessCommand(filesystem, documents),
     createClearCommand(),
     createHistoryCommand(),
-    createManCommand(),
+    createManCommand(manpages),
     createEchoCommand(),
     createWhoamiCommand(),
   ];

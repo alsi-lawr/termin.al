@@ -1,0 +1,18 @@
+TOOLS(1)                        termin.al Manual                        TOOLS(1)
+
+NAME
+     tools - Open tools content.
+
+SYNOPSIS
+     tools
+
+DESCRIPTION
+     Opens the published tools document in the inline viewer.
+
+EXAMPLES
+     $ tools
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               TOOLS(1)

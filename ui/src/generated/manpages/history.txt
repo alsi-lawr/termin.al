@@ -1,0 +1,19 @@
+HISTORY(1)                      termin.al Manual                      HISTORY(1)
+
+NAME
+     history - Show this shell pane's bounded command history.
+
+SYNOPSIS
+     history
+
+DESCRIPTION
+     Prints the bounded command history owned by the current shell pane, includ‐
+     ing the current history invocation.
+
+EXAMPLES
+     $ history
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                             HISTORY(1)

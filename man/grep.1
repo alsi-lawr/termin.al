@@ -1,0 +1,29 @@
+.\" termin.al-name: grep
+.\" termin.al-usage: grep [-i] [-n] <pattern> [path]
+.\" termin.al-summary: Search raw virtual document text.
+.TH GREP 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+grep \- Search raw virtual document text.
+.SH SYNOPSIS
+.nf
+grep [-i] [-n] <pattern> [path]
+.fi
+.SH DESCRIPTION
+Searches the raw text of virtual documents. When no path is supplied, the command searches readable documents beneath the current directory within the traversal bound.
+.SH OPTIONS
+.TP
+.B -i
+Compare text without ASCII letter case.
+.TP
+.B -n
+Prefix matching lines with their line number.
+.SH EXAMPLES
+.nf
+$ grep -n fixture about.md
+$ grep -i typed
+.fi
+.SH SEE ALSO
+help(1), man(1)

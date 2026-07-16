@@ -1,0 +1,19 @@
+ECHO(1)                         termin.al Manual                         ECHO(1)
+
+NAME
+     echo - Print arguments as text.
+
+SYNOPSIS
+     echo [text ...]
+
+DESCRIPTION
+     Joins  its  arguments  with single spaces and writes the result to terminal
+     scrollback.
+
+EXAMPLES
+     $ echo 'hello terminal'
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                ECHO(1)

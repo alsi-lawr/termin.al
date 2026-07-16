@@ -1,0 +1,33 @@
+.\" termin.al-name: theme
+.\" termin.al-usage: theme [list|set <name>|system]
+.\" termin.al-summary: List, select, or follow the system terminal theme.
+.TH THEME 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+theme \- List, select, or follow the system terminal theme.
+.SH SYNOPSIS
+.nf
+theme [list|set <name>|system]
+.fi
+.SH DESCRIPTION
+Displays or changes the terminal colour theme for the current browser session. System mode follows the active operating-system preference.
+.SH OPTIONS
+.TP
+.B list
+List available theme names.
+.TP
+.B set name
+Select one named theme.
+.TP
+.B system
+Follow the operating-system colour preference.
+.SH EXAMPLES
+.nf
+$ theme list
+$ theme set gruber-darker
+$ theme system
+.fi
+.SH SEE ALSO
+help(1), man(1)

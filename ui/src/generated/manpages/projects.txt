@@ -1,0 +1,18 @@
+PROJECTS(1)                     termin.al Manual                     PROJECTS(1)
+
+NAME
+     projects - Open projects content.
+
+SYNOPSIS
+     projects
+
+DESCRIPTION
+     Opens the published projects collection for keyboard or touch navigation.
+
+EXAMPLES
+     $ projects
+
+SEE ALSO
+     open(1), notes(1), blog(1)
+
+termin.al                                                            PROJECTS(1)

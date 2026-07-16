@@ -1,0 +1,19 @@
+STATS(1)                        termin.al Manual                        STATS(1)
+
+NAME
+     stats - Show aggregate site statistics.
+
+SYNOPSIS
+     stats
+
+DESCRIPTION
+     Shows  the  latest  aggregate site statistics available to the session, in‐
+     cluding the current connection or freshness status.
+
+EXAMPLES
+     $ stats
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               STATS(1)

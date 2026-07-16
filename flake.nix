@@ -18,6 +18,7 @@
           dotnet-sdk_10
           fantomas
           git
+          groff
         ];
       };
     };

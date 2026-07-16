@@ -1,0 +1,27 @@
+OPEN(1)                         termin.al Manual                         OPEN(1)
+
+NAME
+     open - Open virtual content inline or in a split viewer pane.
+
+SYNOPSIS
+     open [--split horizontal|vertical] <target>
+
+DESCRIPTION
+     Opens a virtual document or collection in a viewer. A split disposition re‐
+     quests a new pane without changing how the target is resolved.
+
+OPTIONS
+     --split horizontal
+            Open the target in a new horizontal split.
+
+     --split vertical
+            Open the target in a new vertical split.
+
+EXAMPLES
+     $ open about.md
+     $ open --split vertical projects
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                OPEN(1)

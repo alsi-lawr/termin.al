@@ -1,0 +1,26 @@
+TREE(1)                         termin.al Manual                         TREE(1)
+
+NAME
+     tree - Render a bounded virtual directory tree.
+
+SYNOPSIS
+     tree [-a] [-L depth] [path]
+
+DESCRIPTION
+     Displays  a  bounded hierarchy rooted at a virtual directory. The traversal
+     is deterministic and never reaches outside the published content corpus.
+
+OPTIONS
+     -a     Include hidden entries.
+
+     -L depth
+            Limit traversal to the positive depth value.
+
+EXAMPLES
+     $ tree
+     $ tree -L 1 projects
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                TREE(1)

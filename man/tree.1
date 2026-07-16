@@ -1,0 +1,29 @@
+.\" termin.al-name: tree
+.\" termin.al-usage: tree [-a] [-L depth] [path]
+.\" termin.al-summary: Render a bounded virtual directory tree.
+.TH TREE 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+tree \- Render a bounded virtual directory tree.
+.SH SYNOPSIS
+.nf
+tree [-a] [-L depth] [path]
+.fi
+.SH DESCRIPTION
+Displays a bounded hierarchy rooted at a virtual directory. The traversal is deterministic and never reaches outside the published content corpus.
+.SH OPTIONS
+.TP
+.B -a
+Include hidden entries.
+.TP
+.B -L depth
+Limit traversal to the positive depth value.
+.SH EXAMPLES
+.nf
+$ tree
+$ tree -L 1 projects
+.fi
+.SH SEE ALSO
+help(1), man(1)

@@ -1,0 +1,26 @@
+GREP(1)                         termin.al Manual                         GREP(1)
+
+NAME
+     grep - Search raw virtual document text.
+
+SYNOPSIS
+     grep [-i] [-n] <pattern> [path]
+
+DESCRIPTION
+     Searches  the  raw text of virtual documents. When no path is supplied, the
+     command searches readable documents beneath the  current  directory  within
+     the traversal bound.
+
+OPTIONS
+     -i     Compare text without ASCII letter case.
+
+     -n     Prefix matching lines with their line number.
+
+EXAMPLES
+     $ grep -n fixture about.md
+     $ grep -i typed
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                GREP(1)

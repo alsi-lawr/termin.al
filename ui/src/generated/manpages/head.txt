@@ -1,0 +1,24 @@
+HEAD(1)                         termin.al Manual                         HEAD(1)
+
+NAME
+     head - Print initial raw document lines.
+
+SYNOPSIS
+     head [-n count] <path>
+
+DESCRIPTION
+     Prints  the  first requested lines of one virtual document. The document is
+     read as raw text rather than rendered Markdown.
+
+OPTIONS
+     -n count
+            Print count initial lines. Count must be a supported positive  inte‐
+            ger.
+
+EXAMPLES
+     $ head -n 3 about.md
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                HEAD(1)

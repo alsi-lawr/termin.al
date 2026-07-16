@@ -1,0 +1,18 @@
+SKILLS(1)                       termin.al Manual                       SKILLS(1)
+
+NAME
+     skills - Open skills content.
+
+SYNOPSIS
+     skills
+
+DESCRIPTION
+     Opens the published skills document in the inline viewer.
+
+EXAMPLES
+     $ skills
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                              SKILLS(1)

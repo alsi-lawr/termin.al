@@ -153,6 +153,45 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.equal(mobileControlsPosition > promptPosition, true);
 });
 
+test("renders Vim manpages with a current line, NORMAL status, and mobile controls", async () => {
+  const text = Array.from(
+    { length: 25 },
+    (_, index) => `manual line ${index + 1}\n`,
+  ).join("");
+  const markup = await renderViewerPane({
+    kind: "document",
+    title: "ls(1)",
+    presentation: "vim-manpager",
+    document: {
+      text,
+      source: { path: "man/ls.1" },
+    },
+    statsIdentity: { kind: "uncounted" },
+  });
+
+  assert.equal(markup.includes('aria-label="Current Vim manpage"'), true);
+  assert.equal(markup.includes('aria-current="true"'), true);
+  assert.equal(markup.includes("bg-surface-highlight"), true);
+  assert.equal(markup.includes("manual line 1\n"), true);
+  assert.equal(markup.includes("manual line 20\n"), true);
+  assert.equal(markup.includes("manual line 21\n"), false);
+  assert.equal(markup.includes('aria-label="Less prompt"'), false);
+  assert.equal(markup.includes(">NORMAL</span>"), true);
+  assert.equal(markup.includes(">ls(1)</span>"), true);
+  assert.equal(markup.includes(">Line 1/25</span>"), true);
+  assert.equal(markup.includes(">Return</button>"), false);
+
+  const statusPosition = markup.indexOf(
+    'aria-label="Viewer navigation status"',
+  );
+  const mobileControlsPosition = markup.indexOf(
+    'aria-label="Mobile terminal controls"',
+  );
+
+  assert.notEqual(statusPosition, -1);
+  assert.equal(mobileControlsPosition > statusPosition, true);
+});
+
 test("renders hierarchical collections as terminal rows with explicit touch controls and no viewer page chrome", async () => {
   const markup = await renderViewerPane({
     kind: "collection",

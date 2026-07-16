@@ -1,0 +1,18 @@
+NOTES(1)                        termin.al Manual                        NOTES(1)
+
+NAME
+     notes - Open notes content.
+
+SYNOPSIS
+     notes
+
+DESCRIPTION
+     Opens the published notes collection for keyboard or touch navigation.
+
+EXAMPLES
+     $ notes
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               NOTES(1)

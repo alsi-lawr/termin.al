@@ -1,0 +1,30 @@
+THEME(1)                        termin.al Manual                        THEME(1)
+
+NAME
+     theme - List, select, or follow the system terminal theme.
+
+SYNOPSIS
+     theme [list|set <name>|system]
+
+DESCRIPTION
+     Displays  or changes the terminal colour theme for the current browser ses‐
+     sion. System mode follows the active operating-system preference.
+
+OPTIONS
+     list   List available theme names.
+
+     set name
+            Select one named theme.
+
+     system
+            Follow the operating-system colour preference.
+
+EXAMPLES
+     $ theme list
+     $ theme set gruber-darker
+     $ theme system
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               THEME(1)

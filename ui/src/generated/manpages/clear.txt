@@ -1,0 +1,19 @@
+CLEAR(1)                        termin.al Manual                        CLEAR(1)
+
+NAME
+     clear - Clear terminal scrollback.
+
+SYNOPSIS
+     clear
+
+DESCRIPTION
+     Removes  terminal  scrollback  from the current shell pane. Command history
+     and the pane's working directory are preserved.
+
+EXAMPLES
+     $ clear
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                               CLEAR(1)

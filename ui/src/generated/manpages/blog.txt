@@ -1,0 +1,18 @@
+BLOG(1)                         termin.al Manual                         BLOG(1)
+
+NAME
+     blog - Open blog content.
+
+SYNOPSIS
+     blog
+
+DESCRIPTION
+     Opens the published blog collection for keyboard or touch navigation.
+
+EXAMPLES
+     $ blog
+
+SEE ALSO
+     help(1), man(1)
+
+termin.al                                                                BLOG(1)

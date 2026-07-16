@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite --mode demo --port 5173 --strictPort",
     "dev:live": "vite --mode live --port 5173 --strictPort",
-    "build": "tsc -b && vite build",
+    "build": "npm run manpages:check && tsc -b && vite build",
     "lint": "oxlint .",
+    "manpages:generate": "node --experimental-strip-types ../scripts/generate-manpages.ts",
+    "manpages:check": "node --experimental-strip-types ../scripts/generate-manpages.ts --check",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
     "preview": "vite preview --port 5175 --strictPort"
   },

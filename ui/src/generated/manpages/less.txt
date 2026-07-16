@@ -1,0 +1,23 @@
+LESS(1)                         termin.al Manual                         LESS(1)
+
+NAME
+     less - Open raw virtual document text in a pager.
+
+SYNOPSIS
+     less <path>
+
+DESCRIPTION
+     Opens  one  virtual document in termin.al's raw pager. The pager keeps GNU-
+     less-like presentation separate from the Vim manpage viewer.
+
+EXAMPLES
+     $ less notes/sample-note.md
+
+NOTES
+     Keys include j/k and the arrow keys, PageUp/b, PageDown/Space, g/G,  Ctrl+f
+     and q/Escape. Ctrl+b remains the pane-prefix key.
+
+SEE ALSO
+     man(1), cat(1)
+
+termin.al                                                                LESS(1)
