@@ -608,55 +608,125 @@ module StatsTests =
         message
 
     let private assertFailedSseSetupCleanupScope () =
-        let sourcePath = Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../src/Stats.fs"))
+        let sourcePath =
+            Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "../src/Stats.fs"))
+
         let lines = File.ReadAllLines sourcePath
 
-        let branchIndex =
+        let assertCleanupScope (sourceLines: string array) =
+            let requireUniqueExactLine description exactLine startIndex endIndex =
+                let matches =
+                    sourceLines[startIndex .. endIndex - 1]
+                    |> Array.indexed
+                    |> Array.choose (fun (offset, line) -> if line = exactLine then Some(startIndex + offset) else None)
+
+                match matches with
+                | [| index |] -> index
+                | _ -> failwithf "Expected one exact %s line, found %d." description matches.Length
+
+            let branchIndex =
+                requireUniqueExactLine
+                    "statistics SSE subscribed branch"
+                    "                | Subscribed(reader, subscriptionId, initial) ->"
+                    0
+                    sourceLines.Length
+
+            let branchEndIndex =
+                requireUniqueExactLine
+                    "statistics endpoint boundary"
+                    "    let mapEndpoints"
+                    (branchIndex + 1)
+                    sourceLines.Length
+
+            let outerTryIndex =
+                sourceLines
+                |> Array.skip (branchIndex + 1)
+                |> Array.tryFindIndex (String.IsNullOrWhiteSpace >> not)
+                |> Option.map ((+) (branchIndex + 1))
+                |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch is empty.")
+
+            if sourceLines[outerTryIndex] <> "                    try" then
+                failwith "The statistics SSE subscribed branch must enter its cleanup scope before response setup."
+
+            let outerFinallyIndex =
+                requireUniqueExactLine
+                    "statistics SSE outer finally"
+                    "                    finally"
+                    (outerTryIndex + 1)
+                    branchEndIndex
+
+            let unsubscribeIndex =
+                sourceLines
+                |> Array.skip (outerFinallyIndex + 1)
+                |> Array.tryFindIndex (fun line ->
+                    not (String.IsNullOrWhiteSpace line)
+                    && not (line.TrimStart().StartsWith("//", StringComparison.Ordinal)))
+                |> Option.map ((+) (outerFinallyIndex + 1))
+                |> Option.defaultWith (fun () -> failwith "The statistics SSE outer finally block is empty.")
+
+            if
+                sourceLines[unsubscribeIndex]
+                <> "                        store.Unsubscribe subscriptionId"
+            then
+                failwith "Statistics SSE unsubscribe must be the first executable line in the outer finally block."
+
+            for operation, expectedCount in
+                [ "setSessionCookie allowLocalHttp randomBytes context |> ignore", 1
+                  "context.Response.StatusCode <- StatusCodes.Status200OK", 1
+                  "context.Response.ContentType <- \"text/event-stream\"", 1
+                  "context.Response.Headers.CacheControl <- \"no-store\"", 1
+                  "context.Response.Headers.Append(\"X-Accel-Buffering\", \"no\")", 1
+                  "do! context.Response.WriteAsync(\"retry: 5000\\n\", cancellationToken)", 1
+                  "do! context.Response.WriteAsync($\"data: {snapshotJson initial}\\n\\n\", cancellationToken)", 1
+                  "do! context.Response.Body.FlushAsync(cancellationToken)", 3
+                  "let available = reader.WaitToReadAsync(cancellationToken).AsTask()", 1
+                  "let heartbeat = Task.Delay(heartbeatInterval, cancellationToken)", 1
+                  "do! context.Response.WriteAsync(\": heartbeat\\n\\n\", cancellationToken)", 1
+                  "while reader.TryRead(&payload) do", 1
+                  "do! context.Response.WriteAsync($\"data: {payload}\\n\\n\", cancellationToken)", 1 ] do
+                let operationIndexes =
+                    sourceLines[branchIndex .. branchEndIndex - 1]
+                    |> Array.indexed
+                    |> Array.choose (fun (offset, line) ->
+                        if line.Trim() = operation then
+                            Some(branchIndex + offset)
+                        else
+                            None)
+
+                if operationIndexes.Length <> expectedCount then
+                    failwithf
+                        "Expected %d protected statistics SSE operation(s) '%s', found %d."
+                        expectedCount
+                        operation
+                        operationIndexes.Length
+
+                if
+                    operationIndexes
+                    |> Array.exists (fun index -> index <= outerTryIndex || index >= outerFinallyIndex)
+                then
+                    failwithf
+                        "Statistics SSE operation '%s' must remain inside the outer unsubscribe cleanup scope."
+                        operation
+
+        assertCleanupScope lines
+
+        let unsubscribeIndex =
             lines
-            |> Array.tryFindIndex (fun line ->
-                line.Contains("| Subscribed(reader, subscriptionId, initial) ->", StringComparison.Ordinal))
-            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch was not found.")
+            |> Array.findIndex ((=) "                        store.Unsubscribe subscriptionId")
 
-        let firstStatementIndex =
-            lines
-            |> Array.skip (branchIndex + 1)
-            |> Array.tryFindIndex (String.IsNullOrWhiteSpace >> not)
-            |> Option.map ((+) (branchIndex + 1))
-            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch is empty.")
+        let cleanupEscapedMutation =
+            Array.concat
+                [ lines[.. unsubscribeIndex - 1]
+                  [| "                        ()"
+                     "                    store.Unsubscribe subscriptionId" |]
+                  lines[unsubscribeIndex + 1 ..] ]
 
-        if lines[firstStatementIndex] <> "                    try" then
-            failwith "The statistics SSE subscribed branch must enter its cleanup scope before response setup."
-
-        let branchEndIndex =
-            lines
-            |> Array.skip (branchIndex + 1)
-            |> Array.tryFindIndex (fun line -> line.StartsWith("    let mapEndpoints", StringComparison.Ordinal))
-            |> Option.map ((+) (branchIndex + 1))
-            |> Option.defaultWith (fun () -> failwith "The statistics SSE subscribed branch boundary was not found.")
-
-        let branchLines = lines[branchIndex..branchEndIndex - 1]
-
-        let requireOrderedLine (fragment: string) =
-            branchLines
-            |> Array.tryFindIndex (fun line -> line.Contains(fragment, StringComparison.Ordinal))
-            |> Option.defaultWith (fun () -> failwithf "The statistics SSE setup line '%s' was not found." fragment)
-
-        let cleanupFinally = requireOrderedLine "                    finally"
-        let unsubscribe = requireOrderedLine "store.Unsubscribe subscriptionId"
-
-        for setup in
-            [ "setSessionCookie allowLocalHttp randomBytes context"
-              "context.Response.StatusCode <- StatusCodes.Status200OK"
-              "context.Response.ContentType <- \"text/event-stream\""
-              "context.Response.Headers.CacheControl <- \"no-store\""
-              "context.Response.Headers.Append(\"X-Accel-Buffering\", \"no\")" ] do
-            let setupIndex = requireOrderedLine setup
-
-            if setupIndex >= cleanupFinally then
-                failwithf "Statistics SSE setup '%s' must remain inside the unsubscribe cleanup scope." setup
-
-        if unsubscribe <= cleanupFinally then
-            failwith "Statistics SSE unsubscribe must remain in the cleanup finally block."
+        try
+            assertCleanupScope cleanupEscapedMutation
+            failwith "The statistics SSE cleanup assertion accepted unsubscribe outside the outer finally."
+        with error when
+            error.Message = "Statistics SSE unsubscribe must be the first executable line in the outer finally block." ->
+            ()
 
     let private runApiChecks () =
         assertFailedSseSetupCleanupScope ()
