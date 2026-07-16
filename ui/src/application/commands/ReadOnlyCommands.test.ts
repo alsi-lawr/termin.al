@@ -295,7 +295,7 @@ test("implements line readers, terminal history, manual pages, and pager effects
     ]),
   );
   const manual = outputText(await execute("man grep", registry));
-  const pager = succeeded(await execute("less notes/sample-note.md", registry));
+  const pager = succeeded(await execute("less notes/field-notes/filesystems/sample-note.md", registry));
   const clear = succeeded(await execute("clear", registry));
 
   assert.equal(head, "# About");
@@ -323,7 +323,7 @@ test("implements line readers, terminal history, manual pages, and pager effects
   if (pagerEffect.viewer.kind !== "document") {
     assert.fail("Expected raw document viewer content.");
   }
-  assert.equal(pagerEffect.viewer.document.source.path, "~/notes/sample-note.md");
+  assert.equal(pagerEffect.viewer.document.source.path, "~/notes/field-notes/filesystems/sample-note.md");
   assert.equal(pagerEffect.viewer.presentation, "raw-pager");
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
 });

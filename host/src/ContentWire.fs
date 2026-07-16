@@ -60,6 +60,7 @@ module ContentWire =
           Summary: string
           Url: string
           Repository: string
+          CollectionPath: string
           UpdatedAt: string
           Tags: string list
           Readme: string }
@@ -232,6 +233,10 @@ module ContentWire =
             project
             |> ContentDomain.Project.repository
             |> ContentDomain.RepositoryName.value
+          CollectionPath =
+            project
+            |> ContentDomain.Project.collectionPath
+            |> ContentDomain.ProjectCollectionPath.value
           UpdatedAt = project |> ContentDomain.Project.updatedAt |> ContentDomain.Timestamp.value
           Tags = project |> ContentDomain.Project.tags |> List.map ContentDomain.ContentTag.value
           Readme = readme |> ContentDomain.ProjectReadme.body |> ContentDomain.MarkdownBody.value }
@@ -379,6 +384,7 @@ module ContentWire =
               "summary", text value.Summary
               "url", text value.Url
               "repository", text value.Repository
+              "collectionPath", text value.CollectionPath
               "updatedAt", text value.UpdatedAt
               "tags", value.Tags |> List.map text |> arrayOf
               "readme", text value.Readme ]

@@ -66,6 +66,10 @@ test("accepts every shared serialized content contract fixture", () => {
     projects.value.projects.map((project) => project.repository.value),
     ["example-owner/sample-project", "example-owner/second-project"],
   );
+  assert.deepEqual(
+    projects.value.projects.map((project) => project.collectionPath.value),
+    ["validated/core", "validated/examples"],
+  );
 });
 
 test("rejects malformed paths, fractional sizes, duplicate projects, and unstable problem shapes", () => {
@@ -109,6 +113,7 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
         summary: "A validated project fixture.",
         url: "https://github.com/example-owner/sample-project",
         repository: "example-owner/sample-project",
+        collectionPath: "tests/one",
         updatedAt: "2026-07-15T00:00:03.000Z",
         tags: ["fsharp"],
         readme: "# Sample Project README\n\nThis is the supplied README body.",
@@ -120,6 +125,7 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
         summary: "A second validated project fixture.",
         url: "https://github.com/example-owner/second-project",
         repository: "example-owner/second-project",
+        collectionPath: "tests/two",
         updatedAt: "2026-07-15T00:00:03.000Z",
         tags: ["typescript"],
         readme: "# Second Project README\n\nThis is another supplied README body.",
@@ -148,6 +154,36 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
 
   assert.equal(validateContentCatalog(traversalCatalog).kind, "invalid");
   assert.equal(validateContentProjects(duplicateProjects).kind, "invalid");
+  const invalidCollectionPath = structuredClone(fixture("projects.json"));
+
+  if (
+    typeof invalidCollectionPath === "object" &&
+    invalidCollectionPath !== null &&
+    "projects" in invalidCollectionPath &&
+    Array.isArray(invalidCollectionPath.projects) &&
+    invalidCollectionPath.projects[0] !== undefined &&
+    typeof invalidCollectionPath.projects[0] === "object" &&
+    invalidCollectionPath.projects[0] !== null
+  ) {
+    Reflect.set(invalidCollectionPath.projects[0], "collectionPath", "../escape");
+  }
+
+  assert.equal(validateContentProjects(invalidCollectionPath).kind, "invalid");
+  const missingCollectionPath = structuredClone(fixture("projects.json"));
+
+  if (
+    typeof missingCollectionPath === "object" &&
+    missingCollectionPath !== null &&
+    "projects" in missingCollectionPath &&
+    Array.isArray(missingCollectionPath.projects) &&
+    missingCollectionPath.projects[0] !== undefined &&
+    typeof missingCollectionPath.projects[0] === "object" &&
+    missingCollectionPath.projects[0] !== null
+  ) {
+    Reflect.deleteProperty(missingCollectionPath.projects[0], "collectionPath");
+  }
+
+  assert.equal(validateContentProjects(missingCollectionPath).kind, "invalid");
   assert.equal(ContentByteSize.tryCreate(0.5, "catalog.size").kind, "invalid");
   assert.equal(validateContentCatalog(fixture("catalog-fractional-size.json")).kind, "invalid");
   assert.equal(
@@ -159,4 +195,23 @@ test("rejects malformed paths, fractional sizes, duplicate projects, and unstabl
     "invalid",
   );
   assert.equal(validateContentProblem(malformedProblem).kind, "invalid");
+});
+
+test("accepts canonical nested publication paths", () => {
+  const nested = structuredClone(fixture("document-publication.json"));
+
+  if (typeof nested !== "object" || nested === null) {
+    assert.fail("Expected a publication fixture object.");
+  }
+
+  Reflect.set(nested, "path", "~/blog/engineering/types/validated-metadata.md");
+  const source = Reflect.get(nested, "source");
+
+  if (typeof source !== "object" || source === null) {
+    assert.fail("Expected publication source metadata.");
+  }
+
+  Reflect.set(source, "path", "blog/engineering/types/validated-metadata.md");
+  const result = validateContentDocument(nested);
+  assert.equal(result.kind, "valid", result.kind === "invalid" ? result.message : "");
 });

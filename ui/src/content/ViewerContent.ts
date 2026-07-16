@@ -1,7 +1,5 @@
 import type {
   VirtualAbsolutePath,
-  VirtualNodeId,
-  VirtualTimestamp,
 } from "../domain/filesystem/VirtualFilesystem.ts";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
 
@@ -12,25 +10,30 @@ export type ViewerDirectoryEntry = Readonly<{
   kind: "directory" | "file" | "locked-file";
 }>;
 
-export type ViewerProjectCard = Readonly<{
+export type ViewerCollectionLeaf = Readonly<{
+  kind: "leaf";
   id: string;
-  name: string;
+  title: string;
+  path: string;
   summary: string;
-  repository: string;
-  repositoryUrl?: string;
   tags: ReadonlyArray<string>;
+  metadata: string;
+  documentTitle: string;
   document: MarkdownDocument;
+  repositoryUrl: string | undefined;
 }>;
 
-export type ViewerPublicationEntry = Readonly<{
-  id: VirtualNodeId;
-  slug: string;
+export type ViewerCollectionBranch = Readonly<{
+  kind: "branch";
+  id: string;
   title: string;
-  summary: string;
-  publishedAt: VirtualTimestamp;
-  tags: ReadonlyArray<string>;
-  document: MarkdownDocument;
+  path: string;
+  children: ReadonlyArray<ViewerCollectionNode>;
 }>;
+
+export type ViewerCollectionNode =
+  | ViewerCollectionBranch
+  | ViewerCollectionLeaf;
 
 export type ViewerContent =
   | Readonly<{
@@ -50,15 +53,10 @@ export type ViewerContent =
       entries: ReadonlyArray<ViewerDirectoryEntry>;
     }>
   | Readonly<{
-      kind: "project-gallery";
+      kind: "collection";
       title: string;
-      projects: ReadonlyArray<ViewerProjectCard>;
-    }>
-  | Readonly<{
-      kind: "publication-list";
-      title: string;
-      publicationKind: "blog" | "notes";
-      entries: ReadonlyArray<ViewerPublicationEntry>;
+      emptyMessage: string;
+      roots: ReadonlyArray<ViewerCollectionNode>;
     }>;
 
 export type ViewerOpenDisposition =
@@ -80,15 +78,10 @@ export type CreateDirectoryViewerContentOptions = Readonly<{
   entries: ReadonlyArray<ViewerDirectoryEntry>;
 }>;
 
-export type CreateProjectGalleryViewerContentOptions = Readonly<{
+export type CreateCollectionViewerContentOptions = Readonly<{
   title: string;
-  projects: ReadonlyArray<ViewerProjectCard>;
-}>;
-
-export type CreatePublicationListViewerContentOptions = Readonly<{
-  title: string;
-  publicationKind: "blog" | "notes";
-  entries: ReadonlyArray<ViewerPublicationEntry>;
+  emptyMessage: string;
+  roots: ReadonlyArray<ViewerCollectionNode>;
 }>;
 
 function assertViewerTitle(value: string): void {
@@ -127,25 +120,18 @@ export function createDirectoryViewerContent({
   return { kind: "directory", title, path, entries: [...entries] };
 }
 
-export function createProjectGalleryViewerContent({
+export function createCollectionViewerContent({
   title,
-  projects,
-}: CreateProjectGalleryViewerContentOptions): ViewerContent {
+  emptyMessage,
+  roots,
+}: CreateCollectionViewerContentOptions): ViewerContent {
   assertViewerTitle(title);
-  return { kind: "project-gallery", title, projects: [...projects] };
-}
-
-export function createPublicationListViewerContent({
-  title,
-  publicationKind,
-  entries,
-}: CreatePublicationListViewerContentOptions): ViewerContent {
-  assertViewerTitle(title);
+  assertViewerTitle(emptyMessage);
   return {
-    kind: "publication-list",
+    kind: "collection",
     title,
-    publicationKind,
-    entries: [...entries],
+    emptyMessage,
+    roots: [...roots],
   };
 }
 

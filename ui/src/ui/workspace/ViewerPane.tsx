@@ -47,22 +47,7 @@ import {
 } from "./MarkdownViewerSearch.ts";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { lessPrompt } from "./LessPrompt.ts";
-import {
-  beginCollectionSelectorFilter,
-  collectionSelectorBrowseOperationFromKey,
-  createCollectionSelectorState,
-  leaveCollectionSelectorFilter,
-  moveCollectionSelectorSelection,
-  type CollectionSelectorOperation,
-  type CollectionSelectorState,
-} from "./CollectionSelector.ts";
-import { CollectionViewerSelector } from "./CollectionViewerSelector.tsx";
-import {
-  collectionSelectorItemsForViewer,
-  selectedCollectionViewerDocument,
-  type CollectionViewerContent,
-  type CollectionViewerDocument,
-} from "./CollectionViewerSelectorModel.ts";
+import { HierarchicalCollectionPane } from "./HierarchicalCollectionPane.tsx";
 import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
 
 type ViewerPaneProps = Readonly<{
@@ -108,21 +93,37 @@ function ViewerNavigationStatusLine({
   );
 }
 
-function collectionViewerContent(
-  viewer: ViewerContent,
-): CollectionViewerContent | undefined {
-  switch (viewer.kind) {
-    case "project-gallery":
-    case "publication-list":
-      return viewer;
-    case "placeholder":
-    case "document":
-    case "directory":
-      return undefined;
+export function ViewerPane(props: ViewerPaneProps): ReactElement {
+  if (props.viewer.kind !== "collection") {
+    return <StandardViewerPane {...props} viewer={props.viewer} />;
   }
+
+  return (
+    <HierarchicalCollectionPane
+      collection={props.viewer}
+      presentation={{ kind: "split-pane" }}
+      isActive={props.isActive}
+      focusVersion={props.focusVersion}
+      onActivate={props.onActivate}
+      onPaneKeyInput={props.onPaneKeyInput}
+      onCancel={props.onClose ?? (() => undefined)}
+      renderDocument={(leaf, onReturn) => (
+        <StandardViewerPane
+          {...props}
+          viewer={{
+            kind: "document",
+            title: leaf.documentTitle,
+            presentation: "inline",
+            document: leaf.document,
+          }}
+          onClose={onReturn}
+        />
+      )}
+    />
+  );
 }
 
-export function ViewerPane({
+function StandardViewerPane({
   viewer,
   isActive,
   focusVersion,
@@ -133,30 +134,11 @@ export function ViewerPane({
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
   onClose,
-}: ViewerPaneProps): ReactElement {
+}: ViewerPaneProps & Readonly<{ viewer: Exclude<ViewerContent, { kind: "collection" }> }>): ReactElement {
   const viewerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const collectionFilterInputRef = useRef<HTMLInputElement | null>(null);
-  const collectionViewer = collectionViewerContent(viewer);
-  const collectionItems = collectionViewer === undefined
-    ? []
-    : collectionSelectorItemsForViewer(collectionViewer);
-  const [openedDocument, setOpenedDocument] =
-    useState<CollectionViewerDocument>();
-  const [collectionSelector, setCollectionSelector] =
-    useState<CollectionSelectorState>(() =>
-      createCollectionSelectorState(collectionItems)
-    );
-  const activeViewer: ViewerContent =
-    openedDocument === undefined
-      ? viewer
-      : {
-          kind: "document",
-          title: openedDocument.title,
-          presentation: "inline",
-          document: openedDocument.document,
-        };
+  const activeViewer = viewer;
   const title = viewerTitle(activeViewer);
   const isRawPager =
     activeViewer.kind === "document" &&
@@ -198,16 +180,6 @@ export function ViewerPane({
   }, [focusVersion, isActive]);
 
   useEffect(() => {
-    const nextCollectionViewer = collectionViewerContent(viewer);
-    const nextCollectionItems = nextCollectionViewer === undefined
-      ? []
-      : collectionSelectorItemsForViewer(nextCollectionViewer);
-
-    setOpenedDocument(undefined);
-    setCollectionSelector(createCollectionSelectorState(nextCollectionItems));
-  }, [viewer]);
-
-  useEffect(() => {
     setRawPagerState(createRawPagerState(rawText));
     setMarkdownPosition(createMarkdownViewerPosition(markdownBlocks));
     setMarkdownSearch(createMarkdownViewerSearch());
@@ -220,19 +192,6 @@ export function ViewerPane({
   }, [markdownSearch]);
 
   useEffect(() => {
-    if (
-      !isActive ||
-      openedDocument !== undefined ||
-      collectionViewer === undefined ||
-      collectionSelector.mode.kind !== "filtering"
-    ) {
-      return;
-    }
-
-    collectionFilterInputRef.current?.focus();
-  }, [collectionSelector.mode.kind, collectionViewer, isActive, openedDocument]);
-
-  useEffect(() => {
     if (activeBlockIndex === undefined) {
       return;
     }
@@ -243,13 +202,7 @@ export function ViewerPane({
     match?.scrollIntoView({ block: "center" });
   }, [activeBlockIndex]);
 
-  const closeActiveViewer =
-    openedDocument === undefined
-      ? onClose
-      : (): void => {
-          setOpenedDocument(undefined);
-          viewerRef.current?.focus({ preventScroll: true });
-        };
+  const closeActiveViewer = onClose;
 
   const applyPagerOperation = (operation: RawPagerOperation): void => {
     if (operation.kind === "quit") {
@@ -341,68 +294,6 @@ export function ViewerPane({
     restoreMarkdownViewerFocus(viewerRef.current);
   };
 
-  const restoreViewerFocus = (): void => {
-    viewerRef.current?.focus({ preventScroll: true });
-  };
-
-  const openCollectionDocument = (
-    document: CollectionViewerDocument,
-  ): void => {
-    setOpenedDocument(document);
-    restoreViewerFocus();
-  };
-
-  const applyCollectionSelectorOperation = (
-    operation: CollectionSelectorOperation,
-  ): InputCapturePaneKeyResult => {
-    if (collectionViewer === undefined || openedDocument !== undefined) {
-      return { kind: "unhandled" };
-    }
-
-    switch (operation.kind) {
-      case "move":
-        setCollectionSelector((current) =>
-          moveCollectionSelectorSelection(
-            current,
-            collectionItems,
-            operation.motion,
-          )
-        );
-        return { kind: "handled" };
-      case "open": {
-        const target = selectedCollectionViewerDocument(
-          collectionViewer,
-          collectionSelector,
-        );
-
-        if (target.kind === "none") {
-          return { kind: "handled" };
-        }
-
-        openCollectionDocument(target.document);
-        return { kind: "handled" };
-      }
-      case "begin-filter":
-        setCollectionSelector((current) =>
-          beginCollectionSelectorFilter(current)
-        );
-        return { kind: "handled" };
-      case "leave-filter":
-        setCollectionSelector((current) =>
-          leaveCollectionSelectorFilter(current, collectionItems)
-        );
-        restoreViewerFocus();
-        return { kind: "handled" };
-      case "return":
-        if (closeActiveViewer === undefined) {
-          return { kind: "unhandled" };
-        }
-
-        closeActiveViewer();
-        return { kind: "handled" };
-    }
-  };
-
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (
       event.target instanceof HTMLButtonElement ||
@@ -437,21 +328,7 @@ export function ViewerPane({
           },
       onPaneKeyInput,
       onClose: closeActiveViewer,
-      onViewerKeyInput:
-        collectionViewer === undefined || openedDocument !== undefined
-          ? undefined
-          : (viewerInput) => {
-              const result = collectionSelectorBrowseOperationFromKey({
-                key: viewerInput.key,
-                altKey: event.altKey,
-                ctrlKey: viewerInput.ctrlKey,
-                metaKey: viewerInput.metaKey,
-              });
-
-              return result.kind === "ignored"
-                ? { kind: "unhandled" }
-                : applyCollectionSelectorOperation(result.operation);
-            },
+      onViewerKeyInput: undefined,
       onPagerOperation: applyPagerOperation,
       preventDefault: () => {
         defaultPrevented = true;
@@ -505,31 +382,6 @@ export function ViewerPane({
   ): void => {
     if (ctrlKey) {
       return;
-    }
-
-    if (collectionViewer !== undefined && openedDocument === undefined) {
-      switch (control) {
-        case "escape":
-          applyCollectionSelectorOperation(
-            collectionSelector.mode.kind === "filtering"
-              ? { kind: "leave-filter" }
-              : { kind: "return" },
-          );
-          return;
-        case "up":
-          applyCollectionSelectorOperation({
-            kind: "move",
-            motion: "previous",
-          });
-          return;
-        case "down":
-          applyCollectionSelectorOperation({ kind: "move", motion: "next" });
-          return;
-        case "tab":
-        case "left":
-        case "right":
-          return;
-      }
     }
 
     if (isRawPager) {
@@ -667,18 +519,6 @@ export function ViewerPane({
             </ul>
           </>
         );
-      case "project-gallery":
-      case "publication-list":
-        return (
-          <CollectionViewerSelector
-            viewer={activeViewer}
-            state={collectionSelector}
-            filterInputRef={collectionFilterInputRef}
-            onStateChange={setCollectionSelector}
-            onOpen={openCollectionDocument}
-            onRestoreViewerFocus={restoreViewerFocus}
-          />
-        );
     }
   })();
 
@@ -701,7 +541,7 @@ export function ViewerPane({
               className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent md:hidden"
               onClick={closeActiveViewer}
             >
-              {openedDocument === undefined ? "Return" : "Back"}
+              Return
             </button>
           )}
         </div>

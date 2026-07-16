@@ -143,7 +143,7 @@ module ContentContractsTests =
 
     let private projects () =
         let manifest =
-            "{\"projects\":[{\"id\":\"sample-project\",\"slug\":\"sample-project\",\"name\":\"Sample Project\",\"summary\":\"A validated project fixture.\",\"url\":\"https://github.com/example-owner/sample-project\",\"repository\":\"example-owner/sample-project\",\"updatedAt\":\"2026-07-15T00:00:03.000Z\",\"tags\":[\"fsharp\",\"typescript\"]},{\"id\":\"second-project\",\"slug\":\"second-project\",\"name\":\"Second Project\",\"summary\":\"A second validated project fixture.\",\"url\":\"https://github.com/example-owner/second-project\",\"repository\":\"example-owner/second-project\",\"updatedAt\":\"2026-07-15T00:00:04.000Z\",\"tags\":[\"typescript\"]}]}"
+            "{\"projects\":[{\"id\":\"sample-project\",\"slug\":\"sample-project\",\"name\":\"Sample Project\",\"summary\":\"A validated project fixture.\",\"url\":\"https://github.com/example-owner/sample-project\",\"repository\":\"example-owner/sample-project\",\"collectionPath\":\"validated/core\",\"updatedAt\":\"2026-07-15T00:00:03.000Z\",\"tags\":[\"fsharp\",\"typescript\"]},{\"id\":\"second-project\",\"slug\":\"second-project\",\"name\":\"Second Project\",\"summary\":\"A second validated project fixture.\",\"url\":\"https://github.com/example-owner/second-project\",\"repository\":\"example-owner/second-project\",\"collectionPath\":\"validated/examples\",\"updatedAt\":\"2026-07-15T00:00:04.000Z\",\"tags\":[\"typescript\"]}]}"
 
         let readmes =
             [ "# Sample Project README\n\nThis is the supplied README body, not the project summary."
@@ -311,25 +311,47 @@ module ContentContractsTests =
         | Error _ -> ()
 
         let duplicateProjectManifest =
-            "{\"projects\":[{\"id\":\"one\",\"slug\":\"same\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"same\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"example/two\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"same\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"collectionPath\":\"tests/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"same\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"example/two\",\"collectionPath\":\"tests/two\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
 
         match ContentDomain.ProjectManifest.tryParse duplicateProjectManifest with
         | Ok _ -> failwith "Duplicate project slugs should not validate."
         | Error _ -> ()
 
         let exactDuplicateRepositoryManifest =
-            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"collectionPath\":\"tests/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"example/one\",\"collectionPath\":\"tests/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
 
         match ContentDomain.ProjectManifest.tryParse exactDuplicateRepositoryManifest with
         | Ok _ -> failwith "Exact duplicate project repositories should not validate."
         | Error _ -> ()
 
         let caseDuplicateRepositoryManifest =
-            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"Example/One\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"collectionPath\":\"tests/one\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]},{\"id\":\"two\",\"slug\":\"two\",\"name\":\"Two\",\"summary\":\"Two\",\"url\":\"https://example.com/two\",\"repository\":\"Example/One\",\"collectionPath\":\"tests/two\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"two\"]}]}"
 
         match ContentDomain.ProjectManifest.tryParse caseDuplicateRepositoryManifest with
         | Ok _ -> failwith "Case-only duplicate project repositories should not validate."
         | Error _ -> ()
+
+        let invalidCollectionPathManifest =
+            "{\"projects\":[{\"id\":\"one\",\"slug\":\"one\",\"name\":\"One\",\"summary\":\"One\",\"url\":\"https://example.com/one\",\"repository\":\"example/one\",\"collectionPath\":\"../escape\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"one\"]}]}"
+
+        match ContentDomain.ProjectManifest.tryParse invalidCollectionPathManifest with
+        | Ok _ -> failwith "Project collection paths must reject traversal."
+        | Error _ -> ()
+
+        let nestedPublication =
+            ContentDomain.ContentDocument.tryCreate
+                (contentId "nested-post")
+                (virtualPath "~/blog/engineering/types/nested-post.md")
+                (timestamp "2026-07-15T00:00:00.000Z")
+                (source
+                    "blog/engineering/types/nested-post.md"
+                    "https://github.com/example-owner/content/blob/main/blog/engineering/types/nested-post.md")
+                cache
+                validPublication
+
+        match nestedPublication with
+        | Ok _ -> ()
+        | Error failure -> failwith $"Nested publication paths should validate: {failure.Message}"
 
         let oversized = String.replicate (ContentDomain.DocumentByteLimit + 1) "a"
 

@@ -135,3 +135,46 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.notEqual(promptPosition, -1);
   assert.equal(mobileControlsPosition > promptPosition, true);
 });
+
+test("renders hierarchical collections as terminal rows with explicit touch controls and no viewer page chrome", async () => {
+  const markup = await renderViewerPane({
+    kind: "collection",
+    title: "Projects",
+    emptyMessage: "No projects. Press Esc to return.",
+    roots: [
+      {
+        kind: "branch",
+        id: "branch:engineering",
+        title: "engineering",
+        path: "engineering",
+        children: [
+          {
+            kind: "leaf",
+            id: "project:terminal",
+            title: "termin.al",
+            path: "engineering/termin.al",
+            summary: "A keyboard-first terminal.",
+            tags: ["typescript"],
+            metadata: "alsi-lawr/termin.al",
+            documentTitle: "termin.al README",
+            document: { text: "# termin.al", source: { path: "~/projects/termin.al" } },
+            repositoryUrl: "https://github.com/alsi-lawr/termin.al",
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(markup.includes('role="listbox"'), true);
+  assert.equal(markup.includes('role="option"'), true);
+  assert.equal(markup.includes('aria-selected="true"'), true);
+  assert.equal(markup.includes('aria-label="Collection touch controls"'), true);
+  assert.equal(markup.includes(">Left</button>"), true);
+  assert.equal(markup.includes(">Right</button>"), true);
+  assert.equal(markup.includes(">Toggle</button>"), true);
+  assert.equal(markup.includes(">Open</button>"), true);
+  assert.equal(markup.includes(">Shell</button>"), true);
+  assert.equal(markup.includes("<h2"), false);
+  assert.equal(markup.includes("Selected item details"), false);
+  assert.equal(markup.includes(">Return</button>"), false);
+});

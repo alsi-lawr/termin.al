@@ -1,18 +1,18 @@
 import {
+  createCollectionViewerContent,
   createDirectoryViewerContent,
   createDocumentViewerContent,
-  createProjectGalleryViewerContent,
-  createPublicationListViewerContent,
   type ViewerContent,
+  type ViewerCollectionLeaf,
+  type ViewerCollectionNode,
   type ViewerOpenDisposition,
-  type ViewerProjectCard,
-  type ViewerPublicationEntry,
 } from "../../content/ViewerContent.ts";
 import type { ProjectReadme } from "../../api/ContentClient.ts";
 import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   listVirtualDirectory,
   resolveVirtualPath,
+  traverseVirtualDirectory,
   type VirtualDocumentSupplier,
   type VirtualDocumentClassification,
   type VirtualFileNode,
@@ -267,31 +267,124 @@ function noArguments(
   return invocation.arguments.length === 0 ? undefined : `Usage: ${usage}`;
 }
 
-function projectCard(project: ProjectReadme): ViewerProjectCard {
+type CollectionLeafSource = Readonly<{
+  branchPath: string;
+  leaf: ViewerCollectionLeaf;
+}>;
+
+type CollectionBranchBuilder = {
+  readonly id: string;
+  readonly title: string;
+  readonly path: string;
+  readonly branches: Map<string, CollectionBranchBuilder>;
+  readonly leaves: ViewerCollectionLeaf[];
+};
+
+function createBranchBuilder(
+  id: string,
+  title: string,
+  path: string,
+): CollectionBranchBuilder {
+  return { id, title, path, branches: new Map(), leaves: [] };
+}
+
+function compareCollectionTitles(
+  left: CollectionBranchBuilder,
+  right: CollectionBranchBuilder,
+): number {
+  if (left.title < right.title) {
+    return -1;
+  }
+
+  return left.title > right.title ? 1 : 0;
+}
+
+function collectionTree(
+  leaves: ReadonlyArray<CollectionLeafSource>,
+): ReadonlyArray<ViewerCollectionNode> {
+  const root = createBranchBuilder("collection-root", "", "");
+
+  for (const source of leaves) {
+    const segments = source.branchPath.length === 0
+      ? []
+      : source.branchPath.split("/");
+    let branch = root;
+    let path = "";
+
+    for (const segment of segments) {
+      path = path.length === 0 ? segment : `${path}/${segment}`;
+      const existing = branch.branches.get(segment);
+
+      if (existing !== undefined) {
+        branch = existing;
+        continue;
+      }
+
+      const created = createBranchBuilder(`branch:${path}`, segment, path);
+      branch.branches.set(segment, created);
+      branch = created;
+    }
+
+    branch.leaves.push(source.leaf);
+  }
+
+  const nodes = (branch: CollectionBranchBuilder): ReadonlyArray<ViewerCollectionNode> => [
+    ...[...branch.branches.values()]
+      .sort(compareCollectionTitles)
+      .map((child): ViewerCollectionNode => ({
+        kind: "branch",
+        id: child.id,
+        title: child.title,
+        path: child.path,
+        children: nodes(child),
+      })),
+    ...branch.leaves,
+  ];
+
+  return nodes(root);
+}
+
+function projectLeaf(project: ProjectReadme): CollectionLeafSource {
   return {
-    id: project.id,
-    name: project.name,
-    summary: project.summary,
-    repository: project.repository,
-    repositoryUrl: project.repositoryUrl,
-    tags: project.tags,
-    document: project.document,
+    branchPath: project.collectionPath,
+    leaf: {
+      kind: "leaf",
+      id: `project:${project.id}`,
+      title: project.name,
+      path: `${project.collectionPath}/${project.name}`,
+      summary: project.summary,
+      metadata: project.repository,
+      repositoryUrl: project.repositoryUrl,
+      tags: project.tags,
+      documentTitle: `${project.name} README`,
+      document: project.document,
+    },
   };
 }
 
-function publicationEntry({
+function publicationLeaf(rootPath: string, {
   node,
   document,
   publication,
-}: LoadedDirectoryDocument): ViewerPublicationEntry {
+}: LoadedDirectoryDocument): CollectionLeafSource {
+  const relativePath = node.path.slice(rootPath.length + 1);
+  const slash = relativePath.lastIndexOf("/");
+  const branchPath = slash < 0 ? "" : relativePath.slice(0, slash);
+
   return {
-    id: node.id,
-    slug: publication.slug,
-    title: publication.title,
-    summary: publication.summary,
-    publishedAt: publication.publishedAt,
-    tags: publication.tags,
-    document,
+    branchPath,
+    leaf: {
+      kind: "leaf",
+      id: `publication:${node.id}`,
+      title: publication.title,
+      path: relativePath,
+      summary: publication.summary,
+      metadata: publication.publishedAt.slice(0, 10),
+      repositoryUrl: undefined,
+      tags: publication.tags,
+      documentTitle: publication.title,
+      document,
+    },
   };
 }
 
@@ -308,10 +401,12 @@ async function loadDirectoryDocuments(
     })),
   );
 
-  if (signal.aborted || loaded.some(({ result }) => result.kind === "cancelled")) {
+  if (
+    signal.aborted ||
+    loaded.some(({ result }) => result.kind === "cancelled")
+  ) {
     return { kind: "cancelled" };
   }
-
   if (loaded.some(({ result }) => result.kind === "missing")) {
     return { kind: "missing" };
   }
@@ -374,9 +469,11 @@ async function openTarget(
     if (resolution.node.path === "~/projects") {
       return {
         kind: "viewer",
-        viewer: createProjectGalleryViewerContent({
+        viewer: createCollectionViewerContent({
           title: "Projects",
-          projects: projectReadmes.map(projectCard),
+          emptyMessage:
+            "No public projects are available. Press Esc or Ctrl+C to return.",
+          roots: collectionTree(projectReadmes.map(projectLeaf)),
         }),
       };
     }
@@ -384,8 +481,20 @@ async function openTarget(
     if (resolution.node.path === "~/blog" || resolution.node.path === "~/notes") {
       const documentPublicationKind =
         resolution.node.path === "~/blog" ? "blog" : "note";
-      const files = listing.entries.filter(
-        (entry): entry is VirtualFileNode => entry.kind === "file",
+      const traversal = traverseVirtualDirectory({
+        filesystem,
+        directory: resolution.node,
+        limit: 100,
+        maximumDepth: 100,
+        signal: context.signal,
+      });
+
+      if (traversal.kind === "cancelled") {
+        return { kind: "cancelled" };
+      }
+
+      const files = traversal.entries.flatMap(({ node }) =>
+        node.kind === "file" ? [node] : []
       );
       const loaded = await loadDirectoryDocuments(
         files,
@@ -407,18 +516,22 @@ async function openTarget(
 
       const publicationKind =
         documentPublicationKind === "blog" ? "blog" : "notes";
-      const entries = loaded.documents
-        .map(publicationEntry)
+      const leaves = [...loaded.documents]
         .sort((left, right) =>
-          right.publishedAt.localeCompare(left.publishedAt),
-        );
+          right.publication.publishedAt.localeCompare(
+            left.publication.publishedAt,
+          ),
+        )
+        .map((entry) => publicationLeaf(resolution.node.path, entry));
 
       return {
         kind: "viewer",
-        viewer: createPublicationListViewerContent({
+        viewer: createCollectionViewerContent({
           title: publicationKind === "blog" ? "Blog" : "Notes",
-          publicationKind,
-          entries,
+          emptyMessage: publicationKind === "blog"
+            ? "No blog posts are published. Press Esc or Ctrl+C to return."
+            : "No public notes are published. Press Esc or Ctrl+C to return.",
+          roots: collectionTree(leaves),
         }),
       };
     }

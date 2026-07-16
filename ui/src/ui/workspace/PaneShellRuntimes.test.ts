@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  createCollectionViewerContent,
   createDocumentViewerContent,
   createPlaceholderViewerContent,
   type ViewerContent,
@@ -42,6 +43,56 @@ function applied(result: PaneOperationResult): PaneWorkspace {
 
   return result.workspace;
 }
+
+test("keeps collection commands in one shell history row and removes transient selection on return", () => {
+  const workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  const paneId = workspace.activePaneId;
+  const initial = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const submitted = reducePaneShellRuntime({
+    runtimes: insert(initial, paneId, "projects"),
+    paneId,
+    action: { kind: "prompt.submit" },
+  });
+  const running = stateFor(submitted, paneId);
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected projects to be running.");
+  }
+
+  const collection = createCollectionViewerContent({
+    title: "Projects",
+    emptyMessage: "No projects. Press Esc to return.",
+    roots: [],
+  });
+  const settled = applyPaneShellAction({
+    workspace,
+    runtimes: submitted,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.lifecycle.command.id,
+      outcome: viewerCommandOutcome(collection, "inline"),
+    },
+  });
+  const presented = paneShellRuntime(settled.runtimes, paneId);
+
+  assert.equal(presented.presentation.kind, "inline-collection");
+  assert.equal(presented.state.history.length, 1);
+  assert.equal(presented.state.history[0]?.command.source, "projects");
+  assert.equal(presented.state.commandHistory.length, 1);
+  assert.equal(presented.state.input.text, "");
+
+  const returned = closePaneShellViewer(settled.runtimes, paneId);
+  const shell = paneShellRuntime(returned, paneId);
+  assert.equal(shell.presentation.kind, "shell");
+  assert.equal(shell.state.history.length, 1);
+  assert.equal(shell.state.input.text, "");
+});
 
 function apply(
   workspace: PaneWorkspace,

@@ -117,6 +117,34 @@ export class RepositoryPath {
   }
 }
 
+export class ProjectCollectionPath {
+  readonly value: string;
+
+  private constructor(value: string) {
+    this.value = value;
+  }
+
+  static tryCreate(
+    value: string,
+    field: string,
+  ): ContentValidation<ProjectCollectionPath> {
+    const segment = /^[A-Za-z0-9._-]{1,128}$/u;
+
+    if (value.length === 0 || value.startsWith("/") || value.length > 512) {
+      return invalid(`${field} must be a bounded relative branch path.`);
+    }
+
+    const validSegments = value.split("/").every(
+      (candidate) =>
+        candidate !== "." && candidate !== ".." && segment.test(candidate),
+    );
+
+    return validSegments
+      ? valid(new ProjectCollectionPath(value))
+      : invalid(`${field} must contain canonical traversal-free segments.`);
+  }
+}
+
 export class ContentRevision {
   readonly value: string;
 
@@ -328,6 +356,7 @@ export type ContentProject = Readonly<{
   summary: string;
   url: ContentUrl;
   repository: RepositoryName;
+  collectionPath: ProjectCollectionPath;
   updatedAt: ContentTimestamp;
   tags: ReadonlyArray<ContentTag>;
   readme: string;
@@ -1096,12 +1125,13 @@ function validatePublicationDocument(
   }
 
   const directory = kind === "blog" ? "blog" : "notes";
-  const expectedRepositoryPath = `${directory}/${slug.value.value}.md`;
-  const expectedVirtualPath = `~/${expectedRepositoryPath}`;
+  const repositoryPath = fields.value.source.path.value;
+  const expectedSuffix = `/${slug.value.value}.md`;
 
   if (
-    fields.value.source.path.value !== expectedRepositoryPath ||
-    fields.value.path.value !== expectedVirtualPath
+    !repositoryPath.startsWith(`${directory}/`) ||
+    !repositoryPath.endsWith(expectedSuffix) ||
+    fields.value.path.value !== `~/${repositoryPath}`
   ) {
     return invalid("Publication kind and slug must match the document paths.");
   }
@@ -1139,7 +1169,7 @@ export function validateContentDocument(
 function validateContentProject(value: unknown): ContentValidation<ContentProject> {
   const object = requireObject(
     value,
-    ["id", "slug", "name", "summary", "url", "repository", "updatedAt", "tags", "readme"],
+    ["id", "slug", "name", "summary", "url", "repository", "collectionPath", "updatedAt", "tags", "readme"],
     "project",
   );
 
@@ -1153,6 +1183,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
   const summaryValue = requireString(object.value, "summary");
   const urlValue = requireString(object.value, "url");
   const repositoryValue = requireString(object.value, "repository");
+  const collectionPathValue = requireString(object.value, "collectionPath");
   const updatedAtValue = requireString(object.value, "updatedAt");
   const tagsValue = requireArray(object.value, "tags");
   const readmeValue = requireString(object.value, "readme");
@@ -1181,6 +1212,10 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     return repositoryValue;
   }
 
+  if (collectionPathValue.kind === "invalid") {
+    return collectionPathValue;
+  }
+
   if (updatedAtValue.kind === "invalid") {
     return updatedAtValue;
   }
@@ -1201,6 +1236,10 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
   const repository = validateRepositoryName(
     repositoryValue.value,
     "project.repository",
+  );
+  const collectionPath = ProjectCollectionPath.tryCreate(
+    collectionPathValue.value,
+    "project.collectionPath",
   );
   const updatedAt = validateContentTimestamp(updatedAtValue.value, "project.updatedAt");
   const tags = validateTags(tagsValue.value, "project.tags");
@@ -1230,6 +1269,10 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     return repository;
   }
 
+  if (collectionPath.kind === "invalid") {
+    return collectionPath;
+  }
+
   if (updatedAt.kind === "invalid") {
     return updatedAt;
   }
@@ -1249,6 +1292,7 @@ function validateContentProject(value: unknown): ContentValidation<ContentProjec
     summary: summary.value,
     url: url.value,
     repository: repository.value,
+    collectionPath: collectionPath.value,
     updatedAt: updatedAt.value,
     tags: tags.value,
     readme: readme.value,

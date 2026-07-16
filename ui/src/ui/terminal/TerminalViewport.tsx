@@ -22,8 +22,44 @@ type TerminalViewportProps = Readonly<{
   transientDiagnostic: string | undefined;
 }>;
 
+type TerminalTranscriptProps = Readonly<{
+  rows: ReadonlyArray<ShellHistoryEntry>;
+  transientDiagnostic: string | undefined;
+}>;
+
 function scrollToLatestOutput(element: HTMLDivElement): void {
   synchronizeTerminalViewport(element);
+}
+
+function TerminalTranscriptContent({
+  rows,
+  transientDiagnostic,
+}: TerminalTranscriptProps): ReactElement {
+  return (
+    <>
+      <div
+        role="log"
+        aria-label="Terminal output"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-atomic="false"
+      >
+        {rows.map((row) => (
+          <TerminalHistoryRow key={row.id} entry={row} />
+        ))}
+      </div>
+      {transientDiagnostic === undefined ? null : (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="whitespace-pre-wrap wrap-break-words text-diagnostic-error"
+        >
+          {transientDiagnostic}
+        </div>
+      )}
+    </>
+  );
 }
 
 export function TerminalViewportContent({
@@ -39,28 +75,10 @@ export function TerminalViewportContent({
 }: TerminalViewportProps): ReactElement {
   return (
     <div className="flex flex-col">
-      <div
-        role="log"
-        aria-label="Terminal output"
-        aria-live="polite"
-        aria-relevant="additions text"
-        aria-atomic="false"
-      >
-        {rows.map((row) => (
-          <TerminalHistoryRow key={row.id} entry={row} />
-        ))}
-      </div>
-
-      {transientDiagnostic === undefined ? null : (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className="whitespace-pre-wrap wrap-break-words text-diagnostic-error"
-        >
-          {transientDiagnostic}
-        </div>
-      )}
+      <TerminalTranscriptContent
+        rows={rows}
+        transientDiagnostic={transientDiagnostic}
+      />
 
       <div>
         <TerminalPrompt
@@ -71,6 +89,37 @@ export function TerminalViewportContent({
           status={status}
           completion={completion}
           autosuggestion={autosuggestion}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function TerminalTranscript({
+  rows,
+  transientDiagnostic,
+}: TerminalTranscriptProps): ReactElement {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+
+    if (viewport) {
+      scrollToLatestOutput(viewport);
+    }
+  }, [rows, transientDiagnostic]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary">
+      <div
+        ref={viewportRef}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-4"
+        role="region"
+        aria-label="Terminal scrollback"
+      >
+        <TerminalTranscriptContent
+          rows={rows}
+          transientDiagnostic={transientDiagnostic}
         />
       </div>
     </div>

@@ -193,6 +193,16 @@ module ContentDomain =
 
         let value (RepositoryName value) = value
 
+    type ProjectCollectionPath = private ProjectCollectionPath of string
+
+    [<RequireQualifiedAccess>]
+    module ProjectCollectionPath =
+        let tryCreate field (value: string) : ValidationResult<ProjectCollectionPath> =
+            RepositoryPath.tryCreate field value
+            |> Result.map (RepositoryPath.value >> ProjectCollectionPath)
+
+        let value (ProjectCollectionPath value) = value
+
     type ContentRevision = private ContentRevision of string
 
     [<RequireQualifiedAccess>]
@@ -592,13 +602,14 @@ module ContentDomain =
 
             let publicationPath directory kind =
                 let prefix = directory + "/"
-                let fileName = value.Substring(prefix.Length)
+                let relativePath = value.Substring(prefix.Length)
+                let fileName =
+                    relativePath.Substring(relativePath.LastIndexOf('/') + 1)
 
                 if
-                    fileName.Contains('/')
-                    || not (fileName.EndsWith(".md", StringComparison.Ordinal))
+                    not (fileName.EndsWith(".md", StringComparison.Ordinal))
                 then
-                    invalid "document.path" $"{directory} documents must use {directory}/{{slug}}.md paths."
+                    invalid "document.path" $"{directory} documents must end with a canonical slug.md path."
                 else
                     fileName.Substring(0, fileName.Length - 3)
                     |> ContentSlug.tryCreate "document.slug"
@@ -752,18 +763,20 @@ module ContentDomain =
               Summary: ContentSummary
               Url: ContentUrl
               Repository: RepositoryName
+              CollectionPath: ProjectCollectionPath
               UpdatedAt: Timestamp
               Tags: ContentTag list }
 
     [<RequireQualifiedAccess>]
     module Project =
-        let create id slug name summary url repository updatedAt tags =
+        let create id slug name summary url repository collectionPath updatedAt tags =
             { Id = id
               Slug = slug
               Name = name
               Summary = summary
               Url = url
               Repository = repository
+              CollectionPath = collectionPath
               UpdatedAt = updatedAt
               Tags = tags }
 
@@ -773,6 +786,7 @@ module ContentDomain =
         let summary project = project.Summary
         let url project = project.Url
         let repository project = project.Repository
+        let collectionPath project = project.CollectionPath
         let updatedAt project = project.UpdatedAt
         let tags project = project.Tags
 
@@ -885,7 +899,7 @@ module ContentDomain =
 
         let private tryProject (element: JsonElement) : ValidationResult<Project> =
             let allowed =
-                Set.ofList [ "id"; "slug"; "name"; "summary"; "url"; "repository"; "updatedAt"; "tags" ]
+                Set.ofList [ "id"; "slug"; "name"; "summary"; "url"; "repository"; "collectionPath"; "updatedAt"; "tags" ]
 
             if element.ValueKind <> JsonValueKind.Object then
                 invalid "projects" "Each project manifest entry must be an object."
@@ -913,20 +927,24 @@ module ContentDomain =
                                     tryString "repository" element
                                     |> Result.bind (RepositoryName.tryCreate "projects.repository")
                                     |> Result.bind (fun repository ->
-                                        tryString "updatedAt" element
-                                        |> Result.bind (Timestamp.tryCreate "projects.updatedAt")
-                                        |> Result.bind (fun updatedAt ->
-                                            tryTags element
-                                            |> Result.map (fun tags ->
-                                                Project.create
-                                                    id
-                                                    slug
-                                                    name
-                                                    summary
-                                                    url
-                                                    repository
-                                                    updatedAt
-                                                    tags))))))))
+                                        tryString "collectionPath" element
+                                        |> Result.bind (ProjectCollectionPath.tryCreate "projects.collectionPath")
+                                        |> Result.bind (fun collectionPath ->
+                                            tryString "updatedAt" element
+                                            |> Result.bind (Timestamp.tryCreate "projects.updatedAt")
+                                            |> Result.bind (fun updatedAt ->
+                                                tryTags element
+                                                |> Result.map (fun tags ->
+                                                    Project.create
+                                                        id
+                                                        slug
+                                                        name
+                                                        summary
+                                                        url
+                                                        repository
+                                                        collectionPath
+                                                        updatedAt
+                                                        tags)))))))))
 
         let tryParse (manifest: string) : ValidationResult<Project list> =
             try

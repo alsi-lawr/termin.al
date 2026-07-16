@@ -44,6 +44,7 @@ import {
   type InputCapturePaneKeyResult,
 } from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
+import { TerminalTranscript } from "./TerminalViewport";
 import { useShellEngine } from "./useShellEngine";
 import {
   MobilePaneControls,
@@ -51,6 +52,7 @@ import {
 } from "../workspace/MobilePaneControls";
 import type { MobileCtrlInputResolution } from "../workspace/MobileCtrlModifier.ts";
 import { ViewerPane } from "../workspace/ViewerPane";
+import { HierarchicalCollectionPane } from "../workspace/HierarchicalCollectionPane.tsx";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
@@ -235,6 +237,47 @@ export function Terminal({
         onClose={() => {
           onCloseInlineViewer(paneId);
         }}
+      />
+    );
+  }
+
+  if (presentation.kind === "inline-collection") {
+    return (
+      <HierarchicalCollectionPane
+        collection={presentation.collection}
+        presentation={{
+          kind: "inline-terminal",
+          transcript: (
+            <TerminalTranscript
+              rows={shell.state.history}
+              transientDiagnostic={shell.transientDiagnostic?.message}
+            />
+          ),
+        }}
+        isActive={isActive}
+        focusVersion={focusVersion}
+        onActivate={onActivate}
+        onPaneKeyInput={onPaneKeyInput}
+        onCancel={() => onCloseInlineViewer(paneId)}
+        renderDocument={(leaf, onReturn) => (
+          <ViewerPane
+            viewer={{
+              kind: "document",
+              title: leaf.documentTitle,
+              presentation: "inline",
+              document: leaf.document,
+            }}
+            isActive={isActive}
+            focusVersion={focusVersion}
+            onActivate={onActivate}
+            onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
+            onClose={onReturn}
+          />
+        )}
       />
     );
   }

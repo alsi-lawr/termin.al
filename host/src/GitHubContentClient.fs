@@ -985,10 +985,11 @@ module GitHubContentClient =
                 toDomainResult (ContentDomain.ContentId.tryCreate "project.id" slugValue),
                 toDomainResult (ContentDomain.ContentTitle.tryCreate "project.name" repositoryShortName),
                 toDomainResult (ContentDomain.ContentSummary.tryCreate "project.summary" summary),
+                toDomainResult (ContentDomain.ProjectCollectionPath.tryCreate "project.collectionPath" "recent/github"),
                 toDomainResult (ContentDomain.ContentTag.tryCreate "project.tag" "github"),
                 toDomainResult (ContentDomain.MarkdownBody.tryCreate "project.readme" readme)
             with
-            | Ok slug, Ok id, Ok title, Ok projectSummary, Ok tag, Ok projectReadme ->
+            | Ok slug, Ok id, Ok title, Ok projectSummary, Ok collectionPath, Ok tag, Ok projectReadme ->
                 Ok(
                     ContentDomain.ProjectReadme.create
                         (ContentDomain.Project.create
@@ -998,16 +999,18 @@ module GitHubContentClient =
                             projectSummary
                             repository.RepositoryUrl
                             repository.RepositoryFullName
+                            collectionPath
                             repository.RepositoryUpdatedAt
                             [ tag ])
                         projectReadme
                 )
-            | Error message, _, _, _, _, _
-            | _, Error message, _, _, _, _
-            | _, _, Error message, _, _, _
-            | _, _, _, Error message, _, _
-            | _, _, _, _, Error message, _
-            | _, _, _, _, _, Error message -> Error message
+            | Error message, _, _, _, _, _, _
+            | _, Error message, _, _, _, _, _
+            | _, _, Error message, _, _, _, _
+            | _, _, _, Error message, _, _, _
+            | _, _, _, _, Error message, _, _
+            | _, _, _, _, _, Error message, _
+            | _, _, _, _, _, _, Error message -> Error message
 
         let getProjectReadmes (repositories: GitHubRepositoryData list) cancellationToken =
             task {

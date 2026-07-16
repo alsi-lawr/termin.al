@@ -44,6 +44,10 @@ export type PaneShellPresentation =
   | Readonly<{
       kind: "inline-viewer";
       viewer: ViewerContent;
+    }>
+  | Readonly<{
+      kind: "inline-collection";
+      collection: Extract<ViewerContent, { kind: "collection" }>;
     }>;
 
 export type CreatePaneShellRuntimesOptions = Readonly<{
@@ -291,7 +295,9 @@ export function showPaneShellViewer(
   if (
     runtime === undefined ||
     (runtime.presentation.kind === "inline-viewer" &&
-      runtime.presentation.viewer === viewer)
+      runtime.presentation.viewer === viewer) ||
+    (runtime.presentation.kind === "inline-collection" &&
+      runtime.presentation.collection === viewer)
   ) {
     return runtimes;
   }
@@ -299,7 +305,9 @@ export function showPaneShellViewer(
   const nextRuntimes = new Map(runtimes);
   nextRuntimes.set(paneId, {
     ...runtime,
-    presentation: { kind: "inline-viewer", viewer },
+    presentation: viewer.kind === "collection"
+      ? { kind: "inline-collection", collection: viewer }
+      : { kind: "inline-viewer", viewer },
   });
   return nextRuntimes;
 }

@@ -138,6 +138,7 @@ test("loads the same-origin content corpus and forwards cancellation", async () 
     const project = result.corpus.projectReadmes[0];
 
     assert.equal(project?.name, "Sample Project");
+    assert.equal(project?.collectionPath, "validated/core");
     assert.equal(
       project?.document.text,
       "# Sample Project README\n\nThis is the supplied README body, not the project summary.",

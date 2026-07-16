@@ -31,6 +31,7 @@ export type ProjectReadme = Readonly<{
   name: string;
   summary: string;
   repository: string;
+  collectionPath: string;
   repositoryUrl: string;
   tags: ReadonlyArray<string>;
   document: MarkdownDocument;
@@ -195,6 +196,7 @@ function createProjectReadmes(
     name: project.name,
     summary: project.summary,
     repository: project.repository.value,
+    collectionPath: project.collectionPath.value,
     repositoryUrl: project.url.value,
     tags: project.tags.map((tag) => tag.value),
     document: {

@@ -163,7 +163,7 @@ module GitHubContentClientTests =
         "{\"entries\":" + entries + "}"
 
     let private projectsManifest =
-        "{\"projects\":[{\"id\":\"curated-project\",\"slug\":\"curated-project\",\"name\":\"Curated Project\",\"summary\":\"Curated project summary.\",\"url\":\"https://github.com/example-owner/curated-project\",\"repository\":\"example-owner/curated-project\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"fsharp\"]}]}"
+        "{\"projects\":[{\"id\":\"curated-project\",\"slug\":\"curated-project\",\"name\":\"Curated Project\",\"summary\":\"Curated project summary.\",\"url\":\"https://github.com/example-owner/curated-project\",\"repository\":\"example-owner/curated-project\",\"collectionPath\":\"curated/featured\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"tags\":[\"fsharp\"]}]}"
 
     let private emptyProjectsManifest = "{\"projects\":[]}"
 
@@ -1125,7 +1125,28 @@ module GitHubContentClientTests =
                 <> "example-owner/curated-project"
             then
                 failwith "Curated projects must retain their configured repository casing."
+
+            if
+                curated
+                |> ContentDomain.ProjectReadme.project
+                |> ContentDomain.Project.collectionPath
+                |> ContentDomain.ProjectCollectionPath.value
+                <> "curated/featured"
+            then
+                failwith "Curated projects must retain their authoritative collection path."
         | _ -> failwith "Curated projects must retain their supplied repository README bodies."
+
+        let generatedCollectionPaths =
+            ContentDomain.Projects.entries projects
+            |> List.tail
+            |> List.map (
+                ContentDomain.ProjectReadme.project
+                >> ContentDomain.Project.collectionPath
+                >> ContentDomain.ProjectCollectionPath.value
+            )
+
+        if generatedCollectionPaths |> List.exists ((<>) "recent/github") then
+            failwith "Generated projects must use their stable construction-time collection path."
 
         if
             handler.Requests

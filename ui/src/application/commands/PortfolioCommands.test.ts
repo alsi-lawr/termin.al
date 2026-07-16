@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
+  createVirtualTimestamp,
   createVirtualFilesystem,
   resolveVirtualPath,
   virtualHomeDirectory,
   type VirtualDocumentSupplier,
   type VirtualFilesystem,
+  type VirtualCorpusCatalogEntry,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
@@ -33,6 +35,18 @@ import { createPaneCommandDefinition } from "./PaneCommand.ts";
 import { createPortfolioCommandDefinitions } from "./PortfolioCommands.ts";
 import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
 import { createCommandRegistry, type CommandRegistry } from "./CommandRegistry.ts";
+import type {
+  ViewerCollectionLeaf,
+  ViewerCollectionNode,
+} from "../../content/ViewerContent.ts";
+
+function collectionLeaves(
+  nodes: ReadonlyArray<ViewerCollectionNode>,
+): ReadonlyArray<ViewerCollectionLeaf> {
+  return nodes.flatMap((node) =>
+    node.kind === "leaf" ? [node] : collectionLeaves(node.children)
+  );
+}
 
 function createThemeController(): ThemeController {
   let state: ThemeState = createThemeState(systemThemePreference, "dark");
@@ -174,13 +188,13 @@ test("opens fixture documents inline and directory targets in requested split ef
     kind: "split",
     orientation: "vertical",
   });
-  assert.equal(splitEffect.viewer.kind, "project-gallery");
-  if (splitEffect.viewer.kind === "project-gallery") {
-    const project = splitEffect.viewer.projects[0];
+  assert.equal(splitEffect.viewer.kind, "collection");
+  if (splitEffect.viewer.kind === "collection") {
+    const project = collectionLeaves(splitEffect.viewer.roots)[0];
 
-    assert.equal(project?.name, "Sample Project");
+    assert.equal(project?.title, "Sample Project");
     assert.equal(
-      project?.repository,
+      project?.metadata,
       "demo/sample-project",
     );
     assert.deepEqual(project?.tags, [
@@ -192,6 +206,7 @@ test("opens fixture documents inline and directory targets in requested split ef
       "# Sample Project README\n\nThis independently supplied README documents the deterministic demo project.",
     );
     assert.notEqual(project?.document.text, project?.summary);
+    assert.equal(project?.path, "demonstrations/typed-applications/Sample Project");
   }
 });
 
@@ -215,69 +230,67 @@ test("builds blog and note listings with document-open data", async () => {
     assert.fail("Expected publication viewer effects.");
   }
 
-  assert.equal(blogEffect.viewer.kind, "publication-list");
-  assert.equal(repeatedBlogEffect.viewer.kind, "publication-list");
-  assert.equal(notesEffect.viewer.kind, "publication-list");
+  assert.equal(blogEffect.viewer.kind, "collection");
+  assert.equal(repeatedBlogEffect.viewer.kind, "collection");
+  assert.equal(notesEffect.viewer.kind, "collection");
 
   if (
-    blogEffect.viewer.kind === "publication-list" &&
-    repeatedBlogEffect.viewer.kind === "publication-list" &&
-    notesEffect.viewer.kind === "publication-list"
+    blogEffect.viewer.kind === "collection" &&
+    repeatedBlogEffect.viewer.kind === "collection" &&
+    notesEffect.viewer.kind === "collection"
   ) {
-    assert.equal(blogEffect.viewer.publicationKind, "blog");
+    const blogEntries = collectionLeaves(blogEffect.viewer.roots);
+    const repeatedBlogEntries = collectionLeaves(repeatedBlogEffect.viewer.roots);
+    const noteEntries = collectionLeaves(notesEffect.viewer.roots);
     assert.deepEqual(
-      blogEffect.viewer.entries.map((entry) => ({
-        slug: entry.slug,
+      blogEntries.map((entry) => ({
         title: entry.title,
-        publishedAt: entry.publishedAt,
+        publishedAt: entry.metadata,
         tags: entry.tags,
       })),
       [
         {
-          slug: "deterministic-demo",
           title: "Deterministic Demos",
-          publishedAt: "2026-01-12T00:00:00.000Z",
+          publishedAt: "2026-01-12",
           tags: ["demo", "offline"],
         },
         {
-          slug: "sample-post",
           title: "Stable Interfaces",
-          publishedAt: "2026-01-05T00:00:00.000Z",
+          publishedAt: "2026-01-05",
           tags: ["typescript", "interfaces"],
         },
       ],
     );
     assert.equal(
-      blogEffect.viewer.entries[1]?.summary,
+      blogEntries[1]?.summary,
       "Validated metadata about typed outcomes and explicit dependencies.",
     );
     assert.doesNotMatch(
-      blogEffect.viewer.entries[1]?.document.text ?? "",
+      blogEntries[1]?.document.text ?? "",
       /Validated metadata about typed outcomes/u,
     );
     assert.deepEqual(
-      repeatedBlogEffect.viewer.entries,
-      blogEffect.viewer.entries,
+      repeatedBlogEntries,
+      blogEntries,
       "Demo publication data must remain deterministic across reads.",
     );
-    assert.equal(notesEffect.viewer.publicationKind, "notes");
-    assert.equal(notesEffect.viewer.entries[0]?.title, "Local Paths");
-    assert.deepEqual(notesEffect.viewer.entries[0]?.tags, [
+    assert.equal(noteEntries[0]?.title, "Local Paths");
+    assert.deepEqual(noteEntries[0]?.tags, [
       "filesystem",
       "determinism",
     ]);
-    assert.equal(notesEffect.viewer.entries[0]?.document.source.path, "~/notes/sample-note.md");
+    assert.equal(noteEntries[0]?.document.source.path, "~/notes/field-notes/filesystems/sample-note.md");
   }
 
   const samplePost = resolveVirtualPath(
     demoContentCorpus.filesystem,
     virtualHomeDirectory(),
-    "blog/sample-post.md",
+    "blog/engineering/interfaces/sample-post.md",
   );
   const deterministicDemo = resolveVirtualPath(
     demoContentCorpus.filesystem,
     virtualHomeDirectory(),
-    "blog/deterministic-demo.md",
+    "blog/engineering/demos/deterministic-demo.md",
   );
 
   if (
@@ -294,6 +307,72 @@ test("builds blog and note listings with document-open data", async () => {
     true,
     "Catalog update order must differ from publication order in this fixture.",
   );
+});
+
+test("bounds recursive publication loading at the existing traversal limit", async () => {
+  const timestamp = "2026-01-01T00:00:00.000Z";
+  const files: ReadonlyArray<VirtualCorpusCatalogEntry> = Array.from(
+    { length: 101 },
+    (_, index) => {
+    const suffix = index.toString().padStart(3, "0");
+    return {
+      kind: "file",
+      id: `post-${suffix}`,
+      path: `~/blog/post-${suffix}.md`,
+      updatedAt: timestamp,
+      size: 1,
+      documentHandle: `post-${suffix}`,
+    };
+    },
+  );
+  const filesystem = createVirtualFilesystem({
+    entries: [
+      { kind: "directory", id: "home", path: "~", updatedAt: timestamp, size: 0 },
+      { kind: "directory", id: "blog", path: "~/blog", updatedAt: timestamp, size: 0 },
+      ...files,
+    ],
+  });
+  let reads = 0;
+  const documents: VirtualDocumentSupplier = {
+    read: (handle, signal) => {
+      if (signal.aborted) {
+        return Promise.resolve({ kind: "cancelled" });
+      }
+
+      reads += 1;
+      return Promise.resolve({
+        kind: "available",
+        document: { text: `# ${handle}`, source: { path: `~/blog/${handle}.md` } },
+        classification: {
+          kind: "publication",
+          publicationKind: "blog",
+          slug: handle,
+          title: handle,
+          summary: `Summary for ${handle}`,
+          publishedAt: createVirtualTimestamp(timestamp),
+          tags: [],
+        },
+      });
+    },
+  };
+  const outcome = succeeded(await execute("blog", createRegistry(
+    documents,
+    createThemeController(),
+    filesystem,
+    [],
+  )));
+  const effect = outcome.effects[0];
+
+  if (
+    effect === undefined ||
+    effect.kind !== "open-viewer" ||
+    effect.viewer.kind !== "collection"
+  ) {
+    assert.fail("Expected a bounded blog collection.");
+  }
+
+  assert.equal(reads, 100);
+  assert.equal(collectionLeaves(effect.viewer.roots).length, 100);
 });
 
 test("represents an empty public collection as an empty listing", async () => {
@@ -327,9 +406,9 @@ test("represents an empty public collection as an empty listing", async () => {
     assert.fail("Expected an empty publication viewer effect.");
   }
 
-  assert.equal(effect.viewer.kind, "publication-list");
-  if (effect.viewer.kind === "publication-list") {
-    assert.deepEqual(effect.viewer.entries, []);
+  assert.equal(effect.viewer.kind, "collection");
+  if (effect.viewer.kind === "collection") {
+    assert.deepEqual(effect.viewer.roots, []);
   }
 });
 
@@ -431,7 +510,7 @@ test("provides discoverable navigation commands and useful unavailable-feature d
   }
 
   assert.equal(aboutEffect.viewer.kind, "document");
-  assert.equal(projectsEffect.viewer.kind, "project-gallery");
+  assert.equal(projectsEffect.viewer.kind, "collection");
   assert.equal(cv.kind, "failed");
   assert.equal(invalidOpen.kind, "failed");
   assert.deepEqual(
