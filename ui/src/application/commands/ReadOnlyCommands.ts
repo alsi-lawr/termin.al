@@ -914,6 +914,9 @@ function createLsCommand(
           return succeededOutcome([output]);
         }
       }
+
+      const exhaustiveMode: never = parsed.value.mode;
+      return exhaustiveMode;
     },
   };
 }
