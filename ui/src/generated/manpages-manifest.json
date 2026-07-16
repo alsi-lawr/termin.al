@@ -161,9 +161,9 @@
       "summary": "Open raw virtual document text in a pager.",
       "sourcePath": "man/less.1",
       "artifactPath": "ui/src/generated/manpages/less.txt",
-      "byteCount": 627,
+      "byteCount": 633,
       "lineCount": 23,
-      "sha256": "60218afcbda419bc576fe131beb9e8a0f49190c8f1309cd7850dfae3fe9ec3f4"
+      "sha256": "2fe6b680a08059f5903f95be7d4ba66047fc082afc1e072d4dae62b97de7b47f"
     },
     {
       "name": "login",
@@ -201,13 +201,13 @@
     {
       "name": "man",
       "section": 1,
-      "usage": "man <command>",
+      "usage": "man [-P less|vi] [--pager=less|vi] <command>",
       "summary": "Show a command manual.",
       "sourcePath": "man/man.1",
       "artifactPath": "ui/src/generated/manpages/man.txt",
-      "byteCount": 942,
-      "lineCount": 36,
-      "sha256": "ebe3fb3f0069a5cb33619814385bd9c3e375678b5492d0a2d7103c662f576012"
+      "byteCount": 1161,
+      "lineCount": 38,
+      "sha256": "c06ed24bf48e931c11f2ffced9c25b2a60d8cd4492f6e72643879618b078237a"
     },
     {
       "name": "notes",
@@ -249,9 +249,9 @@
       "summary": "Manage terminal panes.",
       "sourcePath": "man/pane.1",
       "artifactPath": "ui/src/generated/manpages/pane.txt",
-      "byteCount": 684,
+      "byteCount": 696,
       "lineCount": 24,
-      "sha256": "fc9577e27c043d7565d24eb0f8bf1c61dacc596bc9fbbe66e7557873a3a348bb"
+      "sha256": "51472a0a338b3d4a70bfbe3440172363ac2892aa4ec5cabfcc32898aa49f9179"
     },
     {
       "name": "projects",

@@ -4,7 +4,7 @@ import type {
 import type { ContentId } from "../api/ContentContracts.ts";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
 
-export type DocumentViewerPresentation = "inline" | "raw-pager" | "vim-manpager";
+export type DocumentViewerPresentation = "inline" | "raw-pager" | "vi-manpager";
 
 export type ViewerStatsIdentity =
   | Readonly<{ kind: "countable"; contentId: ContentId }>

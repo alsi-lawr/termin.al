@@ -5,30 +5,32 @@ NAME
 
 SYNOPSIS
      man <command>
-     man -P vim <command>
-     man --pager=vim <command>
+     man -P less|vi <command>
+     man --pager=less|vi <command>
 
 DESCRIPTION
-     Reads  a  project-authored section-1 manual for a registered command. Ordi‐
-     nary mode prints the generated text; Vim mode opens the same text in a key‐
-     board pager.
+     Reads a project-authored section-1 manual for a registered command. The de‐
+     fault  and less presentations open the generated text in the raw pager. The
+     vi presentation opens the same text with a  highlighted  current  line  and
+     NORMAL status.
 
 OPTIONS
-     -P vim
-            Open the selected manual in the Vim manpager.
+     -P less|vi
+            Select the less or vi manpager presentation.
 
-     --pager=vim
-            Open the selected manual in the Vim manpager.
+     --pager=less|vi
+            Select the less or vi manpager presentation.
 
 EXAMPLES
      $ man grep
-     $ man -P vim grep
-     $ man --pager=vim pane
+     $ man -P less grep
+     $ man --pager=vi pane
 
 NOTES
-     Manual sources are roff files generated to checked UTF-8  artifacts  during
-     the  production  build. Aliases resolve through the command registry to the
-     canonical manual.
+     Manual  sources  are roff files generated to checked UTF-8 artifacts during
+     the production build. All presentations use the same artifact. Aliases  re‐
+     solve through the command registry to the canonical manual. Use q or Escape
+     to close either pager; Ctrl+b remains the pane-prefix key.
 
 SEE ALSO
      help(1), less(1)

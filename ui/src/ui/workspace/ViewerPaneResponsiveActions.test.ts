@@ -153,7 +153,7 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.equal(mobileControlsPosition > promptPosition, true);
 });
 
-test("renders Vim manpages with a current line, NORMAL status, and mobile controls", async () => {
+test("renders vi manpages with a current line, NORMAL status, and mobile controls", async () => {
   const text = Array.from(
     { length: 25 },
     (_, index) => `manual line ${index + 1}\n`,
@@ -161,7 +161,7 @@ test("renders Vim manpages with a current line, NORMAL status, and mobile contro
   const markup = await renderViewerPane({
     kind: "document",
     title: "ls(1)",
-    presentation: "vim-manpager",
+    presentation: "vi-manpager",
     document: {
       text,
       source: { path: "man/ls.1" },
@@ -169,7 +169,7 @@ test("renders Vim manpages with a current line, NORMAL status, and mobile contro
     statsIdentity: { kind: "uncounted" },
   });
 
-  assert.equal(markup.includes('aria-label="Current Vim manpage"'), true);
+  assert.equal(markup.includes('aria-label="Current vi manpage"'), true);
   assert.equal(markup.includes('aria-current="true"'), true);
   assert.equal(markup.includes("bg-surface-highlight"), true);
   assert.equal(markup.includes("manual line 1\n"), true);

@@ -38,6 +38,7 @@ import { createPortfolioCommandDefinitions } from "./PortfolioCommands.ts";
 import { createReadOnlyCommandDefinitions } from "./ReadOnlyCommands.ts";
 import { createCommandRegistry, type CommandRegistry } from "./CommandRegistry.ts";
 import type {
+  ViewerContent,
   ViewerCollectionLeaf,
   ViewerCollectionNode,
 } from "../../content/ViewerContent.ts";
@@ -157,31 +158,32 @@ function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "su
   return outcome;
 }
 
-function outputText(outcome: CommandOutcome): string {
-  const output = succeeded(outcome).outputs.find(
-    (candidate) => candidate.kind === "text",
+function documentViewer(
+  outcome: CommandOutcome,
+): Extract<ViewerContent, { kind: "document" }> {
+  const effect = succeeded(outcome).effects.find(
+    (candidate) => candidate.kind === "open-viewer",
   );
 
-  if (output === undefined || output.kind !== "text") {
-    assert.fail("Expected text output.");
+  if (effect === undefined || effect.kind !== "open-viewer") {
+    assert.fail("Expected a document viewer effect.");
   }
 
-  return output.text;
+  if (effect.viewer.kind !== "document") {
+    assert.fail("Expected document viewer content.");
+  }
+
+  return effect.viewer;
 }
 
-test("renders help and manual metadata as terminal-native text", async () => {
+test("renders help as text and opens manual metadata in the default pager", async () => {
   const registry = createRegistry();
   const help = succeeded(await execute("help", registry));
-  const manual = succeeded(await execute("man open", registry));
+  const manual = documentViewer(await execute("man open", registry));
   const output = help.outputs[0];
-  const manualOutput = manual.outputs[0];
 
   if (output === undefined || output.kind !== "text") {
     assert.fail("Expected terminal help output.");
-  }
-
-  if (manualOutput === undefined || manualOutput.kind !== "text") {
-    assert.fail("Expected terminal manual output.");
   }
 
   assert.match(output.text, /^HELP\(1\).*HELP\(1\)$/mu);
@@ -191,13 +193,14 @@ test("renders help and manual metadata as terminal-native text", async () => {
   assert.match(output.text, /pane +Manage terminal panes/u);
   assert.match(output.text, /about +Open about content/u);
   assert.match(output.text, /\nEXAMPLES\n       \$ help\n       \$ man ls/u);
-  assert.match(manualOutput.text, /^OPEN\(1\).*OPEN\(1\)$/mu);
+  assert.equal(manual.presentation, "raw-pager");
+  assert.match(manual.document.text, /^OPEN\(1\).*OPEN\(1\)$/mu);
   assert.match(
-    manualOutput.text,
+    manual.document.text,
     /\nSYNOPSIS\n     open \[--split horizontal\|vertical\] <target>/u,
   );
   assert.match(
-    manualOutput.text,
+    manual.document.text,
     /\nEXAMPLES\n     \$ open about\.md\n     \$ open --split vertical projects/u,
   );
 });
@@ -224,7 +227,7 @@ test("keeps the actual registry and generated manuals in exact metadata agreemen
     assert.equal(manual.manpage.metadata.usage, metadata.usage);
     assert.equal(manual.manpage.metadata.summary, metadata.summary);
     assert.equal(
-      outputText(await execute(`man ${metadata.name}`, registry)),
+      documentViewer(await execute(`man ${metadata.name}`, registry)).document.text,
       manual.manpage.text,
     );
 

@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import { createManpageCorpus } from "../../content/ManpageCorpus.ts";
+import type { ViewerContent } from "../../content/ViewerContent.ts";
 import {
   createVirtualFilesystem,
   virtualHomeDirectory,
@@ -238,6 +239,24 @@ function outputText(outcome: CommandOutcome): string {
   return output.text;
 }
 
+function documentViewer(
+  outcome: CommandOutcome,
+): Extract<ViewerContent, { kind: "document" }> {
+  const effect = succeeded(outcome).effects.find(
+    (candidate) => candidate.kind === "open-viewer",
+  );
+
+  if (effect === undefined || effect.kind !== "open-viewer") {
+    assert.fail("Expected a document viewer effect.");
+  }
+
+  if (effect.viewer.kind !== "document") {
+    assert.fail("Expected document viewer content.");
+  }
+
+  return effect.viewer;
+}
+
 function failureMessage(outcome: CommandOutcome): string {
   if (outcome.kind !== "failed") {
     assert.fail("Expected a failed command outcome.");
@@ -326,7 +345,7 @@ test("adds exact ls tree parsing, metadata, and tree output parity", async () =>
   const terminatedTreeLong = failureMessage(
     await execute("ls --tree -- -l", registry),
   );
-  const manual = outputText(await execute("man ls", registry));
+  const manual = documentViewer(await execute("man ls", registry)).document.text;
   const resolution = resolveCommand(registry, "ls");
 
   if (resolution.kind === "missing") {
@@ -428,7 +447,7 @@ test("implements line readers, terminal history, manual pages, and pager effects
       "echo 😀 second",
     ]),
   );
-  const manual = outputText(await execute("man grep", registry));
+  const manual = documentViewer(await execute("man grep", registry)).document.text;
   const pager = succeeded(await execute("less notes/field-notes/filesystems/sample-note.md", registry));
   const clear = succeeded(await execute("clear", registry));
 
@@ -471,7 +490,7 @@ test("implements line readers, terminal history, manual pages, and pager effects
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
 });
 
-test("uses one canonical artifact for ordinary, Vim, and alias manual requests", async () => {
+test("uses one canonical artifact for default less, explicit less, vi, and aliases", async () => {
   const definitions = createReadOnlyCommandDefinitions({
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
@@ -494,41 +513,38 @@ test("uses one canonical artifact for ordinary, Vim, and alias manual requests",
     assert.fail("Expected the generated ls manual.");
   }
 
-  const ordinary = outputText(await execute("man ls", registry));
-  const alias = outputText(await execute("man dir", registry));
-  const shortPager = succeeded(await execute("man -P vim ls", registry));
-  const longPager = succeeded(await execute("man --pager=vim ls", registry));
+  const requests = [
+    ["man ls", "raw-pager"],
+    ["man dir", "raw-pager"],
+    ["man -P less ls", "raw-pager"],
+    ["man --pager=less ls", "raw-pager"],
+    ["man -P vi ls", "vi-manpager"],
+    ["man --pager=vi ls", "vi-manpager"],
+  ] as const;
 
-  assert.equal(ordinary, manual.manpage.text);
-  assert.equal(alias, manual.manpage.text);
+  for (const [source, presentation] of requests) {
+    const outcome = succeeded(await execute(source, registry));
+    const viewer = documentViewer(outcome);
 
-  for (const outcome of [shortPager, longPager]) {
-    const effect = outcome.effects.find((candidate) => candidate.kind === "open-viewer");
-
-    if (effect === undefined || effect.kind !== "open-viewer") {
-      assert.fail("Expected Vim manpager viewer effect.");
-    }
-
-    if (effect.viewer.kind !== "document") {
-      assert.fail("Expected a Vim manpage document.");
-    }
-
-    assert.equal(effect.viewer.title, "ls(1)");
-    assert.equal(effect.viewer.presentation, "vim-manpager");
-    assert.equal(effect.viewer.document.text, manual.manpage.text);
-    assert.equal(effect.viewer.document.source.path, "man/ls.1");
-    assert.deepEqual(effect.viewer.statsIdentity, { kind: "uncounted" });
+    assert.deepEqual(outcome.outputs, []);
+    assert.equal(viewer.title, "ls(1)");
+    assert.equal(viewer.presentation, presentation);
+    assert.equal(viewer.document.text, manual.manpage.text);
+    assert.equal(viewer.document.source.path, "man/ls.1");
+    assert.deepEqual(viewer.statsIdentity, { kind: "uncounted" });
   }
 });
 
 test("reports stable diagnostics for malformed and unavailable manual requests", async () => {
   const registry = createRegistry();
   const invalidRequests: ReadonlyArray<readonly [string, string]> = [
-    ["man", "Usage: man [-P vim|--pager=vim] <command>"],
-    ["man ls grep", "Usage: man [-P vim|--pager=vim] <command>"],
-    ["man -P", "Usage: man [-P vim|--pager=vim] <command>"],
-    ["man -P less ls", "Unsupported man pager: less."],
-    ["man --pager=less ls", "Unsupported man pager: less."],
+    ["man", "Usage: man [-P less|vi] [--pager=less|vi] <command>"],
+    ["man ls grep", "Usage: man [-P less|vi] [--pager=less|vi] <command>"],
+    ["man -P", "Usage: man [-P less|vi] [--pager=less|vi] <command>"],
+    ["man -P vim ls", "Unsupported man pager: vim."],
+    ["man --pager=vim ls", "Unsupported man pager: vim."],
+    ["man -P more ls", "Unsupported man pager: more."],
+    ["man --pager=more ls", "Unsupported man pager: more."],
     ["man --pager= ls", "Man pager must be specified."],
     ["man --pager vim ls", "Unsupported man option: --pager."],
     ["man -Pvim ls", "Unsupported man option: -Pvim."],

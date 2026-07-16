@@ -16,7 +16,7 @@ EXAMPLES
 
 NOTES
      Ctrl+b keyboard prefix behavior and responsive pane layout are not  changed
-     by this command's manual or by the Vim manpager.
+     by this command's manual or by either manpager presentation.
 
 SEE ALSO
      open(1)

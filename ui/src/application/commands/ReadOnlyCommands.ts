@@ -1591,7 +1591,11 @@ function formatHistoryEntries(
     .join("\n");
 }
 
-type ManPresentation = "scrollback" | "vim-manpager";
+type ManPresentation = "raw-pager" | "vi-manpager";
+
+type ManPagerParseResult =
+  | Readonly<{ kind: "supported"; presentation: ManPresentation }>
+  | Readonly<{ kind: "unsupported" }>;
 
 type ManInvocationParseResult =
   | Readonly<{
@@ -1601,7 +1605,19 @@ type ManInvocationParseResult =
     }>
   | Readonly<{ kind: "invalid"; message: string }>;
 
-const manUsage = "Usage: man [-P vim|--pager=vim] <command>";
+const manUsage = "Usage: man [-P less|vi] [--pager=less|vi] <command>";
+
+function parseManPager(pager: string): ManPagerParseResult {
+  if (pager === "less") {
+    return { kind: "supported", presentation: "raw-pager" };
+  }
+
+  if (pager === "vi") {
+    return { kind: "supported", presentation: "vi-manpager" };
+  }
+
+  return { kind: "unsupported" };
+}
 
 function parseManInvocation(invocation: CommandInvocation): ManInvocationParseResult {
   const [first, second, third, ...remaining] = invocation.arguments;
@@ -1615,13 +1631,15 @@ function parseManInvocation(invocation: CommandInvocation): ManInvocationParseRe
       return { kind: "invalid", message: manUsage };
     }
 
-    if (second !== "vim") {
+    const pager = parseManPager(second);
+
+    if (pager.kind === "unsupported") {
       return { kind: "invalid", message: `Unsupported man pager: ${second}.` };
     }
 
     return {
       kind: "parsed",
-      presentation: "vim-manpager",
+      presentation: pager.presentation,
       requestedName: third,
     };
   }
@@ -1633,7 +1651,9 @@ function parseManInvocation(invocation: CommandInvocation): ManInvocationParseRe
 
     const pager = first.slice("--pager=".length);
 
-    if (pager !== "vim") {
+    const pagerResult = parseManPager(pager);
+
+    if (pagerResult.kind === "unsupported") {
       const message = pager.length === 0
         ? "Man pager must be specified."
         : `Unsupported man pager: ${pager}.`;
@@ -1646,7 +1666,7 @@ function parseManInvocation(invocation: CommandInvocation): ManInvocationParseRe
 
     return {
       kind: "parsed",
-      presentation: "vim-manpager",
+      presentation: pagerResult.presentation,
       requestedName: second,
     };
   }
@@ -1659,7 +1679,7 @@ function parseManInvocation(invocation: CommandInvocation): ManInvocationParseRe
     return { kind: "invalid", message: manUsage };
   }
 
-  return { kind: "parsed", presentation: "scrollback", requestedName: first };
+  return { kind: "parsed", presentation: "raw-pager", requestedName: first };
 }
 
 function createHistoryCommand(): CommandDefinition {
@@ -1693,8 +1713,8 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
       name: "man",
       aliases: [],
       summary: "Show a command manual.",
-      usage: "man <command>",
-      examples: ["man grep"],
+      usage: "man [-P less|vi] [--pager=less|vi] <command>",
+      examples: ["man grep", "man -P vi grep"],
     },
     execute: async (invocation, context) => {
       const parsed = parseManInvocation(invocation);
@@ -1719,18 +1739,12 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
         return rejectedOutcome("man", `No manual entry for ${canonicalName}.`);
       }
 
-      if (parsed.presentation === "scrollback") {
-        return succeededOutcome([
-          textOutput("man-output", manual.manpage.text),
-        ]);
-      }
-
       return succeededOutcome([], [
         {
           kind: "open-viewer",
           viewer: createDocumentViewerContent({
             title: `${canonicalName}(1)`,
-            presentation: "vim-manpager",
+            presentation: parsed.presentation,
             document: {
               text: manual.manpage.text,
               source: { path: manual.manpage.metadata.sourcePath },

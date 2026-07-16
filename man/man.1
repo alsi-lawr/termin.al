@@ -1,5 +1,5 @@
 .\" termin.al-name: man
-.\" termin.al-usage: man <command>
+.\" termin.al-usage: man [-P less|vi] [--pager=less|vi] <command>
 .\" termin.al-summary: Show a command manual.
 .TH MAN 1 "" "termin.al" "termin.al Manual"
 .ftr B R
@@ -10,25 +10,25 @@ man \- Show a command manual.
 .SH SYNOPSIS
 .nf
 man <command>
-man -P vim <command>
-man --pager=vim <command>
+man -P less|vi <command>
+man --pager=less|vi <command>
 .fi
 .SH DESCRIPTION
-Reads a project-authored section-1 manual for a registered command. Ordinary mode prints the generated text; Vim mode opens the same text in a keyboard pager.
+Reads a project-authored section-1 manual for a registered command. The default and less presentations open the generated text in the raw pager. The vi presentation opens the same text with a highlighted current line and NORMAL status.
 .SH OPTIONS
 .TP
-.B -P vim
-Open the selected manual in the Vim manpager.
+.BI "-P " "less|vi"
+Select the less or vi manpager presentation.
 .TP
-.B --pager=vim
-Open the selected manual in the Vim manpager.
+.BI "--pager=" "less|vi"
+Select the less or vi manpager presentation.
 .SH EXAMPLES
 .nf
 $ man grep
-$ man -P vim grep
-$ man --pager=vim pane
+$ man -P less grep
+$ man --pager=vi pane
 .fi
 .SH NOTES
-Manual sources are roff files generated to checked UTF-8 artifacts during the production build. Aliases resolve through the command registry to the canonical manual.
+Manual sources are roff files generated to checked UTF-8 artifacts during the production build. All presentations use the same artifact. Aliases resolve through the command registry to the canonical manual. Use q or Escape to close either pager; Ctrl+b remains the pane-prefix key.
 .SH SEE ALSO
 help(1), less(1)

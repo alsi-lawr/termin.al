@@ -147,10 +147,10 @@ function StandardViewerPane({
   const isRawPager =
     activeViewer.kind === "document" &&
     activeViewer.presentation === "raw-pager";
-  const isVimManpager =
+  const isViManpager =
     activeViewer.kind === "document" &&
-    activeViewer.presentation === "vim-manpager";
-  const isTextPager = isRawPager || isVimManpager;
+    activeViewer.presentation === "vi-manpager";
+  const isTextPager = isRawPager || isViManpager;
   const markdownDocument =
     activeViewer.kind === "document" && activeViewer.presentation === "inline"
       ? activeViewer.document
@@ -158,7 +158,7 @@ function StandardViewerPane({
   const rawText =
     activeViewer.kind === "document" &&
     (activeViewer.presentation === "raw-pager" ||
-      activeViewer.presentation === "vim-manpager")
+      activeViewer.presentation === "vi-manpager")
       ? activeViewer.document.text
       : "";
   const markdownBlocks = markdownDocument === undefined
@@ -485,7 +485,7 @@ function StandardViewerPane({
 
   if (
     activeViewer.kind === "document" &&
-    activeViewer.presentation === "vim-manpager"
+    activeViewer.presentation === "vi-manpager"
   ) {
     const status = rawPagerStatus(rawPagerState);
     const position = status.kind === "empty"
@@ -509,7 +509,7 @@ function StandardViewerPane({
         <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
           <pre
             className="min-h-full whitespace-pre-wrap wrap-break-words text-text-bright"
-            aria-label="Current Vim manpage"
+            aria-label="Current vi manpage"
           >
             {pageLines.map((line) => (
               <span
