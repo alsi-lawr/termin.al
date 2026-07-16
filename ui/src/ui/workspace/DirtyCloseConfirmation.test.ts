@@ -29,7 +29,7 @@ function isDirtyCloseConfirmationModule(
   );
 }
 
-test("makes the alertdialog the focus target and keeps actions mobile-only", async () => {
+test("makes the alertdialog the desktop focus boundary and actions mobile-only", async () => {
   const vite = await createServer({
     appType: "custom",
     server: { middlewareMode: true, hmr: false },
@@ -59,9 +59,14 @@ test("makes the alertdialog the focus target and keeps actions mobile-only", asy
     assert.equal(markup.includes('role="alertdialog"'), true);
     assert.equal(markup.includes('tabindex="-1"'), true);
     assert.equal(markup.includes('aria-modal="true"'), true);
-    assert.equal(markup.includes("Keep editing"), true);
-    assert.equal(markup.includes("Close pane"), true);
-    assert.equal(markup.match(/md:hidden/g)?.length, 2);
+    assert.match(
+      markup,
+      /<button[^>]*class="[^"]*md:hidden[^"]*"[^>]*>Keep editing<\/button>/u,
+    );
+    assert.match(
+      markup,
+      /<button[^>]*class="[^"]*md:hidden[^"]*"[^>]*>Close pane<\/button>/u,
+    );
   } finally {
     await vite.close();
   }

@@ -6,7 +6,11 @@ import {
 } from "react";
 import { viewerTitle } from "../../content/ViewerContent.ts";
 import type { Pane } from "../../domain/workspace/PaneTree.ts";
-import { handleDirtyCloseConfirmationKey } from "./DirtyCloseConfirmationKeyHandler.ts";
+import {
+  dirtyCloseActionsVisibility,
+  handleDirtyCloseConfirmationKey,
+  type DirtyCloseConfirmationKeyInput,
+} from "./DirtyCloseConfirmationKeyHandler.ts";
 
 type DirtyCloseConfirmationProps = Readonly<{
   pane: Pane;
@@ -41,6 +45,27 @@ function focusedDirtyCloseAction(
   return "dialog";
 }
 
+function dirtyCloseKeyInput(
+  event: KeyboardEvent<HTMLDivElement>,
+  focusedAction: "dialog" | "cancel" | "confirm",
+  cancelButton: HTMLButtonElement | null,
+  confirmButton: HTMLButtonElement | null,
+): DirtyCloseConfirmationKeyInput {
+  if (event.key === "Tab") {
+    return {
+      kind: "tab",
+      focusedAction,
+      actionsVisibility: dirtyCloseActionsVisibility(
+        cancelButton,
+        confirmButton,
+      ),
+      direction: event.shiftKey ? "backward" : "forward",
+    };
+  }
+
+  return { kind: "key", key: event.key, focusedAction };
+}
+
 export function DirtyCloseConfirmation({
   pane,
   onConfirm,
@@ -55,14 +80,19 @@ export function DirtyCloseConfirmation({
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    const result = handleDirtyCloseConfirmationKey({
-      key: event.key,
-      focusedAction: focusedDirtyCloseAction(
-        event.target,
+    const focusedAction = focusedDirtyCloseAction(
+      event.target,
+      cancelRef.current,
+      confirmRef.current,
+    );
+    const result = handleDirtyCloseConfirmationKey(
+      dirtyCloseKeyInput(
+        event,
+        focusedAction,
         cancelRef.current,
         confirmRef.current,
       ),
-    });
+    );
 
     switch (result.kind) {
       case "cancel":
@@ -72,6 +102,10 @@ export function DirtyCloseConfirmation({
       case "confirm":
         event.preventDefault();
         onConfirm();
+        return;
+      case "focus-dialog":
+        event.preventDefault();
+        dialogRef.current?.focus();
         return;
       case "focus-cancel":
         event.preventDefault();
