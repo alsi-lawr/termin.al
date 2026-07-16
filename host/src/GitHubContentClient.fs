@@ -644,7 +644,15 @@ module GitHubContentClient =
                     with
                     | Ok parsedName, Ok parsedBranch, Ok parsedUrl, Ok parsedUpdatedAt ->
                         match expected with
-                        | Some expectedName when parsedName <> expectedName ->
+                        | Some expectedName when
+                            not (
+                                String.Equals(
+                                    ContentDomain.RepositoryName.value parsedName,
+                                    ContentDomain.RepositoryName.value expectedName,
+                                    StringComparison.OrdinalIgnoreCase
+                                )
+                            )
+                            ->
                             Error "Repository response did not match the requested repository."
                         | _ ->
                             Ok

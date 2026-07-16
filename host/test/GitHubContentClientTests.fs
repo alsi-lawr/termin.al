@@ -1074,9 +1074,9 @@ module GitHubContentClientTests =
                 | "/repos/example-owner/curated-project" ->
                     response
                         HttpStatusCode.OK
-                        (repositoryJson "example-owner/curated-project" "\"Curated project summary\"")
+                        (repositoryJson "Example-Owner/Curated-Project" "\"Curated project summary\"")
                         None
-                | "/repos/example-owner/curated-project/readme?ref=main" ->
+                | "/repos/Example-Owner/Curated-Project/readme?ref=main" ->
                     response HttpStatusCode.OK "# Curated Project README\n\nThis is the supplied curated README." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     linkResponse
@@ -1117,7 +1117,14 @@ module GitHubContentClientTests =
         | curated :: _ when
             curated |> ContentDomain.ProjectReadme.body |> ContentDomain.MarkdownBody.value = "# Curated Project README\n\nThis is the supplied curated README."
             ->
-            ()
+            if
+                curated
+                |> ContentDomain.ProjectReadme.project
+                |> ContentDomain.Project.repository
+                |> ContentDomain.RepositoryName.value
+                <> "example-owner/curated-project"
+            then
+                failwith "Curated projects must retain their configured repository casing."
         | _ -> failwith "Curated projects must retain their supplied repository README bodies."
 
         if
