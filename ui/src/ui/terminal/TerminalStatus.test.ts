@@ -20,7 +20,7 @@ function isTerminalStatusModule(
 test("hides idle readiness and renders meaningful terminal statuses", async () => {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true, hmr: false },
+    server: { middlewareMode: true, hmr: false, ws: false },
   });
 
   try {

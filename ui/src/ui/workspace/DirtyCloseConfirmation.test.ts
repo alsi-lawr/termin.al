@@ -32,7 +32,7 @@ function isDirtyCloseConfirmationModule(
 test("makes the alertdialog the desktop focus boundary and actions mobile-only", async () => {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true, hmr: false },
+    server: { middlewareMode: true, hmr: false, ws: false },
   });
 
   try {

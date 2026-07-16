@@ -40,7 +40,7 @@ function isViewerPaneModule(
 async function renderViewerPane(viewer: unknown): Promise<string> {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true, hmr: false },
+    server: { middlewareMode: true, hmr: false, ws: false },
   });
 
   try {

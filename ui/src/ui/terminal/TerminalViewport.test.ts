@@ -21,7 +21,7 @@ function isTerminalViewportModule(
 test("grows the transcript and active prompt naturally from the top", async () => {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true, hmr: false },
+    server: { middlewareMode: true, hmr: false, ws: false },
   });
 
   try {
