@@ -1196,6 +1196,40 @@ test("keeps adversarial delimiter and malformed-comment object scans bounded", (
     text: "<x>ok</x>",
   });
   assert.deepEqual(tag.status, { kind: "none" });
+
+  const unmatchedDelimiters = "(".repeat(32_000) + "]".repeat(32_000);
+  const crossedDelimiterText = "(x)" + unmatchedDelimiters;
+  const crossedDelimiter = press(
+    press(
+      createVimBuffer({ text: crossedDelimiterText, mode: VimMode.Normal }),
+      "l",
+    ),
+    "y", "a", "(",
+  );
+
+  assert.equal(vimBufferText(crossedDelimiter), crossedDelimiterText);
+  assert.deepEqual(crossedDelimiter.register, {
+    kind: "character",
+    text: "(x)",
+  });
+  assert.deepEqual(crossedDelimiter.status, { kind: "none" });
+
+  const mismatchedTags = "<a>".repeat(10_000) + "</b>".repeat(10_000);
+  const mismatchedTagText = "<x>ok</x>" + mismatchedTags;
+  const mismatchedTag = press(
+    press(
+      createVimBuffer({ text: mismatchedTagText, mode: VimMode.Normal }),
+      "l", "l", "l",
+    ),
+    "y", "a", "t",
+  );
+
+  assert.equal(vimBufferText(mismatchedTag), mismatchedTagText);
+  assert.deepEqual(mismatchedTag.register, {
+    kind: "character",
+    text: "<x>ok</x>",
+  });
+  assert.deepEqual(mismatchedTag.status, { kind: "none" });
 });
 
 test("keeps structural visual movement linewise and defers characterwise object adoption", () => {

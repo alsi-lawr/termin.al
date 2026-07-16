@@ -1575,6 +1575,12 @@ function resolveDelimiterObject(
   const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
   const enclosing: Array<OffsetSpan> = [];
   const stack: Array<Readonly<{ character: string; offset: number }>> = [];
+  const firstOpeningIndices: Array<number | undefined> = [
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+  ];
   const objectOpenings = "([{<";
   const objectClosings = ")]}>";
   let offset = 0;
@@ -1594,13 +1600,22 @@ function resolveDelimiterObject(
         const closingIndex = objectClosings.indexOf(character);
 
         if (openingIndex >= 0) {
+          if (firstOpeningIndices[openingIndex] === undefined) {
+            firstOpeningIndices[openingIndex] = stack.length;
+          }
+
           stack.push({ character, offset });
         } else if (closingIndex >= 0) {
           const expectedOpening = objectOpenings.slice(closingIndex, closingIndex + 1);
           const candidate = stack.at(-1);
 
           if (candidate?.character === expectedOpening) {
+            const removedIndex = stack.length - 1;
             stack.pop();
+
+            if (firstOpeningIndices[closingIndex] === removedIndex) {
+              firstOpeningIndices[closingIndex] = undefined;
+            }
 
             if (
               candidate.character === opening &&
@@ -1614,10 +1629,23 @@ function resolveDelimiterObject(
               });
             }
           } else {
-            const crossed = stack.findIndex((entry) => entry.character === expectedOpening);
+            const crossed = firstOpeningIndices[closingIndex];
 
-            if (crossed >= 0) {
-              stack.splice(crossed);
+            if (crossed !== undefined) {
+              while (stack.length > crossed) {
+                const removedIndex = stack.length - 1;
+                const removed = stack.pop();
+
+                if (removed === undefined) {
+                  throw new Error("Vim delimiter stack truncation must remove an opening.");
+                }
+
+                const removedType = objectOpenings.indexOf(removed.character);
+
+                if (firstOpeningIndices[removedType] === removedIndex) {
+                  firstOpeningIndices[removedType] = undefined;
+                }
+              }
             }
           }
         }
@@ -1627,7 +1655,6 @@ function resolveDelimiterObject(
     offset = nextUnicodeCursorOffset(text, offset);
   }
 
-  enclosing.sort((left, right) => (left.end - left.start) - (right.end - right.start));
   const selected = enclosing[Math.min(options.count, enclosing.length) - 1];
 
   if (selected === undefined) {
@@ -1738,6 +1765,24 @@ function tagTokens(text: string): ReadonlyArray<TagToken> {
   return tokens;
 }
 
+function popTagOpening(
+  stack: Array<TagToken>,
+  firstOpeningIndices: Map<string, number>,
+): TagToken {
+  const removedIndex = stack.length - 1;
+  const removed = stack.pop();
+
+  if (removed === undefined) {
+    throw new Error("Vim tag stack truncation must remove an opening tag.");
+  }
+
+  if (firstOpeningIndices.get(removed.name) === removedIndex) {
+    firstOpeningIndices.delete(removed.name);
+  }
+
+  return removed;
+}
+
 function resolveTagObject(
   options: ResolveVimMotionOptions,
   around: boolean,
@@ -1745,10 +1790,15 @@ function resolveTagObject(
   const text = joinLines(options.lines);
   const cursor = vimTextOffsetForPosition(options.lines, options.cursor);
   const stack: Array<TagToken> = [];
+  const firstOpeningIndices = new Map<string, number>();
   const enclosing: Array<Readonly<{ open: TagToken; close: TagToken }>> = [];
 
   for (const token of tagTokens(text)) {
     if (token.kind === "open") {
+      if (!firstOpeningIndices.has(token.name)) {
+        firstOpeningIndices.set(token.name, stack.length);
+      }
+
       stack.push(token);
       continue;
     }
@@ -1756,25 +1806,24 @@ function resolveTagObject(
     const open = stack.at(-1);
 
     if (open?.name !== token.name) {
-      const crossed = stack.findIndex((candidate) => candidate.name === token.name);
+      const crossed = firstOpeningIndices.get(token.name);
 
-      if (crossed >= 0) {
-        stack.splice(crossed);
+      if (crossed !== undefined) {
+        while (stack.length > crossed) {
+          popTagOpening(stack, firstOpeningIndices);
+        }
       }
 
       continue;
     }
 
-    stack.pop();
+    popTagOpening(stack, firstOpeningIndices);
 
     if (cursor >= open.start && cursor < token.end) {
       enclosing.push({ open, close: token });
     }
   }
 
-  enclosing.sort((left, right) =>
-    (left.close.end - left.open.start) - (right.close.end - right.open.start),
-  );
   const pair = enclosing[Math.min(options.count, enclosing.length) - 1];
 
   if (pair === undefined) {
