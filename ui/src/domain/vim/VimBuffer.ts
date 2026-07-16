@@ -3,6 +3,20 @@ import {
   normalizeUnicodeCursorOffset,
   previousUnicodeCursorOffset,
 } from "../terminal/UnicodeCursor.ts";
+import {
+  resolveVimMotion,
+  vimLineStartOffset as lineStartOffset,
+  vimPositionForTextOffset,
+  vimTextOffsetForPosition as textOffsetForPosition,
+  type VimFindMotion,
+  type VimGoalColumn,
+  type VimLastFind,
+  type VimMotion,
+  type VimMotionRange,
+  type VimMotionRequest,
+} from "./VimMotion.ts";
+
+export type { VimMotion } from "./VimMotion.ts";
 
 export type VimPosition = Readonly<{
   line: number;
@@ -19,15 +33,15 @@ export type VimMode =
       input: string;
     }>;
 
-export const VimMode = {
+export const VimMode: Readonly<{
+  Normal: Extract<VimMode, { kind: "normal" }>;
+  Insert: Extract<VimMode, { kind: "insert" }>;
+  Visual: Extract<VimMode, { kind: "visual" }>;
+}> = {
   Normal: { kind: "normal" },
   Insert: { kind: "insert" },
   Visual: { kind: "visual" },
-} as const satisfies Readonly<{
-  Normal: VimMode;
-  Insert: VimMode;
-  Visual: VimMode;
-}>;
+};
 
 export type VimSelection =
   | Readonly<{ kind: "none" }>
@@ -65,18 +79,12 @@ export type VimCommandEffect =
       source: string;
     }>;
 
-export type VimMotion =
-  | "left"
-  | "right"
-  | "word-forward"
-  | "word-backward"
-  | "word-end"
-  | "line-start"
-  | "line-end"
-  | "line-previous"
-  | "line-next"
-  | "document-start"
-  | "document-end";
+export type VimStatus =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "invalid-input";
+      source: string;
+    }>;
 
 export type VimOperator = "delete" | "change" | "yank";
 
@@ -84,17 +92,15 @@ export type VimDigit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 export type VimNormalKey =
   | Readonly<{
-      kind: "digit";
-      digit: VimDigit;
+      kind: "literal";
+      value: string;
     }>
   | Readonly<{
       kind: "motion";
       motion: VimMotion;
     }>
-  | Readonly<{
-      kind: "operator";
-      operator: VimOperator;
-    }>
+  | Readonly<{ kind: "digit"; digit: VimDigit }>
+  | Readonly<{ kind: "operator"; operator: VimOperator }>
   | Readonly<{ kind: "delete-character" }>
   | Readonly<{ kind: "paste-after" }>
   | Readonly<{ kind: "paste-before" }>
@@ -140,24 +146,42 @@ type VimSnapshot = Readonly<{
   selection: VimSelection;
 }>;
 
+type VimCommandContext =
+  | Readonly<{ kind: "normal"; count: number }>
+  | Readonly<{
+      kind: "operator";
+      operator: VimOperator;
+      count: number;
+    }>;
+
 type VimCount =
   | Readonly<{ kind: "absent" }>
-  | Readonly<{
-      kind: "present";
-      value: number;
-    }>;
+  | Readonly<{ kind: "present"; value: number }>;
 
 type VimPending =
   | Readonly<{ kind: "none" }>
   | Readonly<{
       kind: "count";
       count: number;
+      source: string;
     }>
   | Readonly<{
       kind: "operator";
       operator: VimOperator;
-      count: number;
+      operatorCount: VimCount;
       motionCount: VimCount;
+      source: string;
+    }>
+  | Readonly<{
+      kind: "prefix";
+      context: VimCommandContext;
+      source: string;
+    }>
+  | Readonly<{
+      kind: "find";
+      context: VimCommandContext;
+      motion: VimFindMotion;
+      source: string;
     }>;
 
 type VimTextState = Readonly<{
@@ -167,17 +191,7 @@ type VimTextState = Readonly<{
   selection: VimSelection;
 }>;
 
-type VimTextRange =
-  | Readonly<{
-      kind: "character";
-      start: number;
-      end: number;
-    }>
-  | Readonly<{
-      kind: "line";
-      startLine: number;
-      endLine: number;
-    }>;
+type VimTextRange = VimMotionRange;
 
 export type VimBuffer = Readonly<{
   lines: ReadonlyArray<string>;
@@ -189,8 +203,11 @@ export type VimBuffer = Readonly<{
   register: VimRegister;
   search: VimSearch;
   commandEffect: VimCommandEffect;
+  status: VimStatus;
   savedText: string;
   pending: VimPending;
+  goalColumn: VimGoalColumn;
+  lastFind: VimLastFind;
 }>;
 
 export type CreateVimBufferOptions = Readonly<{
@@ -198,8 +215,6 @@ export type CreateVimBufferOptions = Readonly<{
   mode: Extract<VimMode, { kind: "normal" | "insert" }>;
 }>;
 
-const wordCharacterPattern = /[\p{L}\p{N}_]/u;
-const normalDigits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 const vimHistoryCapacity = 100;
 
 function splitText(text: string): ReadonlyArray<string> {
@@ -315,7 +330,11 @@ function withPending(buffer: VimBuffer, pending: VimPending): VimBuffer {
 }
 
 function resetPending(buffer: VimBuffer): VimBuffer {
-  return withPending(buffer, { kind: "none" });
+  return {
+    ...buffer,
+    pending: { kind: "none" },
+    status: { kind: "none" },
+  };
 }
 
 function withTextState(buffer: VimBuffer, next: VimTextState): VimBuffer {
@@ -323,6 +342,7 @@ function withTextState(buffer: VimBuffer, next: VimTextState): VimBuffer {
     ...buffer,
     ...next,
     pending: { kind: "none" },
+    status: { kind: "none" },
   };
 }
 
@@ -344,86 +364,102 @@ function commitEdit(
     redoStack: [],
     register,
     pending: { kind: "none" },
+    status: { kind: "none" },
+    goalColumn: { kind: "none" },
   };
+}
+
+function clearVimStatus(buffer: VimBuffer): VimBuffer {
+  return buffer.status.kind === "none"
+    ? buffer
+    : { ...buffer, status: { kind: "none" } };
+}
+
+function invalidInput(buffer: VimBuffer, source: string): VimBuffer {
+  return {
+    ...buffer,
+    pending: { kind: "none" },
+    status: { kind: "invalid-input", source },
+  };
+}
+
+function appendSaturatedDecimal(count: number, digit: number): number {
+  const maximumPrefix = Math.floor((Number.MAX_SAFE_INTEGER - digit) / 10);
+
+  return count > maximumPrefix
+    ? Number.MAX_SAFE_INTEGER
+    : count * 10 + digit;
+}
+
+function multiplySaturated(left: number, right: number): number {
+  return left > Math.floor(Number.MAX_SAFE_INTEGER / right)
+    ? Number.MAX_SAFE_INTEGER
+    : left * right;
 }
 
 function pendingCount(pending: VimPending): number {
   return pending.kind === "count" ? pending.count : 1;
 }
 
-function capCount(count: number, lines: ReadonlyArray<string>): number {
-  const maximum = Math.max(
-    1,
-    lines.reduce((total, line) => total + line.length + 1, 0),
-  );
-
-  return Math.max(1, Math.min(count, maximum));
-}
-
-function appendCount(existing: VimCount, digit: VimDigit): VimCount {
-  const value =
-    existing.kind === "present" ? existing.value * 10 + digit : digit;
-
-  return {
-    kind: "present",
-    value: Math.min(value, Number.MAX_SAFE_INTEGER),
-  };
-}
-
-function appendNormalCount(buffer: VimBuffer, digit: VimDigit): VimBuffer {
+function commandContext(buffer: VimBuffer): VimCommandContext {
   if (buffer.pending.kind === "operator") {
-    return withPending(buffer, {
-      ...buffer.pending,
-      motionCount: appendCount(buffer.pending.motionCount, digit),
-    });
+    const operatorCount =
+      buffer.pending.operatorCount.kind === "present"
+        ? buffer.pending.operatorCount.value
+        : 1;
+    const motionCount =
+      buffer.pending.motionCount.kind === "present"
+        ? buffer.pending.motionCount.value
+        : 1;
+
+    return {
+      kind: "operator",
+      operator: buffer.pending.operator,
+      count: multiplySaturated(operatorCount, motionCount),
+    };
+  }
+
+  return { kind: "normal", count: pendingCount(buffer.pending) };
+}
+
+function appendCount(buffer: VimBuffer, digit: number): VimBuffer {
+  if (buffer.pending.kind === "operator") {
+    const motionCount: VimCount = {
+      kind: "present",
+      value: appendSaturatedDecimal(
+        buffer.pending.motionCount.kind === "present"
+          ? buffer.pending.motionCount.value
+          : 0,
+        digit,
+      ),
+    };
+
+    return clearVimStatus(
+      withPending(buffer, {
+        ...buffer.pending,
+        motionCount,
+        source: buffer.pending.source + String(digit),
+      }),
+    );
   }
 
   if (buffer.pending.kind === "count") {
-    return withPending(buffer, {
+    return clearVimStatus(
+      withPending(buffer, {
+        kind: "count",
+        count: appendSaturatedDecimal(buffer.pending.count, digit),
+        source: buffer.pending.source + String(digit),
+      }),
+    );
+  }
+
+  return clearVimStatus(
+    withPending(buffer, {
       kind: "count",
-      count: Math.min(
-        buffer.pending.count * 10 + digit,
-        Number.MAX_SAFE_INTEGER,
-      ),
-    });
-  }
-
-  return withPending(buffer, { kind: "count", count: digit });
-}
-
-function lineStartOffset(lines: ReadonlyArray<string>, line: number): number {
-  let offset = 0;
-
-  for (let index = 0; index < line; index += 1) {
-    const value = lines[index];
-
-    if (value === undefined) {
-      throw new Error("Vim cursor lines must reference existing text.");
-    }
-
-    offset += value.length + 1;
-  }
-
-  return offset;
-}
-
-function textOffsetForPosition(
-  lines: ReadonlyArray<string>,
-  position: VimPosition,
-): number {
-  const safeLine = clampLine(lines, position.line);
-  const line = lines[safeLine];
-
-  if (line === undefined) {
-    throw new Error("Vim buffers must always contain at least one line.");
-  }
-
-  const column = normalizeUnicodeCursorOffset(
-    line,
-    Math.max(0, Math.min(line.length, position.column)),
+      count: digit,
+      source: String(digit),
+    }),
   );
-
-  return lineStartOffset(lines, safeLine) + column;
 }
 
 function positionForTextOffset(
@@ -431,388 +467,9 @@ function positionForTextOffset(
   offset: number,
   mode: VimMode,
 ): VimPosition {
-  const text = joinLines(lines);
-  const normalizedOffset = normalizeUnicodeCursorOffset(text, offset);
-  let remaining: number = normalizedOffset;
+  const boundary = mode.kind === "insert" ? "insertion" : "character";
 
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const line = lines[lineIndex];
-
-    if (line === undefined) {
-      throw new Error("Vim buffers must always contain at least one line.");
-    }
-
-    if (remaining <= line.length) {
-      return normalisePosition(
-        lines,
-        { line: lineIndex, column: remaining },
-        mode,
-      );
-    }
-
-    remaining -= line.length + 1;
-  }
-
-  const lastLine = lines.length - 1;
-  const line = lines[lastLine];
-
-  if (line === undefined) {
-    throw new Error("Vim buffers must always contain at least one line.");
-  }
-
-  return normalisePosition(
-    lines,
-    { line: lastLine, column: line.length },
-    mode,
-  );
-}
-
-function moveCharacterLeft(
-  lines: ReadonlyArray<string>,
-  position: VimPosition,
-  count: number,
-): VimPosition {
-  const line = lines[position.line];
-
-  if (line === undefined) {
-    throw new Error("Vim cursor lines must reference existing text.");
-  }
-
-  let column = position.column;
-
-  for (let step = 0; step < count; step += 1) {
-    column = previousUnicodeCursorOffset(line, column);
-  }
-
-  return { line: position.line, column };
-}
-
-function moveCharacterRight(
-  lines: ReadonlyArray<string>,
-  position: VimPosition,
-  count: number,
-): VimPosition {
-  const line = lines[position.line];
-
-  if (line === undefined) {
-    throw new Error("Vim cursor lines must reference existing text.");
-  }
-
-  const maximumColumn = lastCursorColumn(line);
-  let column = position.column;
-
-  for (let step = 0; step < count; step += 1) {
-    if (column >= maximumColumn) {
-      break;
-    }
-
-    column = nextUnicodeCursorOffset(line, column);
-  }
-
-  return { line: position.line, column };
-}
-
-function characterAt(text: string, offset: number): string {
-  const start = normalizeUnicodeCursorOffset(text, offset);
-  const end = nextUnicodeCursorOffset(text, start);
-
-  return text.slice(start, end);
-}
-
-function isWordCharacter(character: string): boolean {
-  return wordCharacterPattern.test(character);
-}
-
-function wordForward(text: string, offset: number, count: number): number {
-  let position = normalizeUnicodeCursorOffset(text, offset);
-
-  for (let repetition = 0; repetition < count; repetition += 1) {
-    while (
-      position < text.length &&
-      isWordCharacter(characterAt(text, position))
-    ) {
-      position = nextUnicodeCursorOffset(text, position);
-    }
-
-    while (
-      position < text.length &&
-      !isWordCharacter(characterAt(text, position))
-    ) {
-      position = nextUnicodeCursorOffset(text, position);
-    }
-  }
-
-  return position;
-}
-
-function wordBackward(text: string, offset: number, count: number): number {
-  let position = normalizeUnicodeCursorOffset(text, offset);
-
-  for (let repetition = 0; repetition < count; repetition += 1) {
-    if (position === 0) {
-      return 0;
-    }
-
-    position = previousUnicodeCursorOffset(text, position);
-
-    while (position > 0 && !isWordCharacter(characterAt(text, position))) {
-      position = previousUnicodeCursorOffset(text, position);
-    }
-
-    while (
-      position > 0 &&
-      isWordCharacter(
-        characterAt(text, previousUnicodeCursorOffset(text, position)),
-      )
-    ) {
-      position = previousUnicodeCursorOffset(text, position);
-    }
-  }
-
-  return position;
-}
-
-function wordEnd(text: string, offset: number, count: number): number {
-  if (text.length === 0) {
-    return 0;
-  }
-
-  let position = normalizeUnicodeCursorOffset(text, offset);
-  const lastCursor = previousUnicodeCursorOffset(text, text.length);
-
-  for (let repetition = 0; repetition < count; repetition += 1) {
-    while (
-      position < lastCursor &&
-      !isWordCharacter(characterAt(text, position))
-    ) {
-      position = nextUnicodeCursorOffset(text, position);
-    }
-
-    while (
-      position < lastCursor &&
-      isWordCharacter(
-        characterAt(text, nextUnicodeCursorOffset(text, position)),
-      )
-    ) {
-      position = nextUnicodeCursorOffset(text, position);
-    }
-
-    if (repetition < count - 1 && position < lastCursor) {
-      position = nextUnicodeCursorOffset(text, position);
-    }
-  }
-
-  return position;
-}
-
-function moveCursorForMotion(
-  buffer: VimBuffer,
-  motion: VimMotion,
-  count: number,
-): VimPosition {
-  const safeCount = capCount(count, buffer.lines);
-  const text = joinLines(buffer.lines);
-  const offset = textOffsetForPosition(buffer.lines, buffer.cursor);
-
-  switch (motion) {
-    case "left":
-      return normalisePosition(
-        buffer.lines,
-        moveCharacterLeft(buffer.lines, buffer.cursor, safeCount),
-        VimMode.Normal,
-      );
-    case "right":
-      return normalisePosition(
-        buffer.lines,
-        moveCharacterRight(buffer.lines, buffer.cursor, safeCount),
-        VimMode.Normal,
-      );
-    case "word-forward":
-      return positionForTextOffset(
-        buffer.lines,
-        wordForward(text, offset, safeCount),
-        VimMode.Normal,
-      );
-    case "word-backward":
-      return positionForTextOffset(
-        buffer.lines,
-        wordBackward(text, offset, safeCount),
-        VimMode.Normal,
-      );
-    case "word-end":
-      return positionForTextOffset(
-        buffer.lines,
-        wordEnd(text, offset, safeCount),
-        VimMode.Normal,
-      );
-    case "line-start":
-      return { line: buffer.cursor.line, column: 0 };
-    case "line-end": {
-      const line = buffer.lines[buffer.cursor.line];
-
-      if (line === undefined) {
-        throw new Error("Vim cursor lines must reference existing text.");
-      }
-
-      return { line: buffer.cursor.line, column: lastCursorColumn(line) };
-    }
-    case "line-previous": {
-      const line = Math.max(0, buffer.cursor.line - safeCount);
-      const target = buffer.lines[line];
-
-      if (target === undefined) {
-        throw new Error("Vim cursor lines must reference existing text.");
-      }
-
-      return {
-        line,
-        column: Math.min(lastCursorColumn(target), buffer.cursor.column),
-      };
-    }
-    case "line-next": {
-      const line = Math.min(buffer.lines.length - 1, buffer.cursor.line + safeCount);
-      const target = buffer.lines[line];
-
-      if (target === undefined) {
-        throw new Error("Vim cursor lines must reference existing text.");
-      }
-
-      return {
-        line,
-        column: Math.min(lastCursorColumn(target), buffer.cursor.column),
-      };
-    }
-    case "document-start":
-      return { line: 0, column: 0 };
-    case "document-end": {
-      const line = buffer.lines.length - 1;
-      const target = buffer.lines[line];
-
-      if (target === undefined) {
-        throw new Error("Vim buffers must always contain at least one line.");
-      }
-
-      return { line, column: lastCursorColumn(target) };
-    }
-  }
-}
-
-function lineRangeForMotion(
-  buffer: VimBuffer,
-  motion: Extract<
-    VimMotion,
-    "line-previous" | "line-next" | "document-start" | "document-end"
-  >,
-  count: number,
-): VimTextRange {
-  const target = moveCursorForMotion(buffer, motion, count);
-
-  return {
-    kind: "line",
-    startLine: Math.min(buffer.cursor.line, target.line),
-    endLine: Math.max(buffer.cursor.line, target.line),
-  };
-}
-
-function characterRangeForMotion(
-  buffer: VimBuffer,
-  motion: Exclude<
-    VimMotion,
-    "line-previous" | "line-next" | "document-start" | "document-end"
-  >,
-  count: number,
-): VimTextRange {
-  const safeCount = capCount(count, buffer.lines);
-  const text = joinLines(buffer.lines);
-  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-
-  switch (motion) {
-    case "left":
-      return {
-        kind: "character",
-        start: textOffsetForPosition(
-          buffer.lines,
-          moveCharacterLeft(buffer.lines, buffer.cursor, safeCount),
-        ),
-        end: cursorOffset,
-      };
-    case "right": {
-      const target = moveCharacterRight(
-        buffer.lines,
-        buffer.cursor,
-        safeCount,
-      );
-      const targetOffset = textOffsetForPosition(buffer.lines, target);
-
-      return {
-        kind: "character",
-        start: cursorOffset,
-        end: nextUnicodeCursorOffset(text, targetOffset),
-      };
-    }
-    case "word-forward":
-      return {
-        kind: "character",
-        start: cursorOffset,
-        end: wordForward(text, cursorOffset, safeCount),
-      };
-    case "word-backward":
-      return {
-        kind: "character",
-        start: wordBackward(text, cursorOffset, safeCount),
-        end: cursorOffset,
-      };
-    case "word-end":
-      return {
-        kind: "character",
-        start: cursorOffset,
-        end: nextUnicodeCursorOffset(
-          text,
-          wordEnd(text, cursorOffset, safeCount),
-        ),
-      };
-    case "line-start":
-      return {
-        kind: "character",
-        start: lineStartOffset(buffer.lines, buffer.cursor.line),
-        end: cursorOffset,
-      };
-    case "line-end": {
-      const line = buffer.lines[buffer.cursor.line];
-
-      if (line === undefined) {
-        throw new Error("Vim cursor lines must reference existing text.");
-      }
-
-      return {
-        kind: "character",
-        start: cursorOffset,
-        end: lineStartOffset(buffer.lines, buffer.cursor.line) + line.length,
-      };
-    }
-  }
-}
-
-function rangeForMotion(
-  buffer: VimBuffer,
-  motion: VimMotion,
-  count: number,
-): VimTextRange {
-  switch (motion) {
-    case "line-previous":
-    case "line-next":
-    case "document-start":
-    case "document-end":
-      return lineRangeForMotion(buffer, motion, count);
-    case "left":
-    case "right":
-    case "word-forward":
-    case "word-backward":
-    case "word-end":
-    case "line-start":
-    case "line-end":
-      return characterRangeForMotion(buffer, motion, count);
-  }
+  return vimPositionForTextOffset(lines, offset, boundary);
 }
 
 function registerForRange(
@@ -899,6 +556,8 @@ function applyOperatorRange(
       ...buffer,
       register: registerForRange(buffer, range),
       pending: { kind: "none" },
+      status: { kind: "none" },
+      goalColumn: { kind: "none" },
     };
   }
 
@@ -906,66 +565,150 @@ function applyOperatorRange(
 }
 
 function wholeLineRange(buffer: VimBuffer, count: number): VimTextRange {
+  const available = buffer.lines.length - buffer.cursor.line;
+  const distance = Math.min(count, available) - 1;
+
   return {
     kind: "line",
     startLine: buffer.cursor.line,
-    endLine: Math.min(buffer.lines.length - 1, buffer.cursor.line + count - 1),
+    endLine: buffer.cursor.line + distance,
   };
 }
 
-function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
-  if (buffer.pending.kind === "operator") {
-    if (buffer.pending.operator === operator) {
-      return applyOperatorRange(
-        buffer,
-        operator,
-        wholeLineRange(buffer, buffer.pending.count),
-      );
-    }
-
-    return withPending(buffer, {
-      kind: "operator",
-      operator,
-      count: buffer.pending.count,
-      motionCount: { kind: "absent" },
-    });
+function operatorSource(operator: VimOperator): "d" | "c" | "y" {
+  switch (operator) {
+    case "delete":
+      return "d";
+    case "change":
+      return "c";
+    case "yank":
+      return "y";
   }
-
-  return withPending(buffer, {
-    kind: "operator",
-    operator,
-    count: pendingCount(buffer.pending),
-    motionCount: { kind: "absent" },
-  });
 }
 
-function handleMotion(buffer: VimBuffer, motion: VimMotion): VimBuffer {
+function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
+  if (buffer.mode.kind === "visual") {
+    return applyOperatorRange(buffer, operator, visualRange(buffer));
+  }
+
   if (buffer.pending.kind === "operator") {
-    const motionCount =
-      buffer.pending.motionCount.kind === "present"
-        ? buffer.pending.motionCount.value
-        : 1;
-    const count = Math.min(
-      buffer.pending.count * motionCount,
-      Number.MAX_SAFE_INTEGER,
-    );
+    const source = buffer.pending.source + operatorSource(operator);
+
+    if (buffer.pending.operator !== operator) {
+      return invalidInput(buffer, source);
+    }
 
     return applyOperatorRange(
       buffer,
-      buffer.pending.operator,
-      rangeForMotion(buffer, motion, count),
+      operator,
+      wholeLineRange(
+        buffer,
+        buffer.pending.operatorCount.kind === "present"
+          ? buffer.pending.operatorCount.value
+          : 1,
+      ),
     );
   }
 
-  const cursor = moveCursorForMotion(
+  const countSource = buffer.pending.kind === "count" ? buffer.pending.source : "";
+  const operatorCount: VimCount =
+    buffer.pending.kind === "count"
+      ? { kind: "present", value: buffer.pending.count }
+      : { kind: "absent" };
+
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "operator",
+      operator,
+      operatorCount,
+      motionCount: { kind: "absent" },
+      source: countSource + operatorSource(operator),
+    }),
+  );
+}
+
+function executeMotion(
+  buffer: VimBuffer,
+  request: VimMotionRequest,
+  context: VimCommandContext,
+  source: string,
+  lastFind: VimLastFind,
+): VimBuffer {
+  const resolution = resolveVimMotion({
+    lines: buffer.lines,
+    cursor: buffer.cursor,
+    request,
+    count: context.count,
+    goalColumn: buffer.goalColumn,
+  });
+
+  if (resolution.kind === "invalid") {
+    return invalidInput(buffer, source);
+  }
+
+  if (buffer.mode.kind === "visual") {
+    if (buffer.selection.kind !== "line") {
+      throw new Error("Visual mode requires a linewise selection.");
+    }
+
+    const moved = withTextState(
+      buffer,
+      createTextState(
+        buffer.lines,
+        resolution.motion.cursor,
+        VimMode.Visual,
+        {
+          kind: "line",
+          anchorLine: buffer.selection.anchorLine,
+          activeLine: resolution.motion.cursor.line,
+        },
+      ),
+    );
+
+    return {
+      ...moved,
+      goalColumn: resolution.motion.goalColumn,
+      lastFind,
+    };
+  }
+
+  if (context.kind === "operator") {
+    return {
+      ...applyOperatorRange(
+        buffer,
+        context.operator,
+        resolution.motion.range,
+      ),
+      lastFind,
+      goalColumn: { kind: "none" },
+      status: { kind: "none" },
+    };
+  }
+
+  const moved = withTextState(
     buffer,
-    motion,
-    pendingCount(buffer.pending),
+    createTextState(
+      buffer.lines,
+      resolution.motion.cursor,
+      VimMode.Normal,
+      { kind: "none" },
+    ),
   );
 
-  return withTextState(
+  return {
+    ...moved,
+    goalColumn: resolution.motion.goalColumn,
+    lastFind,
+  };
+}
+
+function handleMotion(buffer: VimBuffer, motion: VimMotion, source: string): VimBuffer {
+  return executeMotion(
     buffer,
-    createTextState(buffer.lines, cursor, VimMode.Normal, { kind: "none" }),
+    { kind: "motion", motion },
+    commandContext(buffer),
+    source,
+    buffer.lastFind,
   );
 }
 
@@ -978,10 +721,16 @@ function deleteCharacters(buffer: VimBuffer): VimBuffer {
 
   const start = buffer.cursor.column;
   let end = start;
-  const count = capCount(pendingCount(buffer.pending), buffer.lines);
+  const count = pendingCount(buffer.pending);
+  let moved = 0;
 
-  for (let step = 0; step < count && end < line.length; step += 1) {
+  while (moved < count && end < line.length) {
     end = nextUnicodeCursorOffset(line, end);
+    moved += 1;
+  }
+
+  if (end === start) {
+    return invalidInput(buffer, "x");
   }
 
   const lineOffset = lineStartOffset(buffer.lines, buffer.cursor.line);
@@ -992,6 +741,7 @@ function deleteCharacters(buffer: VimBuffer): VimBuffer {
       kind: "character",
       start: lineOffset + start,
       end: lineOffset + end,
+      inclusivity: "inclusive",
     },
     false,
   );
@@ -999,7 +749,7 @@ function deleteCharacters(buffer: VimBuffer): VimBuffer {
 
 function enterInsertMode(buffer: VimBuffer, cursor: VimPosition): VimBuffer {
   return withTextState(
-    buffer,
+    { ...buffer, goalColumn: { kind: "none" } },
     createTextState(buffer.lines, cursor, VimMode.Insert, { kind: "none" }),
   );
 }
@@ -1034,54 +784,6 @@ function visualRange(buffer: VimBuffer): VimTextRange {
     startLine: Math.min(buffer.selection.anchorLine, buffer.selection.activeLine),
     endLine: Math.max(buffer.selection.anchorLine, buffer.selection.activeLine),
   };
-}
-
-function updateVisualSelection(
-  buffer: VimBuffer,
-  motion: VimMotion,
-): VimBuffer {
-  if (buffer.selection.kind !== "line") {
-    throw new Error("Visual mode requires a linewise selection.");
-  }
-
-  const cursor = moveCursorForMotion(
-    buffer,
-    motion,
-    pendingCount(buffer.pending),
-  );
-
-  return withTextState(
-    buffer,
-    createTextState(buffer.lines, cursor, VimMode.Visual, {
-      kind: "line",
-      anchorLine: buffer.selection.anchorLine,
-      activeLine: cursor.line,
-    }),
-  );
-}
-
-function applyVisualKey(buffer: VimBuffer, key: VimNormalKey): VimBuffer {
-  if (key.kind === "escape" || key.kind === "enter-visual-line") {
-    return enterNormalMode(buffer);
-  }
-
-  if (key.kind === "digit") {
-    return appendNormalCount(buffer, key.digit);
-  }
-
-  if (key.kind === "motion") {
-    return updateVisualSelection(buffer, key.motion);
-  }
-
-  if (key.kind === "operator") {
-    return applyOperatorRange(buffer, key.operator, visualRange(buffer));
-  }
-
-  if (key.kind === "delete-character") {
-    return applyOperatorRange(buffer, "delete", visualRange(buffer));
-  }
-
-  return resetPending(buffer);
 }
 
 function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
@@ -1148,6 +850,8 @@ function undo(buffer: VimBuffer): VimBuffer {
       vimHistoryCapacity,
     ),
     pending: { kind: "none" },
+    status: { kind: "none" },
+    goalColumn: { kind: "none" },
   };
 }
 
@@ -1166,22 +870,9 @@ function redo(buffer: VimBuffer): VimBuffer {
     ),
     redoStack: buffer.redoStack.slice(1),
     pending: { kind: "none" },
+    status: { kind: "none" },
+    goalColumn: { kind: "none" },
   };
-}
-
-function isLineStartKey(buffer: VimBuffer, key: VimNormalKey): boolean {
-  if (key.kind !== "digit" || key.digit !== 0) {
-    return false;
-  }
-
-  if (buffer.pending.kind === "none") {
-    return true;
-  }
-
-  return (
-    buffer.pending.kind === "operator" &&
-    buffer.pending.motionCount.kind === "absent"
-  );
 }
 
 function moveToSearchMatch(
@@ -1198,18 +889,24 @@ function moveToSearchMatch(
     direction === "forward"
       ? nextUnicodeCursorOffset(text, cursorOffset)
       : cursorOffset;
-  const index =
-    direction === "forward"
-      ? text.indexOf(buffer.search.query, searchStart)
-      : searchStart === 0
-        ? -1
-        : text.lastIndexOf(buffer.search.query, searchStart - 1);
-  const wrappedIndex =
-    index === -1
-      ? direction === "forward"
+  let index: number;
+
+  if (direction === "forward") {
+    index = text.indexOf(buffer.search.query, searchStart);
+  } else if (searchStart === 0) {
+    index = -1;
+  } else {
+    index = text.lastIndexOf(buffer.search.query, searchStart - 1);
+  }
+
+  let wrappedIndex = index;
+
+  if (index === -1) {
+    wrappedIndex =
+      direction === "forward"
         ? text.indexOf(buffer.search.query)
-        : text.lastIndexOf(buffer.search.query)
-      : index;
+        : text.lastIndexOf(buffer.search.query);
+  }
 
   if (wrappedIndex === -1) {
     return resetPending(buffer);
@@ -1231,10 +928,7 @@ export function createVimBuffer({
   mode,
 }: CreateVimBufferOptions): VimBuffer {
   const lines = splitText(text);
-  const cursor =
-    mode.kind === "normal"
-      ? { line: 0, column: 0 }
-      : { line: 0, column: 0 };
+  const cursor = { line: 0, column: 0 };
   const state = createTextState(lines, cursor, mode, { kind: "none" });
 
   return {
@@ -1244,8 +938,11 @@ export function createVimBuffer({
     register: { kind: "empty" },
     search: { kind: "none" },
     commandEffect: { kind: "none" },
+    status: { kind: "none" },
     savedText: text,
     pending: { kind: "none" },
+    goalColumn: { kind: "none" },
+    lastFind: { kind: "none" },
   };
 }
 
@@ -1404,97 +1101,382 @@ export function replaceVimInsertText(
   );
 }
 
+function pendingSource(buffer: VimBuffer): string {
+  return buffer.pending.kind === "none" ? "" : buffer.pending.source;
+}
+
+function hasExplicitCount(buffer: VimBuffer): boolean {
+  return (
+    buffer.pending.kind === "count" ||
+    (buffer.pending.kind === "operator" &&
+      (buffer.pending.operatorCount.kind === "present" ||
+        buffer.pending.motionCount.kind === "present"))
+  );
+}
+
+function beginPrefix(buffer: VimBuffer): VimBuffer {
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "prefix",
+      context: commandContext(buffer),
+      source: pendingSource(buffer) + "g",
+    }),
+  );
+}
+
+function beginFind(buffer: VimBuffer, motion: VimFindMotion): VimBuffer {
+  return clearVimStatus(
+    withPending(buffer, {
+      kind: "find",
+      context: commandContext(buffer),
+      motion,
+      source: pendingSource(buffer) + motion,
+    }),
+  );
+}
+
+function reverseFindMotion(motion: VimFindMotion): VimFindMotion {
+  switch (motion) {
+    case "f":
+      return "F";
+    case "F":
+      return "f";
+    case "t":
+      return "T";
+    case "T":
+      return "t";
+  }
+}
+
+function repeatFind(buffer: VimBuffer, reverse: boolean): VimBuffer {
+  const source = pendingSource(buffer) + (reverse ? "," : ";");
+
+  if (buffer.lastFind.kind === "none") {
+    return invalidInput(buffer, source);
+  }
+
+  const motion = reverse
+    ? reverseFindMotion(buffer.lastFind.motion)
+    : buffer.lastFind.motion;
+
+  return executeMotion(
+    buffer,
+    { kind: "find", motion, target: buffer.lastFind.target },
+    commandContext(buffer),
+    source,
+    buffer.lastFind,
+  );
+}
+
+function applyPrefixContinuation(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind !== "prefix") {
+    throw new Error("Vim prefix continuation requires prefix state.");
+  }
+
+  const source = buffer.pending.source + value;
+  let motion: VimMotion;
+
+  switch (value) {
+    case "g":
+      motion = "document-start";
+      break;
+    case "e":
+      motion = "word-previous-end";
+      break;
+    case "E":
+      motion = "WORD-previous-end";
+      break;
+    case "_":
+      motion = "line-last-nonblank";
+      break;
+    default:
+      return invalidInput(buffer, source);
+  }
+
+  return executeMotion(
+    buffer,
+    { kind: "motion", motion },
+    buffer.pending.context,
+    source,
+    buffer.lastFind,
+  );
+}
+
+function applyFindTarget(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind !== "find") {
+    throw new Error("Vim find target requires find state.");
+  }
+
+  const source = buffer.pending.source + value;
+
+  if (Array.from(value).length !== 1) {
+    return invalidInput(buffer, source);
+  }
+
+  return executeMotion(
+    buffer,
+    { kind: "find", motion: buffer.pending.motion, target: value },
+    buffer.pending.context,
+    source,
+    {
+      kind: "present",
+      motion: buffer.pending.motion,
+      target: value,
+    },
+  );
+}
+
+function insertAfterCursor(buffer: VimBuffer): VimBuffer {
+  const text = vimBufferText(buffer);
+  const offset = textOffsetForPosition(buffer.lines, buffer.cursor);
+
+  return enterInsertMode(
+    buffer,
+    positionForTextOffset(
+      buffer.lines,
+      nextUnicodeCursorOffset(text, offset),
+      VimMode.Insert,
+    ),
+  );
+}
+
+function insertAtLineEnd(buffer: VimBuffer): VimBuffer {
+  const line = buffer.lines[buffer.cursor.line];
+
+  if (line === undefined) {
+    throw new Error("Vim cursor lines must reference existing text.");
+  }
+
+  return enterInsertMode(buffer, {
+    line: buffer.cursor.line,
+    column: line.length,
+  });
+}
+
+function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
+  if (buffer.pending.kind === "prefix") {
+    return applyPrefixContinuation(buffer, value);
+  }
+
+  if (buffer.pending.kind === "find") {
+    return applyFindTarget(buffer, value);
+  }
+
+  if (/^[0-9]$/u.test(value)) {
+    const digit = Number(value);
+    const zeroIsMotion =
+      value === "0" &&
+      (buffer.pending.kind === "none" ||
+        (buffer.pending.kind === "operator" &&
+          buffer.pending.motionCount.kind === "absent"));
+
+    if (zeroIsMotion) {
+      return handleMotion(buffer, "line-start", pendingSource(buffer) + value);
+    }
+
+    return appendCount(buffer, digit);
+  }
+
+  switch (value) {
+    case "h":
+      return handleMotion(buffer, "left", pendingSource(buffer) + value);
+    case "l":
+    case " ":
+      return handleMotion(buffer, "right", pendingSource(buffer) + value);
+    case "j":
+      return handleMotion(buffer, "line-next", pendingSource(buffer) + value);
+    case "k":
+      return handleMotion(buffer, "line-previous", pendingSource(buffer) + value);
+    case "+":
+      return handleMotion(
+        buffer,
+        "line-next-first-nonblank",
+        pendingSource(buffer) + value,
+      );
+    case "-":
+      return handleMotion(
+        buffer,
+        "line-previous-first-nonblank",
+        pendingSource(buffer) + value,
+      );
+    case "^":
+      return handleMotion(
+        buffer,
+        "line-first-nonblank",
+        pendingSource(buffer) + value,
+      );
+    case "_":
+      return handleMotion(buffer, "line-current", pendingSource(buffer) + value);
+    case "$":
+      return handleMotion(buffer, "line-end", pendingSource(buffer) + value);
+    case "w":
+      return handleMotion(buffer, "word-forward", pendingSource(buffer) + value);
+    case "W":
+      return handleMotion(buffer, "WORD-forward", pendingSource(buffer) + value);
+    case "b":
+      return handleMotion(buffer, "word-backward", pendingSource(buffer) + value);
+    case "B":
+      return handleMotion(buffer, "WORD-backward", pendingSource(buffer) + value);
+    case "e":
+      return handleMotion(buffer, "word-end", pendingSource(buffer) + value);
+    case "E":
+      return handleMotion(buffer, "WORD-end", pendingSource(buffer) + value);
+    case "g":
+      return beginPrefix(buffer);
+    case "G":
+      return handleMotion(
+        buffer,
+        hasExplicitCount(buffer) ? "document-start" : "document-end",
+        pendingSource(buffer) + value,
+      );
+    case "%":
+      return handleMotion(
+        buffer,
+        hasExplicitCount(buffer) ? "percentage" : "match-pair",
+        pendingSource(buffer) + value,
+      );
+    case "f":
+    case "F":
+    case "t":
+    case "T":
+      return beginFind(buffer, value);
+    case ";":
+      return repeatFind(buffer, false);
+    case ",":
+      return repeatFind(buffer, true);
+    case "d":
+      return handleOperator(buffer, "delete");
+    case "c":
+      return handleOperator(buffer, "change");
+    case "y":
+      return handleOperator(buffer, "yank");
+    case "x":
+      return buffer.mode.kind === "visual"
+        ? applyOperatorRange(buffer, "delete", visualRange(buffer))
+        : deleteCharacters(buffer);
+    case "p":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, pendingSource(buffer) + value)
+        : pasteRegister(buffer, true);
+    case "P":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, pendingSource(buffer) + value)
+        : pasteRegister(buffer, false);
+    case "u":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, pendingSource(buffer) + value)
+        : undo(buffer);
+    case "v":
+    case "V":
+      return buffer.mode.kind === "visual"
+        ? enterNormalMode(buffer)
+        : enterVisualMode(buffer);
+    case ":":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : {
+            ...buffer,
+            mode: { kind: "command", prompt: ":", input: "" },
+            selection: { kind: "none" },
+            pending: { kind: "none" },
+            status: { kind: "none" },
+          };
+    case "/":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : {
+            ...buffer,
+            mode: { kind: "command", prompt: "/", input: "" },
+            selection: { kind: "none" },
+            pending: { kind: "none" },
+            status: { kind: "none" },
+          };
+    case "n":
+      return moveToSearchMatch(buffer, "forward");
+    case "N":
+      return moveToSearchMatch(buffer, "backward");
+    case "i":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : enterInsertMode(buffer, buffer.cursor);
+    case "a":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : insertAfterCursor(buffer);
+    case "I":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : enterInsertMode(buffer, { line: buffer.cursor.line, column: 0 });
+    case "A":
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, value)
+        : insertAtLineEnd(buffer);
+    default:
+      return invalidInput(buffer, pendingSource(buffer) + value);
+  }
+}
+
 export function applyNormalVimKey(
   buffer: VimBuffer,
   key: VimNormalKey,
 ): VimBuffer {
-  if (buffer.mode.kind === "visual") {
-    return applyVisualKey(buffer, key);
+  if (key.kind === "escape") {
+    return buffer.mode.kind === "insert" ||
+      buffer.mode.kind === "command" ||
+      buffer.mode.kind === "visual"
+      ? enterNormalMode(buffer)
+      : resetPending(buffer);
   }
 
-  if (buffer.mode.kind === "insert") {
-    return key.kind === "escape" ? enterNormalMode(buffer) : buffer;
+  if (buffer.mode.kind === "insert" || buffer.mode.kind === "command") {
+    return buffer;
   }
 
-  if (buffer.mode.kind === "command") {
-    return key.kind === "escape" ? enterNormalMode(buffer) : buffer;
-  }
+  if (key.kind === "motion") {
+    if (buffer.pending.kind === "prefix" || buffer.pending.kind === "find") {
+      return invalidInput(buffer, pendingSource(buffer));
+    }
 
-  if (isLineStartKey(buffer, key)) {
-    return handleMotion(buffer, "line-start");
+    return handleMotion(buffer, key.motion, pendingSource(buffer) + key.motion);
   }
 
   switch (key.kind) {
     case "digit":
-      return appendNormalCount(buffer, key.digit);
-    case "motion":
-      return handleMotion(buffer, key.motion);
+      return applyLiteral(buffer, String(key.digit));
     case "operator":
       return handleOperator(buffer, key.operator);
     case "delete-character":
-      return deleteCharacters(buffer);
+      return applyLiteral(buffer, "x");
     case "paste-after":
-      return pasteRegister(buffer, true);
+      return applyLiteral(buffer, "p");
     case "paste-before":
-      return pasteRegister(buffer, false);
+      return applyLiteral(buffer, "P");
     case "undo":
-      return undo(buffer);
+      return applyLiteral(buffer, "u");
     case "redo":
-      return redo(buffer);
+      return buffer.mode.kind === "visual"
+        ? invalidInput(buffer, pendingSource(buffer) + "Ctrl+r")
+        : redo(buffer);
     case "enter-visual-line":
-      return enterVisualMode(buffer);
+      return applyLiteral(buffer, "V");
     case "enter-command":
-      return {
-        ...buffer,
-        mode: { kind: "command", prompt: ":", input: "" },
-        selection: { kind: "none" },
-        pending: { kind: "none" },
-      };
+      return applyLiteral(buffer, ":");
     case "enter-search":
-      return {
-        ...buffer,
-        mode: { kind: "command", prompt: "/", input: "" },
-        selection: { kind: "none" },
-        pending: { kind: "none" },
-      };
+      return applyLiteral(buffer, "/");
     case "search-next":
-      return moveToSearchMatch(buffer, "forward");
+      return applyLiteral(buffer, "n");
     case "search-previous":
-      return moveToSearchMatch(buffer, "backward");
+      return applyLiteral(buffer, "N");
     case "insert-before":
-      return enterInsertMode(buffer, buffer.cursor);
-    case "insert-after": {
-      const text = vimBufferText(buffer);
-      const offset = textOffsetForPosition(buffer.lines, buffer.cursor);
-
-      return enterInsertMode(
-        buffer,
-        positionForTextOffset(
-          buffer.lines,
-          nextUnicodeCursorOffset(text, offset),
-          VimMode.Insert,
-        ),
-      );
-    }
+      return applyLiteral(buffer, "i");
+    case "insert-after":
+      return applyLiteral(buffer, "a");
     case "insert-line-start":
-      return enterInsertMode(buffer, {
-        line: buffer.cursor.line,
-        column: 0,
-      });
-    case "insert-line-end": {
-      const line = buffer.lines[buffer.cursor.line];
-
-      if (line === undefined) {
-        throw new Error("Vim cursor lines must reference existing text.");
-      }
-
-      return enterInsertMode(buffer, {
-        line: buffer.cursor.line,
-        column: line.length,
-      });
-    }
-    case "escape":
-      return enterNormalMode(buffer);
+      return applyLiteral(buffer, "I");
+    case "insert-line-end":
+      return applyLiteral(buffer, "A");
+    case "literal":
+      return applyLiteral(buffer, key.value);
   }
 }
 
@@ -1581,6 +1563,8 @@ export function submitVimCommand(buffer: VimBuffer): VimBuffer {
     selection: { kind: "none" },
     commandEffect,
     pending: { kind: "none" },
+    status: { kind: "none" },
+    goalColumn: { kind: "none" },
   };
 }
 
@@ -1589,112 +1573,67 @@ export function normalVimKeyFromKeyboard(
   ctrlKey: boolean,
   metaKey: boolean,
 ): VimNormalKeyMatch {
-  if (ctrlKey && !metaKey && key.toLowerCase() === "r") {
-    return { kind: "recognized", key: { kind: "redo" } };
-  }
-
-  if (ctrlKey || metaKey) {
+  if (metaKey) {
     return { kind: "unrecognized" };
   }
 
-  const digit = normalDigits.find((candidate) => String(candidate) === key);
-
-  if (digit !== undefined) {
-    return { kind: "recognized", key: { kind: "digit", digit } };
+  if (ctrlKey) {
+    switch (key.toLowerCase()) {
+      case "h":
+        return { kind: "recognized", key: { kind: "motion", motion: "left" } };
+      case "n":
+        return {
+          kind: "recognized",
+          key: { kind: "motion", motion: "line-next" },
+        };
+      case "p":
+        return {
+          kind: "recognized",
+          key: { kind: "motion", motion: "line-previous" },
+        };
+      case "r":
+        return { kind: "recognized", key: { kind: "redo" } };
+      default:
+        return { kind: "unrecognized" };
+    }
   }
 
   switch (key) {
-    case "h":
     case "ArrowLeft":
+    case "Backspace":
       return { kind: "recognized", key: { kind: "motion", motion: "left" } };
-    case "l":
     case "ArrowRight":
       return { kind: "recognized", key: { kind: "motion", motion: "right" } };
-    case "j":
     case "ArrowDown":
       return {
         kind: "recognized",
         key: { kind: "motion", motion: "line-next" },
       };
-    case "k":
     case "ArrowUp":
       return {
         kind: "recognized",
         key: { kind: "motion", motion: "line-previous" },
       };
-    case "w":
-      return {
-        kind: "recognized",
-        key: { kind: "motion", motion: "word-forward" },
-      };
-    case "b":
-      return {
-        kind: "recognized",
-        key: { kind: "motion", motion: "word-backward" },
-      };
-    case "e":
-      return {
-        kind: "recognized",
-        key: { kind: "motion", motion: "word-end" },
-      };
-    case "g":
     case "Home":
-      return {
-        kind: "recognized",
-        key: { kind: "motion", motion: "document-start" },
-      };
-    case "G":
-      return {
-        kind: "recognized",
-        key: { kind: "motion", motion: "document-end" },
-      };
-    case "0":
       return {
         kind: "recognized",
         key: { kind: "motion", motion: "line-start" },
       };
-    case "$":
     case "End":
       return {
         kind: "recognized",
         key: { kind: "motion", motion: "line-end" },
       };
-    case "d":
-      return { kind: "recognized", key: { kind: "operator", operator: "delete" } };
-    case "c":
-      return { kind: "recognized", key: { kind: "operator", operator: "change" } };
-    case "y":
-      return { kind: "recognized", key: { kind: "operator", operator: "yank" } };
-    case "x":
-      return { kind: "recognized", key: { kind: "delete-character" } };
-    case "p":
-      return { kind: "recognized", key: { kind: "paste-after" } };
-    case "P":
-      return { kind: "recognized", key: { kind: "paste-before" } };
-    case "u":
-      return { kind: "recognized", key: { kind: "undo" } };
-    case "V":
-    case "v":
-      return { kind: "recognized", key: { kind: "enter-visual-line" } };
-    case ":":
-      return { kind: "recognized", key: { kind: "enter-command" } };
-    case "/":
-      return { kind: "recognized", key: { kind: "enter-search" } };
-    case "n":
-      return { kind: "recognized", key: { kind: "search-next" } };
-    case "N":
-      return { kind: "recognized", key: { kind: "search-previous" } };
-    case "i":
-      return { kind: "recognized", key: { kind: "insert-before" } };
-    case "a":
-      return { kind: "recognized", key: { kind: "insert-after" } };
-    case "I":
-      return { kind: "recognized", key: { kind: "insert-line-start" } };
-    case "A":
-      return { kind: "recognized", key: { kind: "insert-line-end" } };
+    case "Enter":
+      return {
+        kind: "recognized",
+        key: { kind: "motion", motion: "line-next-first-nonblank" },
+      };
     case "Escape":
       return { kind: "recognized", key: { kind: "escape" } };
     default:
-      return { kind: "unrecognized" };
+      return Array.from(key).length === 1
+        ? { kind: "recognized", key: { kind: "literal", value: key } }
+        : { kind: "unrecognized" };
   }
 }

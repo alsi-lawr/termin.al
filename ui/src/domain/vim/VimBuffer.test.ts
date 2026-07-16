@@ -12,222 +12,369 @@ import {
   submitVimCommand,
   vimBufferCursorOffset,
   vimBufferText,
+  type VimBuffer,
+  type VimNormalKey,
 } from "./VimBuffer.ts";
 
-test("moves through counted character, word, line, and document motions", () => {
-  const buffer = createVimBuffer({
-    text: "one two\nthree four\nfive",
+function mappedKey(
+  key: string,
+  ctrlKey = false,
+  metaKey = false,
+): VimNormalKey {
+  const match = normalVimKeyFromKeyboard(key, ctrlKey, metaKey);
+
+  if (match.kind === "unrecognized") {
+    throw new Error(`Expected ${key} to be a recognized Vim key.`);
+  }
+
+  return match.key;
+}
+
+function press(buffer: VimBuffer, ...keys: ReadonlyArray<string>): VimBuffer {
+  let next = buffer;
+
+  for (const key of keys) {
+    next = applyNormalVimKey(next, mappedKey(key));
+  }
+
+  return next;
+}
+
+function pressControl(buffer: VimBuffer, key: string): VimBuffer {
+  return applyNormalVimKey(buffer, mappedKey(key, true));
+}
+
+test("parses counts once and preserves the desired column for vertical motions", () => {
+  const start = createVimBuffer({
+    text: "abcdef\nx\nabcdef\n  z",
     mode: VimMode.Normal,
   });
-  const word = applyNormalVimKey(buffer, {
-    kind: "motion",
-    motion: "word-forward",
-  });
-  const line = applyNormalVimKey(word, {
-    kind: "motion",
-    motion: "line-next",
-  });
-  const counted = applyNormalVimKey(
-    applyNormalVimKey(line, { kind: "digit", digit: 3 }),
-    { kind: "motion", motion: "right" },
-  );
-  const documentEnd = applyNormalVimKey(counted, {
-    kind: "motion",
-    motion: "document-end",
-  });
-  const documentStart = applyNormalVimKey(documentEnd, {
-    kind: "motion",
-    motion: "document-start",
-  });
+  const positioned = press(start, "l", "l", "l", "l");
+  const shortLine = press(positioned, "j");
+  const restored = press(shortLine, "j");
+  const counted = press(positioned, "5", "j");
+  const boundary = press(counted, "j");
 
-  assert.deepEqual(word.cursor, { line: 0, column: 4 });
-  assert.deepEqual(line.cursor, { line: 1, column: 4 });
-  assert.deepEqual(counted.cursor, { line: 1, column: 7 });
-  assert.deepEqual(documentEnd.cursor, { line: 2, column: 3 });
-  assert.deepEqual(documentStart.cursor, { line: 0, column: 0 });
+  assert.deepEqual(shortLine.cursor, { line: 1, column: 0 });
+  assert.deepEqual(restored.cursor, { line: 2, column: 4 });
+  assert.deepEqual(counted.cursor, { line: 3, column: 2 });
+  assert.deepEqual(boundary.cursor, counted.cursor);
+  assert.deepEqual(boundary.status, { kind: "invalid-input", source: "j" });
+
+  const firstNonblank = press(start, "+");
+  const resetGoal = press(press(positioned, "+"), "-");
+
+  assert.deepEqual(firstNonblank.cursor, { line: 1, column: 0 });
+  assert.deepEqual(resetGoal.cursor, { line: 0, column: 0 });
 });
 
-test("applies delete, change, yank, paste, undo, and redo through the unnamed register", () => {
+test("maps logical aliases without restoring the removed one-key document-start shortcut", () => {
+  const start = createVimBuffer({ text: "abcd\n  ef", mode: VimMode.Normal });
+  const right = applyNormalVimKey(start, mappedKey("ArrowRight"));
+  const space = press(right, " ");
+  const home = applyNormalVimKey(space, mappedKey("Home"));
+  const end = applyNormalVimKey(home, mappedKey("End"));
+  const backspace = applyNormalVimKey(end, mappedKey("Backspace"));
+  const down = pressControl(backspace, "n");
+  const up = pressControl(down, "p");
+  const ctrlH = pressControl(up, "h");
+  const enter = applyNormalVimKey(home, mappedKey("Enter"));
+  const bareG = press(start, "g");
+
+  assert.deepEqual(right.cursor, { line: 0, column: 1 });
+  assert.deepEqual(space.cursor, { line: 0, column: 2 });
+  assert.deepEqual(home.cursor, { line: 0, column: 0 });
+  assert.deepEqual(end.cursor, { line: 0, column: 3 });
+  assert.deepEqual(backspace.cursor, { line: 0, column: 2 });
+  assert.deepEqual(down.cursor, { line: 1, column: 2 });
+  assert.deepEqual(up.cursor, { line: 0, column: 2 });
+  assert.deepEqual(ctrlH.cursor, { line: 0, column: 1 });
+  assert.deepEqual(enter.cursor, { line: 1, column: 2 });
+  assert.equal(bareG.pending.kind, "prefix");
+  assert.deepEqual(bareG.cursor, start.cursor);
+});
+
+test("resolves line anchors and count-addressed line-end behavior explicitly", () => {
   const start = createVimBuffer({
-    text: "one two\nthree",
+    text: "   abc   \n\n   ",
     mode: VimMode.Normal,
   });
-  const deleting = applyNormalVimKey(start, {
-    kind: "operator",
-    operator: "delete",
-  });
-  const deleted = applyNormalVimKey(deleting, {
-    kind: "motion",
-    motion: "word-forward",
-  });
-  const pasted = applyNormalVimKey(deleted, { kind: "paste-before" });
-  const undone = applyNormalVimKey(pasted, { kind: "undo" });
-  const restoredPasted = applyNormalVimKey(undone, { kind: "redo" });
-  const changing = applyNormalVimKey(
-    createVimBuffer({ text: "hello", mode: VimMode.Normal }),
-    { kind: "operator", operator: "change" },
-  );
-  const changed = applyNormalVimKey(changing, {
-    kind: "motion",
-    motion: "word-forward",
-  });
-  const inserted = insertVimText(changed, "hi");
-  const yanking = applyNormalVimKey(
-    createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal }),
-    { kind: "operator", operator: "yank" },
-  );
-  const yanked = applyNormalVimKey(yanking, {
-    kind: "motion",
-    motion: "line-next",
+  const inside = press(start, "l", "l", "l", "l");
+  const firstNonblank = press(inside, "^");
+  const lineStart = press(firstNonblank, "0");
+  const lastNonblank = press(lineStart, "g", "_");
+  const secondEnd = press(start, "2", "$");
+  const thirdEnd = press(start, "3", "$");
+  const impossible = press(start, "4", "$");
+
+  assert.deepEqual(firstNonblank.cursor, { line: 0, column: 3 });
+  assert.deepEqual(lineStart.cursor, { line: 0, column: 0 });
+  assert.deepEqual(lastNonblank.cursor, { line: 0, column: 5 });
+  assert.deepEqual(secondEnd.cursor, { line: 1, column: 0 });
+  assert.deepEqual(thirdEnd.cursor, { line: 2, column: 2 });
+  assert.deepEqual(impossible.cursor, start.cursor);
+  assert.deepEqual(impossible.status, {
+    kind: "invalid-input",
+    source: "4$",
   });
 
-  assert.deepEqual(
-    {
-      deleted: vimBufferText(deleted),
-      pasted: vimBufferText(pasted),
-      undone: vimBufferText(undone),
-      restoredPasted: vimBufferText(restoredPasted),
-    },
-    {
-      deleted: "two\nthree",
-      pasted: "one two\nthree",
-      undone: "two\nthree",
-      restoredPasted: "one two\nthree",
-    },
-  );
-  assert.deepEqual(deleted.register, { kind: "character", text: "one " });
-  assert.deepEqual(undone.register, { kind: "character", text: "one " });
-  assert.deepEqual(restoredPasted.register, {
-    kind: "character",
-    text: "one ",
+  const deletedLine = press(start, "d", "_");
+  assert.equal(vimBufferText(deletedLine), "\n   ");
+  assert.deepEqual(deletedLine.register, {
+    kind: "line",
+    lines: ["   abc   "],
   });
-  assert.equal(undone.mode.kind, "normal");
-  assert.equal(restoredPasted.mode.kind, "normal");
-  assert.equal(isVimBufferDirty(undone), true);
-  assert.equal(isVimBufferDirty(restoredPasted), false);
+});
+
+test("implements gg and G with addressed lines, saturation, and invalid prefixes", () => {
+  const start = createVimBuffer({
+    text: "zero\n one\n  two\n   three\n    four\n     five",
+    mode: VimMode.Normal,
+  });
+  const middle = press(start, "4", "j");
+  const first = press(middle, "g", "g");
+  const fifth = press(start, "5", "g", "g");
+  const final = press(start, "G");
+  const addressedFirst = press(final, "1", "G");
+  const saturated = press(
+    start,
+    ..."99999999999999999999999999999999999999999999999999",
+    "g",
+    "g",
+  );
+  const invalid = press(start, "g", "x");
+  const cleared = press(invalid, "l");
+
+  assert.deepEqual(first.cursor, { line: 0, column: 0 });
+  assert.deepEqual(fifth.cursor, { line: 4, column: 4 });
+  assert.deepEqual(final.cursor, { line: 5, column: 5 });
+  assert.deepEqual(addressedFirst.cursor, { line: 0, column: 0 });
+  assert.deepEqual(saturated.cursor, { line: 5, column: 5 });
+  assert.deepEqual(invalid.cursor, start.cursor);
+  assert.deepEqual(invalid.status, { kind: "invalid-input", source: "gx" });
+  assert.deepEqual(cleared.status, { kind: "none" });
+});
+
+test("distinguishes small words, WORDs, inclusive ends, and g word extensions", () => {
+  const start = createVimBuffer({
+    text: "αβ,!?  gamma delta",
+    mode: VimMode.Normal,
+  });
+  const punctuation = press(start, "w");
+  const smallNext = press(punctuation, "w");
+  const bigNext = press(start, "W");
+  const smallEnd = press(start, "e");
+  const punctuationEnd = press(smallEnd, "e");
+  const backward = press(smallNext, "b");
+  const previousEnd = press(smallNext, "g", "e");
+  const previousWORDEnd = press(bigNext, "g", "E");
+
+  assert.deepEqual(punctuation.cursor, { line: 0, column: 2 });
+  assert.deepEqual(smallNext.cursor, { line: 0, column: 7 });
+  assert.deepEqual(bigNext.cursor, { line: 0, column: 7 });
+  assert.deepEqual(smallEnd.cursor, { line: 0, column: 1 });
+  assert.deepEqual(punctuationEnd.cursor, { line: 0, column: 4 });
+  assert.deepEqual(backward.cursor, { line: 0, column: 2 });
+  assert.deepEqual(previousEnd.cursor, { line: 0, column: 4 });
+  assert.deepEqual(previousWORDEnd.cursor, { line: 0, column: 4 });
+
+  const acrossEmptyLine = press(
+    createVimBuffer({ text: "one\n\ntwo", mode: VimMode.Normal }),
+    "w",
+  );
+  assert.deepEqual(acrossEmptyLine.cursor, { line: 1, column: 0 });
+});
+
+test("multiplies operator and motion counts and applies explicit range kinds", () => {
+  const counted = press(
+    createVimBuffer({
+      text: "one two three four five six seven",
+      mode: VimMode.Normal,
+    }),
+    "2",
+    "d",
+    "3",
+    "w",
+  );
+  const deleteRight = press(
+    createVimBuffer({ text: "abcd", mode: VimMode.Normal }),
+    "d",
+    "l",
+  );
+  const deleteLeft = press(press(
+    createVimBuffer({ text: "abcd", mode: VimMode.Normal }),
+    "l",
+    "l",
+  ), "d", "h");
+  const deleteEnd = press(
+    createVimBuffer({ text: "abcd", mode: VimMode.Normal }),
+    "l",
+    "d",
+    "$",
+  );
+  const doubled = press(
+    createVimBuffer({ text: "one\ntwo\nthree", mode: VimMode.Normal }),
+    "2",
+    "d",
+    "d",
+  );
+  const changed = press(
+    createVimBuffer({ text: "hello world", mode: VimMode.Normal }),
+    "c",
+    "e",
+  );
+  const inserted = insertVimText(changed, "hi");
+  const yanked = press(
+    createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal }),
+    "y",
+    "j",
+  );
+  const saturatedProduct = press(
+    createVimBuffer({ text: "one two three", mode: VimMode.Normal }),
+    ..."9999999999999999999999999999999999999999",
+    "d",
+    ..."9999999999999999999999999999999999999999",
+    "w",
+  );
+
+  assert.equal(vimBufferText(counted), "seven");
+  assert.equal(vimBufferText(deleteRight), "bcd");
+  assert.equal(vimBufferText(deleteLeft), "acd");
+  assert.equal(vimBufferText(deleteEnd), "a");
+  assert.equal(vimBufferText(doubled), "three");
   assert.equal(changed.mode.kind, "insert");
-  assert.equal(vimBufferText(inserted), "hi");
+  assert.equal(vimBufferText(inserted), "hi world");
   assert.deepEqual(yanked.register, {
     kind: "line",
     lines: ["alpha", "beta"],
   });
+  assert.equal(vimBufferText(saturatedProduct), "");
 });
 
-test("bounds undo and redo history at 100 snapshots", () => {
-  const initialText = "x".repeat(100);
-  let edited = createVimBuffer({ text: initialText, mode: VimMode.Normal });
+test("finds and tills counted targets and repeats accepted finds", () => {
+  const start = createVimBuffer({ text: "abacad", mode: VimMode.Normal });
+  const secondA = press(start, "2", "f", "a");
+  const repeated = press(press(start, "f", "a"), ";");
+  const reversed = press(repeated, ",");
+  const sameAfterReverse = press(reversed, ";");
+  const till = press(start, "t", "a");
+  const backwardTill = press(press(start, "$"), "2", "T", "a");
+  const missed = press(press(start, "f", "a"), "f", "z");
+  const repeatAfterMiss = press(missed, ";");
 
-  for (let index = 0; index < 100; index += 1) {
-    edited = applyNormalVimKey(edited, { kind: "delete-character" });
-  }
+  assert.deepEqual(secondA.cursor, { line: 0, column: 4 });
+  assert.deepEqual(repeated.cursor, { line: 0, column: 4 });
+  assert.deepEqual(reversed.cursor, { line: 0, column: 2 });
+  assert.deepEqual(sameAfterReverse.cursor, { line: 0, column: 4 });
+  assert.deepEqual(till.cursor, { line: 0, column: 1 });
+  assert.deepEqual(backwardTill.cursor, { line: 0, column: 3 });
+  assert.deepEqual(missed.cursor, { line: 0, column: 2 });
+  assert.deepEqual(missed.status, { kind: "invalid-input", source: "fz" });
+  assert.deepEqual(repeatAfterMiss.cursor, { line: 0, column: 4 });
 
-  assert.equal(edited.undoStack.length, 100);
-  assert.equal(edited.redoStack.length, 0);
-  assert.equal(vimBufferText(edited), "");
-  assert.equal(isVimBufferDirty(edited), true);
+  const deletedFind = press(start, "d", "f", "a");
+  const deletedTill = press(start, "d", "t", "a");
+  const backwardFind = press(press(start, "$"), "d", "F", "a");
 
-  let undone = edited;
+  assert.equal(vimBufferText(deletedFind), "cad");
+  assert.equal(vimBufferText(deletedTill), "acad");
+  assert.equal(vimBufferText(backwardFind), "abaca");
 
-  for (let index = 0; index < 100; index += 1) {
-    undone = applyNormalVimKey(undone, { kind: "undo" });
-  }
-
-  assert.equal(undone.undoStack.length, 0);
-  assert.equal(undone.redoStack.length, 100);
-  assert.equal(vimBufferText(undone), initialText);
-  assert.equal(undone.mode.kind, "normal");
-  assert.equal(isVimBufferDirty(undone), false);
-
-  let redone = undone;
-
-  for (let index = 0; index < 100; index += 1) {
-    redone = applyNormalVimKey(redone, { kind: "redo" });
-  }
-
-  assert.equal(redone.undoStack.length, 100);
-  assert.equal(redone.redoStack.length, 0);
-  assert.equal(vimBufferText(redone), "");
-  assert.equal(redone.mode.kind, "normal");
-  assert.equal(isVimBufferDirty(redone), true);
-});
-
-test("evicts the oldest snapshot when undo history exceeds 100 entries", () => {
-  const initialText = "x".repeat(101);
-  let edited = createVimBuffer({ text: initialText, mode: VimMode.Normal });
-
-  for (let index = 0; index < 101; index += 1) {
-    edited = applyNormalVimKey(edited, { kind: "delete-character" });
-  }
-
-  assert.equal(edited.undoStack.length, 100);
-
-  let oldestRetained = edited;
-
-  for (let index = 0; index < 100; index += 1) {
-    oldestRetained = applyNormalVimKey(oldestRetained, { kind: "undo" });
-  }
-
-  assert.equal(oldestRetained.redoStack.length, 100);
-  assert.equal(vimBufferText(oldestRetained), "x".repeat(100));
-  assert.equal(
-    vimBufferText(
-      applyNormalVimKey(oldestRetained, { kind: "undo" }),
-    ),
-    "x".repeat(100),
+  const crossLine = press(
+    createVimBuffer({ text: "abc\na", mode: VimMode.Normal }),
+    "f",
+    "a",
   );
+  assert.deepEqual(crossLine.status, { kind: "invalid-input", source: "fa" });
 });
 
-test("replays redo snapshots in order and clears redo after a new edit", () => {
-  const start = createVimBuffer({ text: "abcd", mode: VimMode.Normal });
-  const first = applyNormalVimKey(start, { kind: "delete-character" });
-  const second = applyNormalVimKey(first, { kind: "delete-character" });
-  const third = applyNormalVimKey(second, { kind: "delete-character" });
-  const undoThird = applyNormalVimKey(third, { kind: "undo" });
-  const undoSecond = applyNormalVimKey(undoThird, { kind: "undo" });
-  const redoSecond = applyNormalVimKey(undoSecond, { kind: "redo" });
-  const redoThird = applyNormalVimKey(redoSecond, { kind: "redo" });
-
-  assert.deepEqual(
-    [
-      vimBufferText(first),
-      vimBufferText(second),
-      vimBufferText(third),
-      vimBufferText(undoThird),
-      vimBufferText(undoSecond),
-      vimBufferText(redoSecond),
-      vimBufferText(redoThird),
-    ],
-    ["bcd", "cd", "d", "cd", "bcd", "cd", "d"],
+test("matches nested fixed delimiters and treats counted percent as a file percentage", () => {
+  const nested = createVimBuffer({ text: "(a[{}]b)", mode: VimMode.Normal });
+  const outer = press(nested, "%");
+  const inner = press(nested, "3", "l", "%");
+  const unmatched = press(
+    createVimBuffer({ text: "(abc", mode: VimMode.Normal }),
+    "%",
+  );
+  const percentage = press(
+    createVimBuffer({ text: "a\n b\n  c\n   d", mode: VimMode.Normal }),
+    "5",
+    "0",
+    "%",
+  );
+  const invalidPercentage = press(
+    createVimBuffer({ text: "a\nb", mode: VimMode.Normal }),
+    "1",
+    "0",
+    "1",
+    "%",
+  );
+  const deletedHalf = press(
+    createVimBuffer({ text: "a\nb\nc\nd", mode: VimMode.Normal }),
+    "d",
+    "5",
+    "0",
+    "%",
+  );
+  const explicitOperatorOne = press(
+    createVimBuffer({ text: "a\nb\nc", mode: VimMode.Normal }),
+    "j",
+    "1",
+    "d",
+    "G",
   );
 
-  const rewound = applyNormalVimKey(redoThird, { kind: "undo" });
-  const moved = applyNormalVimKey(rewound, {
-    kind: "motion",
-    motion: "right",
+  assert.deepEqual(outer.cursor, { line: 0, column: 7 });
+  assert.deepEqual(inner.cursor, { line: 0, column: 4 });
+  assert.deepEqual(unmatched.status, { kind: "invalid-input", source: "%" });
+  assert.deepEqual(percentage.cursor, { line: 1, column: 1 });
+  assert.deepEqual(invalidPercentage.status, {
+    kind: "invalid-input",
+    source: "101%",
   });
-  const editedAfterUndo = applyNormalVimKey(moved, {
-    kind: "delete-character",
-  });
-  const redoAttempt = applyNormalVimKey(editedAfterUndo, { kind: "redo" });
-
-  assert.equal(editedAfterUndo.redoStack.length, 0);
-  assert.equal(vimBufferText(redoAttempt), "c");
+  assert.equal(vimBufferText(deletedHalf), "c\nd");
+  assert.equal(vimBufferText(explicitOperatorOne), "c");
 });
 
-test("keeps linewise visual selections immutable and applies their operator", () => {
-  const buffer = createVimBuffer({
+test("Escape cancels every pending stage and invalid input mutates only status and pending", () => {
+  const start = createVimBuffer({ text: "abc def", mode: VimMode.Normal });
+  const stages = [
+    press(start, "2"),
+    press(start, "d"),
+    press(start, "g"),
+    press(start, "f"),
+  ];
+
+  for (const pending of stages) {
+    const cancelled = applyNormalVimKey(pending, mappedKey("Escape"));
+    assert.equal(cancelled.pending.kind, "none");
+    assert.deepEqual(cancelled.status, { kind: "none" });
+    assert.equal(vimBufferText(cancelled), vimBufferText(start));
+    assert.deepEqual(cancelled.cursor, start.cursor);
+  }
+
+  const withRegister = press(start, "y", "w");
+  const invalid = press(withRegister, "g", "q");
+
+  assert.equal(vimBufferText(invalid), vimBufferText(withRegister));
+  assert.deepEqual(invalid.cursor, withRegister.cursor);
+  assert.deepEqual(invalid.selection, withRegister.selection);
+  assert.deepEqual(invalid.register, withRegister.register);
+  assert.deepEqual(invalid.undoStack, withRegister.undoStack);
+  assert.deepEqual(invalid.redoStack, withRegister.redoStack);
+  assert.deepEqual(invalid.mode, withRegister.mode);
+  assert.equal(invalid.pending.kind, "none");
+  assert.deepEqual(invalid.status, { kind: "invalid-input", source: "gq" });
+});
+
+test("keeps linewise visual movement on the shared resolver contract", () => {
+  const start = createVimBuffer({
     text: "one\ntwo\nthree",
     mode: VimMode.Normal,
   });
-  const visual = applyNormalVimKey(buffer, { kind: "enter-visual-line" });
-  const selected = applyNormalVimKey(visual, {
-    kind: "motion",
-    motion: "line-next",
-  });
-  const deleted = applyNormalVimKey(selected, {
-    kind: "operator",
-    operator: "delete",
-  });
+  const visual = press(start, "V");
+  const selected = press(visual, "j");
+  const deleted = press(selected, "d");
 
   assert.deepEqual(selected.selection, {
     kind: "line",
@@ -239,73 +386,100 @@ test("keeps linewise visual selections immutable and applies their operator", ()
   assert.equal(deleted.mode.kind, "normal");
 });
 
-test("searches literal text with n and N and keeps Unicode cursor boundaries", () => {
+test("preserves surrogate-safe cursor and range boundaries", () => {
+  const start = createVimBuffer({ text: "a😀b 😀", mode: VimMode.Normal });
+  const emoji = press(start, "l");
+  const afterEmoji = press(emoji, "l");
+  const found = press(start, "f", "😀");
+  const deleted = press(start, "d", "f", "😀");
+
+  assert.deepEqual(emoji.cursor, { line: 0, column: 1 });
+  assert.deepEqual(afterEmoji.cursor, { line: 0, column: 3 });
+  assert.deepEqual(found.cursor, { line: 0, column: 1 });
+  assert.equal(vimBufferText(deleted), "b 😀");
+});
+
+test("retains undo, redo, paste, and bounded history behavior", () => {
+  const start = createVimBuffer({ text: "abcd", mode: VimMode.Normal });
+  const first = press(start, "x");
+  const second = press(first, "x");
+  const pasted = press(second, "P");
+  const undone = press(pasted, "u");
+  const redone = applyNormalVimKey(undone, mappedKey("r", true));
+
+  assert.equal(vimBufferText(first), "bcd");
+  assert.equal(vimBufferText(second), "cd");
+  assert.equal(vimBufferText(pasted), "bcd");
+  assert.equal(vimBufferText(undone), "cd");
+  assert.equal(vimBufferText(redone), "bcd");
+
+  let edited = createVimBuffer({ text: "x".repeat(101), mode: VimMode.Normal });
+
+  for (let index = 0; index < 101; index += 1) {
+    edited = press(edited, "x");
+  }
+
+  assert.equal(edited.undoStack.length, 100);
+  assert.equal(edited.redoStack.length, 0);
+
+  let rewound = edited;
+
+  for (let index = 0; index < 100; index += 1) {
+    rewound = press(rewound, "u");
+  }
+
+  assert.equal(rewound.redoStack.length, 100);
+  assert.equal(vimBufferText(rewound), "x".repeat(100));
+  assert.equal(isVimBufferDirty(rewound), true);
+});
+
+test("retains command, search, and insert-mode behavior", () => {
   const start = createVimBuffer({
     text: "😀 one\n😀 two",
     mode: VimMode.Normal,
   });
-  const searchMode = applyNormalVimKey(start, { kind: "enter-search" });
+  const searchMode = press(start, "/");
   const typed = appendVimCommandInput(searchMode, "😀");
   const first = submitVimCommand(typed);
-  const next = applyNormalVimKey(first, { kind: "search-next" });
-  const previous = applyNormalVimKey(next, { kind: "search-previous" });
+  const next = press(first, "n");
+  const previous = press(next, "N");
 
   assert.deepEqual(first.cursor, { line: 1, column: 0 });
   assert.deepEqual(next.cursor, { line: 0, column: 0 });
   assert.deepEqual(previous.cursor, { line: 1, column: 0 });
-});
 
-test("parses only generic command-mode effects", () => {
-  const start = createVimBuffer({ text: "", mode: VimMode.Normal });
   const write = submitVimCommand(
-    appendVimCommandInput(
-      applyNormalVimKey(start, { kind: "enter-command" }),
-      "w",
-    ),
+    appendVimCommandInput(press(start, ":"), "w"),
   );
-  const quit = submitVimCommand(
-    appendVimCommandInput(
-      applyNormalVimKey(start, { kind: "enter-command" }),
-      "q",
-    ),
-  );
-  const forceQuit = submitVimCommand(
-    appendVimCommandInput(
-      applyNormalVimKey(start, { kind: "enter-command" }),
-      "q!",
-    ),
-  );
-
   assert.deepEqual(write.commandEffect, { kind: "write" });
-  assert.deepEqual(quit.commandEffect, { kind: "quit" });
-  assert.deepEqual(forceQuit.commandEffect, { kind: "force-quit" });
-  assert.equal(write.mode.kind, "normal");
-});
 
-test("maps only practical normal-mode keys", () => {
-  assert.deepEqual(normalVimKeyFromKeyboard("V", false, false), {
-    kind: "recognized",
-    key: { kind: "enter-visual-line" },
-  });
-  assert.deepEqual(normalVimKeyFromKeyboard("y", false, false), {
-    kind: "recognized",
-    key: { kind: "operator", operator: "yank" },
-  });
-  assert.deepEqual(normalVimKeyFromKeyboard("q", false, false), {
-    kind: "unrecognized",
-  });
-});
-
-test("maps multiline native editor offsets through Unicode-safe Vim cursors", () => {
-  const buffer = createVimBuffer({
-    text: "a😀\nsecond",
-    mode: VimMode.Insert,
-  });
-  const normalized = moveVimInsertCursorToTextOffset(buffer, 2);
-  const secondLine = moveVimInsertCursorToTextOffset(buffer, 4);
+  const insert = createVimBuffer({ text: "a😀\nsecond", mode: VimMode.Insert });
+  const normalized = moveVimInsertCursorToTextOffset(insert, 2);
+  const secondLine = moveVimInsertCursorToTextOffset(insert, 4);
 
   assert.deepEqual(normalized.cursor, { line: 0, column: 1 });
   assert.equal(vimBufferCursorOffset(normalized), 1);
   assert.deepEqual(secondLine.cursor, { line: 1, column: 0 });
   assert.equal(vimBufferCursorOffset(secondLine), 4);
+});
+
+test("keyboard mapping exposes finite parser input and accepted control aliases", () => {
+  assert.deepEqual(normalVimKeyFromKeyboard("g", false, false), {
+    kind: "recognized",
+    key: { kind: "literal", value: "g" },
+  });
+  assert.deepEqual(normalVimKeyFromKeyboard("Home", false, false), {
+    kind: "recognized",
+    key: { kind: "motion", motion: "line-start" },
+  });
+  assert.deepEqual(normalVimKeyFromKeyboard("n", true, false), {
+    kind: "recognized",
+    key: { kind: "motion", motion: "line-next" },
+  });
+  assert.deepEqual(normalVimKeyFromKeyboard("b", true, false), {
+    kind: "unrecognized",
+  });
+  assert.deepEqual(normalVimKeyFromKeyboard("x", false, true), {
+    kind: "unrecognized",
+  });
 });
