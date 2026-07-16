@@ -34,11 +34,21 @@ function applyLoadResult(
   state: WorkspaceStatsState,
   result: StatsLoadResult,
 ): WorkspaceStatsState {
-  if (result.kind === "available") {
-    return "snapshot" in state ? state : workspaceStatsFromSnapshot(result.snapshot);
+  if (result.kind !== "available") {
+    return state.kind === "loading" ? { kind: "unavailable" } : state;
   }
 
-  return state.kind === "loading" ? { kind: "unavailable" } : state;
+  switch (state.kind) {
+    case "loading":
+    case "unavailable":
+    case "reconnecting":
+      return { kind: "reconnecting", snapshot: result.snapshot };
+    case "stale":
+      return { kind: "stale", snapshot: result.snapshot };
+    case "live":
+    case "no-data":
+      return state;
+  }
 }
 
 function applyStreamEvent(
@@ -88,9 +98,21 @@ function applyRecordResult(
   state: WorkspaceStatsState,
   result: StatsRecordResult,
 ): WorkspaceStatsState {
-  return result.kind === "recorded"
-    ? workspaceStatsFromSnapshot(result.snapshot)
-    : state;
+  if (result.kind !== "recorded") {
+    return state;
+  }
+
+  switch (state.kind) {
+    case "loading":
+    case "unavailable":
+    case "reconnecting":
+      return { kind: "reconnecting", snapshot: result.snapshot };
+    case "stale":
+      return { kind: "stale", snapshot: result.snapshot };
+    case "live":
+    case "no-data":
+      return workspaceStatsFromSnapshot(result.snapshot);
+  }
 }
 
 export function createWorkspaceAcceptedOpenRecorder(

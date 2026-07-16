@@ -80,6 +80,11 @@ const readOnlySnapshot = snapshot({
   counts: [{ id: "about", views: 3 }],
   storageState: "read-only",
 });
+const recordedSnapshot = snapshot({
+  totalSessions: 4,
+  counts: [{ id: "about", views: 5 }],
+  storageState: "writable",
+});
 
 test("presents live, reconnecting, stale, no-data, loading, and unavailable states", () => {
   const live = workspaceStatsFromSnapshot(liveSnapshot);
@@ -131,6 +136,167 @@ test("formats current UTC, sorted content, no-data, stale, and unavailable comma
     formatPortfolioStats({ kind: "unavailable" }, currentDate),
     "STATISTICS\nSTATUS       UNAVAILABLE",
   );
+});
+
+test("retains HTTP-first non-zero, zero, and read-only snapshots as reconnecting until valid SSE", async () => {
+  const scenarios = [
+    { snapshot: liveSnapshot, expectedStreamState: "live" },
+    { snapshot: zeroSnapshot, expectedStreamState: "no-data" },
+    { snapshot: readOnlySnapshot, expectedStreamState: "stale" },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    let listener: (event: StatsStreamEvent) => void = () => undefined;
+    const client: StatsClient = {
+      loadSnapshot: () => Promise.resolve({
+        kind: "available",
+        snapshot: scenario.snapshot,
+      }),
+      recordView: () => Promise.resolve({
+        kind: "recorded",
+        snapshot: scenario.snapshot,
+      }),
+      subscribe: (nextListener) => {
+        listener = nextListener;
+        return { close: () => undefined };
+      },
+    };
+    let state: WorkspaceStatsState = { kind: "loading" };
+    const dispatch = (
+      transition: (current: WorkspaceStatsState) => WorkspaceStatsState,
+    ): void => {
+      state = transition(state);
+    };
+    const currentState = (): WorkspaceStatsState => state;
+    const cleanup = connectWorkspaceStats(client, dispatch);
+
+    await Promise.resolve();
+    const afterHttp = currentState();
+    assert.equal(afterHttp.kind, "reconnecting");
+    if (afterHttp.kind === "reconnecting") {
+      assert.strictEqual(afterHttp.snapshot, scenario.snapshot);
+      assert.equal(
+        workspaceStatsStatus(afterHttp).totalPageViews,
+        scenario.snapshot.totalPageViews,
+      );
+    }
+
+    listener({ kind: "snapshot", snapshot: scenario.snapshot });
+    assert.equal(currentState().kind, scenario.expectedStreamState);
+    cleanup();
+  }
+});
+
+test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP failure", async () => {
+  const scenarios = [
+    { snapshot: liveSnapshot, loadResult: { kind: "failed", message: "failed" }, expected: "live" },
+    { snapshot: zeroSnapshot, loadResult: { kind: "unavailable" }, expected: "no-data" },
+    { snapshot: readOnlySnapshot, loadResult: { kind: "failed", message: "failed" }, expected: "stale" },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    let listener: (event: StatsStreamEvent) => void = () => undefined;
+    let resolveLoad: (result: StatsLoadResult) => void = () => undefined;
+    const loadResult = new Promise<StatsLoadResult>((resolve) => {
+      resolveLoad = resolve;
+    });
+    const client: StatsClient = {
+      loadSnapshot: () => loadResult,
+      recordView: () => Promise.resolve({
+        kind: "recorded",
+        snapshot: scenario.snapshot,
+      }),
+      subscribe: (nextListener) => {
+        listener = nextListener;
+        return { close: () => undefined };
+      },
+    };
+    let state: WorkspaceStatsState = { kind: "loading" };
+    const dispatch = (
+      transition: (current: WorkspaceStatsState) => WorkspaceStatsState,
+    ): void => {
+      state = transition(state);
+    };
+    const currentState = (): WorkspaceStatsState => state;
+    const cleanup = connectWorkspaceStats(client, dispatch);
+
+    listener({ kind: "snapshot", snapshot: scenario.snapshot });
+    assert.equal(currentState().kind, scenario.expected);
+    resolveLoad(scenario.loadResult);
+    await Promise.resolve();
+    const afterFailure = currentState();
+    assert.equal(afterFailure.kind, scenario.expected);
+    if ("snapshot" in afterFailure) {
+      assert.strictEqual(afterFailure.snapshot, scenario.snapshot);
+    }
+    cleanup();
+  }
+});
+
+test("record responses update retained data without promoting reconnecting or stale lifecycle", async () => {
+  const client: StatsClient = {
+    loadSnapshot: () => Promise.resolve({ kind: "available", snapshot: liveSnapshot }),
+    recordView: () => Promise.resolve({
+      kind: "recorded",
+      snapshot: recordedSnapshot,
+    }),
+    subscribe: () => ({ close: () => undefined }),
+  };
+  const signal = new AbortController().signal;
+  let reconnecting: WorkspaceStatsState = {
+    kind: "reconnecting",
+    snapshot: liveSnapshot,
+  };
+  const reconnectingRecorder = createWorkspaceAcceptedOpenRecorder(
+    client,
+    () => signal,
+    (transition) => {
+      reconnecting = transition(reconnecting);
+    },
+  );
+  let stale: WorkspaceStatsState = {
+    kind: "stale",
+    snapshot: readOnlySnapshot,
+  };
+  const staleRecorder = createWorkspaceAcceptedOpenRecorder(
+    client,
+    () => signal,
+    (transition) => {
+      stale = transition(stale);
+    },
+  );
+  const zeroClient: StatsClient = {
+    ...client,
+    recordView: () => Promise.resolve({
+      kind: "recorded",
+      snapshot: zeroSnapshot,
+    }),
+  };
+  let live: WorkspaceStatsState = {
+    kind: "live",
+    snapshot: liveSnapshot,
+  };
+  const liveRecorder = createWorkspaceAcceptedOpenRecorder(
+    zeroClient,
+    () => signal,
+    (transition) => {
+      live = transition(live);
+    },
+  );
+  const currentLive = (): WorkspaceStatsState => live;
+
+  reconnectingRecorder(contentId("about"));
+  staleRecorder(contentId("note"));
+  liveRecorder(contentId("zeta"));
+  await Promise.resolve();
+
+  assert.equal(reconnecting.kind, "reconnecting");
+  assert.equal(stale.kind, "stale");
+  assert.equal(currentLive().kind, "no-data");
+  if (reconnecting.kind === "reconnecting" && stale.kind === "stale") {
+    assert.strictEqual(reconnecting.snapshot, recordedSnapshot);
+    assert.strictEqual(stale.snapshot, recordedSnapshot);
+  }
 });
 
 test("owns one stream lifecycle, retains snapshots through disconnects, and recovers", async () => {
@@ -207,6 +373,7 @@ test("deduplicates workspace-local accepted content IDs before recording", async
   const dispatch = (transition: (current: WorkspaceStatsState) => WorkspaceStatsState): void => {
     state = transition(state);
   };
+  const currentState = (): WorkspaceStatsState => state;
   const recorder = createWorkspaceAcceptedOpenRecorder(
     client,
     () => new AbortController().signal,
@@ -219,5 +386,9 @@ test("deduplicates workspace-local accepted content IDs before recording", async
   await Promise.resolve();
 
   assert.deepEqual(recorded, ["about", "note"]);
-  assert.equal(state.kind, "live");
+  const afterRecords = currentState();
+  assert.equal(afterRecords.kind, "reconnecting");
+  if (afterRecords.kind === "reconnecting") {
+    assert.strictEqual(afterRecords.snapshot, liveSnapshot);
+  }
 });
