@@ -9,10 +9,7 @@ import {
 import {
   viewerTitle,
   type ViewerContent,
-  type ViewerProjectCard,
-  type ViewerPublicationEntry,
 } from "../../content/ViewerContent.ts";
-import type { MarkdownDocument } from "../../content/MarkdownDocument.ts";
 import {
   MarkdownRenderer,
   markdownBlockCount,
@@ -48,6 +45,22 @@ import {
   type MarkdownViewerSearch,
 } from "./MarkdownViewerSearch.ts";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
+import {
+  beginCollectionSelectorFilter,
+  collectionSelectorBrowseOperationFromKey,
+  createCollectionSelectorState,
+  leaveCollectionSelectorFilter,
+  moveCollectionSelectorSelection,
+  type CollectionSelectorOperation,
+  type CollectionSelectorState,
+} from "./CollectionSelector.ts";
+import { CollectionViewerSelector } from "./CollectionViewerSelector.tsx";
+import {
+  collectionSelectorItemsForViewer,
+  selectedCollectionViewerDocument,
+  type CollectionViewerContent,
+  type CollectionViewerDocument,
+} from "./CollectionViewerSelectorModel.ts";
 import { handleViewerPaneKeyInput } from "./ViewerPaneKeyHandler.ts";
 
 type ViewerPaneProps = Readonly<{
@@ -66,194 +79,6 @@ type ViewerPaneProps = Readonly<{
   ) => MobileCtrlInputResolution;
   onClose?: () => void;
 }>;
-
-type OpenedViewerDocument = Readonly<{
-  title: string;
-  document: MarkdownDocument;
-}>;
-
-type ProjectIcon = Readonly<{
-  glyph: string;
-  label: string;
-}>;
-
-function generatedProjectGlyph(name: string): string {
-  const initials = name
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((part) => part.length > 0)
-    .slice(0, 2)
-    .map((part) => part[0]?.toLocaleUpperCase() ?? "")
-    .join("");
-
-  return initials.length === 0 ? "◇" : initials;
-}
-
-function projectIcon(project: ViewerProjectCard): ProjectIcon {
-  const tags = new Set(project.tags.map((tag) => tag.toLocaleLowerCase()));
-
-  if (tags.has("fsharp")) {
-    return { glyph: "λ", label: "F#" };
-  }
-
-  if (tags.has("typescript")) {
-    return { glyph: "TS", label: "TypeScript" };
-  }
-
-  if (tags.has("react")) {
-    return { glyph: "⚛", label: "React" };
-  }
-
-  if (tags.has("nix")) {
-    return { glyph: "❄", label: "Nix" };
-  }
-
-  return {
-    glyph: generatedProjectGlyph(project.name),
-    label: `${project.name} generated`,
-  };
-}
-
-function ProjectGallery({
-  projects,
-  onOpen,
-}: Readonly<{
-  projects: ReadonlyArray<ViewerProjectCard>;
-  onOpen: (document: OpenedViewerDocument) => void;
-}>): ReactElement {
-  if (projects.length === 0) {
-    return (
-      <p className="mt-3 text-text-muted" role="status">
-        No public projects are available.
-      </p>
-    );
-  }
-
-  return (
-    <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-      {projects.map((project) => {
-        const icon = projectIcon(project);
-
-        return (
-          <article
-            key={project.id}
-            className="flex min-w-0 flex-col rounded-md border border-surface-border bg-surface-raised p-3"
-          >
-            <div className="flex items-start gap-3">
-              <span
-                className="flex size-10 shrink-0 items-center justify-center rounded border border-ui-subtle bg-surface-deepest font-semibold text-ui-accent"
-                aria-label={`${icon.label} project icon`}
-              >
-                {icon.glyph}
-              </span>
-              <div className="min-w-0">
-                <h3 className="font-semibold text-text-bright">{project.name}</h3>
-                <p className="wrap-break-words text-xs text-text-muted">
-                  {project.repository}
-                </p>
-              </div>
-            </div>
-            <p className="mt-3 flex-1 text-text-primary">{project.summary}</p>
-            {project.tags.length === 0 ? null : (
-              <ul className="mt-3 flex flex-wrap gap-1" aria-label="Project tags">
-                {project.tags.map((tag) => (
-                  <li
-                    key={tag}
-                    className="rounded border border-ui-subtle px-1.5 py-0.5 text-xs text-text-muted"
-                  >
-                    #{tag}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded border border-ui-accent px-2 py-1 text-text-bright hover:bg-surface-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
-                onClick={() => {
-                  onOpen({ title: `${project.name} README`, document: project.document });
-                }}
-              >
-                Open README
-              </button>
-              {project.repositoryUrl === undefined ? null : (
-                <a
-                  className="rounded border border-surface-border px-2 py-1 text-text-bright hover:border-ui-accent hover:text-ui-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
-                  href={project.repositoryUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Repository ↗
-                </a>
-              )}
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
-function PublicationList({
-  publicationKind,
-  entries,
-  onOpen,
-}: Readonly<{
-  publicationKind: "blog" | "notes";
-  entries: ReadonlyArray<ViewerPublicationEntry>;
-  onOpen: (document: OpenedViewerDocument) => void;
-}>): ReactElement {
-  if (entries.length === 0) {
-    return (
-      <p className="mt-3 text-text-muted" role="status">
-        {publicationKind === "blog"
-          ? "No blog posts are published."
-          : "No public notes are published."}
-      </p>
-    );
-  }
-
-  return (
-    <ol className="mt-3 space-y-3">
-      {entries.map((entry) => (
-        <li key={entry.id}>
-          <article className="rounded-md border border-surface-border bg-surface-raised p-3">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h3 className="font-semibold text-text-bright">{entry.title}</h3>
-              <time className="text-xs text-text-muted" dateTime={entry.publishedAt}>
-                {entry.publishedAt.slice(0, 10)}
-              </time>
-            </div>
-            <p className="mt-2 text-text-primary">{entry.summary}</p>
-            {entry.tags.length === 0 ? null : (
-              <ul
-                className="mt-3 flex flex-wrap gap-1"
-                aria-label={`${entry.title} tags`}
-              >
-                {entry.tags.map((tag) => (
-                  <li
-                    key={tag}
-                    className="rounded border border-ui-subtle px-1.5 py-0.5 text-xs text-text-muted"
-                  >
-                    #{tag}
-                  </li>
-                ))}
-              </ul>
-            )}
-            <button
-              type="button"
-              className="mt-3 rounded border border-ui-accent px-2 py-1 text-text-bright hover:bg-surface-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"
-              onClick={() => {
-                onOpen({ title: entry.title, document: entry.document });
-              }}
-            >
-              Open {publicationKind === "blog" ? "post" : "note"}
-            </button>
-          </article>
-        </li>
-      ))}
-    </ol>
-  );
-}
 
 function ViewerNavigationStatusLine({
   mode,
@@ -281,6 +106,20 @@ function ViewerNavigationStatusLine({
   );
 }
 
+function collectionViewerContent(
+  viewer: ViewerContent,
+): CollectionViewerContent | undefined {
+  switch (viewer.kind) {
+    case "project-gallery":
+    case "publication-list":
+      return viewer;
+    case "placeholder":
+    case "document":
+    case "directory":
+      return undefined;
+  }
+}
+
 export function ViewerPane({
   viewer,
   isActive,
@@ -296,8 +135,17 @@ export function ViewerPane({
   const viewerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const collectionFilterInputRef = useRef<HTMLInputElement | null>(null);
+  const collectionViewer = collectionViewerContent(viewer);
+  const collectionItems = collectionViewer === undefined
+    ? []
+    : collectionSelectorItemsForViewer(collectionViewer);
   const [openedDocument, setOpenedDocument] =
-    useState<OpenedViewerDocument>();
+    useState<CollectionViewerDocument>();
+  const [collectionSelector, setCollectionSelector] =
+    useState<CollectionSelectorState>(() =>
+      createCollectionSelectorState(collectionItems)
+    );
   const activeViewer: ViewerContent =
     openedDocument === undefined
       ? viewer
@@ -348,7 +196,13 @@ export function ViewerPane({
   }, [focusVersion, isActive]);
 
   useEffect(() => {
+    const nextCollectionViewer = collectionViewerContent(viewer);
+    const nextCollectionItems = nextCollectionViewer === undefined
+      ? []
+      : collectionSelectorItemsForViewer(nextCollectionViewer);
+
     setOpenedDocument(undefined);
+    setCollectionSelector(createCollectionSelectorState(nextCollectionItems));
   }, [viewer]);
 
   useEffect(() => {
@@ -362,6 +216,19 @@ export function ViewerPane({
       searchInputRef.current?.focus();
     }
   }, [markdownSearch]);
+
+  useEffect(() => {
+    if (
+      !isActive ||
+      openedDocument !== undefined ||
+      collectionViewer === undefined ||
+      collectionSelector.mode.kind !== "filtering"
+    ) {
+      return;
+    }
+
+    collectionFilterInputRef.current?.focus();
+  }, [collectionSelector.mode.kind, collectionViewer, isActive, openedDocument]);
 
   useEffect(() => {
     if (activeBlockIndex === undefined) {
@@ -379,6 +246,7 @@ export function ViewerPane({
       ? onClose
       : (): void => {
           setOpenedDocument(undefined);
+          viewerRef.current?.focus({ preventScroll: true });
         };
 
   const applyPagerOperation = (operation: RawPagerOperation): void => {
@@ -471,6 +339,68 @@ export function ViewerPane({
     restoreMarkdownViewerFocus(viewerRef.current);
   };
 
+  const restoreViewerFocus = (): void => {
+    viewerRef.current?.focus({ preventScroll: true });
+  };
+
+  const openCollectionDocument = (
+    document: CollectionViewerDocument,
+  ): void => {
+    setOpenedDocument(document);
+    restoreViewerFocus();
+  };
+
+  const applyCollectionSelectorOperation = (
+    operation: CollectionSelectorOperation,
+  ): InputCapturePaneKeyResult => {
+    if (collectionViewer === undefined || openedDocument !== undefined) {
+      return { kind: "unhandled" };
+    }
+
+    switch (operation.kind) {
+      case "move":
+        setCollectionSelector((current) =>
+          moveCollectionSelectorSelection(
+            current,
+            collectionItems,
+            operation.motion,
+          )
+        );
+        return { kind: "handled" };
+      case "open": {
+        const target = selectedCollectionViewerDocument(
+          collectionViewer,
+          collectionSelector,
+        );
+
+        if (target.kind === "none") {
+          return { kind: "handled" };
+        }
+
+        openCollectionDocument(target.document);
+        return { kind: "handled" };
+      }
+      case "begin-filter":
+        setCollectionSelector((current) =>
+          beginCollectionSelectorFilter(current)
+        );
+        return { kind: "handled" };
+      case "leave-filter":
+        setCollectionSelector((current) =>
+          leaveCollectionSelectorFilter(current, collectionItems)
+        );
+        restoreViewerFocus();
+        return { kind: "handled" };
+      case "return":
+        if (closeActiveViewer === undefined) {
+          return { kind: "unhandled" };
+        }
+
+        closeActiveViewer();
+        return { kind: "handled" };
+    }
+  };
+
   const handleSearchInputKeyDown = (
     event: KeyboardEvent<HTMLInputElement>,
   ): void => {
@@ -485,6 +415,14 @@ export function ViewerPane({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (
+      event.target instanceof HTMLButtonElement ||
+      event.target instanceof HTMLInputElement ||
+      event.target instanceof HTMLAnchorElement
+    ) {
+      return;
+    }
+
     const mobileCtrlInput = resolveMobileCtrlInput({
       key: event.key,
       ctrlKey: event.ctrlKey,
@@ -510,6 +448,21 @@ export function ViewerPane({
           },
       onPaneKeyInput,
       onClose: closeActiveViewer,
+      onViewerKeyInput:
+        collectionViewer === undefined || openedDocument !== undefined
+          ? undefined
+          : (viewerInput) => {
+              const result = collectionSelectorBrowseOperationFromKey({
+                key: viewerInput.key,
+                altKey: event.altKey,
+                ctrlKey: viewerInput.ctrlKey,
+                metaKey: viewerInput.metaKey,
+              });
+
+              return result.kind === "ignored"
+                ? { kind: "unhandled" }
+                : applyCollectionSelectorOperation(result.operation);
+            },
       onPagerOperation: applyPagerOperation,
       preventDefault: () => {
         defaultPrevented = true;
@@ -563,6 +516,40 @@ export function ViewerPane({
   ): void => {
     if (ctrlKey) {
       return;
+    }
+
+    if (collectionViewer !== undefined && openedDocument === undefined) {
+      switch (control) {
+        case "escape":
+          if (collectionSelector.mode.kind === "filtering") {
+            setCollectionSelector((current) =>
+              leaveCollectionSelectorFilter(current, collectionItems)
+            );
+            restoreViewerFocus();
+            return;
+          }
+
+          closeActiveViewer?.();
+          return;
+        case "up":
+          setCollectionSelector((current) =>
+            moveCollectionSelectorSelection(
+              current,
+              collectionItems,
+              "previous",
+            )
+          );
+          return;
+        case "down":
+          setCollectionSelector((current) =>
+            moveCollectionSelectorSelection(current, collectionItems, "next")
+          );
+          return;
+        case "tab":
+        case "left":
+        case "right":
+          return;
+      }
     }
 
     if (isRawPager) {
@@ -697,18 +684,15 @@ export function ViewerPane({
           </>
         );
       case "project-gallery":
-        return (
-          <ProjectGallery
-            projects={activeViewer.projects}
-            onOpen={setOpenedDocument}
-          />
-        );
       case "publication-list":
         return (
-          <PublicationList
-            publicationKind={activeViewer.publicationKind}
-            entries={activeViewer.entries}
-            onOpen={setOpenedDocument}
+          <CollectionViewerSelector
+            viewer={activeViewer}
+            state={collectionSelector}
+            filterInputRef={collectionFilterInputRef}
+            onStateChange={setCollectionSelector}
+            onOpen={openCollectionDocument}
+            onRestoreViewerFocus={restoreViewerFocus}
           />
         );
     }

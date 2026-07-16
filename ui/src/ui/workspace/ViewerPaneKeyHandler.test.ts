@@ -163,3 +163,60 @@ test("delegates Ctrl+b to the tmux prefix before viewer navigation", () => {
   assert.equal(pagerOperationCount, 0);
   assert.equal(defaultPreventionCount, 1);
 });
+
+test("routes collection viewer keys after pane prefixes and before viewer return", () => {
+  const events: Array<string> = [];
+  let defaultPreventionCount = 0;
+
+  handleViewerPaneKeyInput({
+    input: {
+      kind: "viewer",
+      key: "Escape",
+      ctrlKey: false,
+      metaKey: false,
+    },
+    onPaneKeyInput: () => {
+      events.push("pane");
+      return { kind: "unhandled" };
+    },
+    onViewerKeyInput: () => {
+      events.push("collection");
+      return { kind: "handled" };
+    },
+    onClose: () => {
+      events.push("close");
+    },
+    onPagerOperation: () => undefined,
+    preventDefault: () => {
+      defaultPreventionCount += 1;
+    },
+  });
+
+  assert.deepEqual(events, ["pane", "collection"]);
+  assert.equal(defaultPreventionCount, 1);
+});
+
+test("does not route collection keys when the pane prefix consumes them", () => {
+  const events: Array<string> = [];
+
+  handleViewerPaneKeyInput({
+    input: {
+      kind: "viewer",
+      key: "j",
+      ctrlKey: false,
+      metaKey: false,
+    },
+    onPaneKeyInput: () => {
+      events.push("pane");
+      return { kind: "handled" };
+    },
+    onViewerKeyInput: () => {
+      events.push("collection");
+      return { kind: "handled" };
+    },
+    onPagerOperation: () => undefined,
+    preventDefault: () => undefined,
+  });
+
+  assert.deepEqual(events, ["pane"]);
+});

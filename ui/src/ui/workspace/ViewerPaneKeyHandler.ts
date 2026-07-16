@@ -33,6 +33,9 @@ type ViewerPaneKeyHandlerOptions = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   onClose?: () => void;
+  onViewerKeyInput?: (
+    input: Extract<ViewerPaneKeyInput, { kind: "viewer" }>,
+  ) => InputCapturePaneKeyResult;
   onPagerOperation: (operation: RawPagerNavigationOperation) => void;
   preventDefault: () => void;
 }>;
@@ -41,6 +44,7 @@ export function handleViewerPaneKeyInput({
   input,
   onPaneKeyInput,
   onClose,
+  onViewerKeyInput,
   onPagerOperation,
   preventDefault,
 }: ViewerPaneKeyHandlerOptions): void {
@@ -70,6 +74,13 @@ export function handleViewerPaneKeyInput({
     }
 
     onPagerOperation(pagerKeyResult.operation);
+    return;
+  }
+
+  const viewerKeyResult = onViewerKeyInput?.(input);
+
+  if (viewerKeyResult?.kind === "handled") {
+    preventDefault();
     return;
   }
 
