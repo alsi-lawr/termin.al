@@ -7,12 +7,35 @@ SYNOPSIS
      blog
 
 DESCRIPTION
-     Opens the published blog collection for keyboard or touch navigation.
+     Opens  the  published  entries beneath ~/blog as a hierarchical collection.
+     Publication titles, dates and collection paths come  from  validated  meta‐
+     data; selecting an entry opens its rendered document and returning restores
+     the collection selection.
+
+VIEWER
+     Use  j/k  or  the arrows to move, h/l or left/right to collapse and expand,
+     g/G or Home/End to jump, Enter to toggle a branch or open an entry,  and  /
+     to  filter.  Escape  leaves the filter input first; from the collection, q,
+     Escape or Ctrl+C returns to the owning shell. Mobile controls expose  move‐
+     ment, filtering, opening and Shell return.
+
+FAILURES
+     Extra  arguments are rejected. Missing or misclassified publication content
+     produces the  stable  content-unavailable  diagnostic.  Cancellation  opens
+     nothing.
+
+LIMITS
+     Collection loading traverses at most 100 virtual entries to a maximum depth
+     of 100. The bounded collection does not read outside ~/blog.
+
+NOTES
+     The  collection and opened documents are transient pane presentation. Clos‐
+     ing them preserves the shell transcript, history and working directory.
 
 EXAMPLES
      $ blog
 
 SEE ALSO
-     help(1), man(1)
+     notes(1), projects(1), open(1)
 
 termin.al                                                                BLOG(1)

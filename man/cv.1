@@ -12,10 +12,18 @@ cv \- Open cv content.
 cv
 .fi
 .SH DESCRIPTION
-Requests the published CV document. Access may be denied when that virtual entry is locked.
+Requests the fixed virtual target
+.BR ~/cv.md .
+In the current browser-demo corpus that entry is deliberately locked, so no viewer is opened.
+.SH FAILURES
+With no arguments, cv returns the stable diagnostic
+.BR "Access is locked: ~/cv.md" .
+Extra arguments are rejected before target resolution. Cancellation opens nothing.
+.SH NOTES
+The command does not authenticate, unlock, download or expose CV content. The virtual corpus remains read-only.
 .SH EXAMPLES
 .nf
 $ cv
 .fi
 .SH SEE ALSO
-help(1), man(1)
+about(1), login(1), open(1)

@@ -12,10 +12,21 @@ notes \- Open notes content.
 notes
 .fi
 .SH DESCRIPTION
-Opens the published notes collection for keyboard or touch navigation.
+Opens validated note publications beneath
+.B ~/notes
+as a hierarchical collection. Selecting a row opens its rendered Markdown document; returning from the document restores the collection and its selection.
+.SH VIEWER
+Use j/k or arrows to move, h/l or left/right to collapse and expand, g/G or Home/End to jump, Enter to toggle/open, and / to filter. Escape leaves filter editing first. From the collection, q, Escape or Ctrl+C returns to the shell. Mobile controls provide movement, Filter/Clear, Toggle, Open and Shell.
+.SH FAILURES
+Extra arguments are rejected. Missing or misclassified note content produces the stable content-unavailable diagnostic. Cancellation opens nothing.
+.SH LIMITS
+Loading traverses at most 100 virtual entries to a maximum depth of 100 beneath
+.BR ~/notes .
+.SH NOTES
+The collection is read-only and transient. Closing it preserves the owning pane's transcript, history and working directory.
 .SH EXAMPLES
 .nf
 $ notes
 .fi
 .SH SEE ALSO
-help(1), man(1)
+blog(1), projects(1), open(1)

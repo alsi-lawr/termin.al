@@ -7,12 +7,26 @@ SYNOPSIS
      now
 
 DESCRIPTION
-     Opens the published now document in the inline viewer.
+     Opens  the fixed virtual document ~/now.md as rendered Markdown in the cur‐
+     rent pane's inline viewer. In the  deterministic  demo  this  is  published
+     snapshot content, not a live activity feed.
+
+VIEWER
+     Use  j/k  or arrows, PageUp/b and PageDown/Space, g/G, / search, n/N, and q
+     or Escape to return. Mobile controls expose Escape, movement and Prefix.
+
+FAILURES
+     Extra arguments are rejected. Missing content produces the stable  content-
+     unavailable diagnostic; cancellation opens nothing.
+
+NOTES
+     Returning  preserves  the  shell transcript, history and working directory.
+     The document is read-only and is not refreshed by the command.
 
 EXAMPLES
      $ now
 
 SEE ALSO
-     help(1), man(1)
+     changelog(1), about(1), stats(1)
 
 termin.al                                                                 NOW(1)

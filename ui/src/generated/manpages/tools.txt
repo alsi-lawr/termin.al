@@ -7,12 +7,26 @@ SYNOPSIS
      tools
 
 DESCRIPTION
-     Opens the published tools document in the inline viewer.
+     Opens  the  fixed  virtual  document ~/tools.md as rendered Markdown in the
+     current pane's inline viewer.
+
+VIEWER
+     Use j/k or arrows to move, PageUp/b and  PageDown/Space  to  page,  g/G  to
+     jump,  / to search, n/N for matches, and q or Escape to return. Mobile con‐
+     trols provide Escape, movement and Prefix.
+
+FAILURES
+     Extra arguments are rejected. Missing content produces the stable  content-
+     unavailable diagnostic; cancellation opens nothing.
+
+NOTES
+     The  document  is read-only. Returning preserves the shell transcript, his‐
+     tory and current directory.
 
 EXAMPLES
      $ tools
 
 SEE ALSO
-     help(1), man(1)
+     skills(1), about(1), open(1)
 
 termin.al                                                               TOOLS(1)

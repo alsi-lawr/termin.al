@@ -12,15 +12,34 @@ find \- Find virtual paths by a simple wildcard name pattern.
 find [path] [-name pattern]
 .fi
 .SH DESCRIPTION
-Searches virtual entry names beneath a starting directory. The name expression supports the simple wildcard matching documented below.
+Traverses virtual entry names beneath a starting directory and prints matching canonical paths. The default path is the current pane directory and the default pattern is
+.BR * .
+Paths are resolved only inside the read-only virtual corpus.
 .SH OPTIONS
 .TP
 .B -name pattern
-Match entry names with * and ? wildcards. The option may follow or precede the path.
+Match each entry's basename with the simple wildcards
+.B *
+and
+.BR ? .
+No regular-expression syntax is interpreted. The option may appear before or after the single path operand; a later
+.B -name
+replaces an earlier pattern.
+.SH OUTPUT
+The starting directory is included when its own basename matches. Descendants follow deterministic virtual-filesystem traversal order. No match produces no text output.
+.SH FAILURES
+Unsupported options, a missing pattern, more than one path, invalid or missing paths, files used as the starting path, and locked paths are rejected.
+.SH LIMITS
+Traversal has a maximum depth of 8 and stops at the application's recursive-entry limit, currently 100 in the browser demo. Truncation keeps the matches already found and adds a
+.B runtime.truncated
+diagnostic.
+.SH NOTES
+Cancellation discards the command outcome. Locked descendants may be listed by path because find matches directory entries without reading document contents.
 .SH EXAMPLES
 .nf
 $ find -name '*.md'
 $ find projects -name '*project*'
+$ find ~/notes -name 'sample-????.md'
 .fi
 .SH SEE ALSO
-help(1), man(1)
+tree(1), ls(1), grep(1)

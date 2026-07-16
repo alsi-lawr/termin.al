@@ -12,18 +12,34 @@ open \- Open virtual content inline or in a split viewer pane.
 open [--split horizontal|vertical] <target>
 .fi
 .SH DESCRIPTION
-Opens a virtual document or collection in a viewer. A split disposition requests a new pane without changing how the target is resolved.
+Resolves one target in the virtual filesystem and opens a viewer suited to its type. Files open as rendered Markdown, ordinary directories as read-only listings, and the special projects, blog and notes directories as hierarchical collections.
+.PP
+Without
+.BR --split ,
+the viewer temporarily replaces the current shell presentation. A split request creates an independent viewer pane and leaves the originating shell pane in place.
 .SH OPTIONS
 .TP
 .B --split horizontal
-Open the target in a new horizontal split.
+Create the viewer in a new split stacked vertically on narrow screens and arranged horizontally at desktop width.
 .TP
 .B --split vertical
-Open the target in a new vertical split.
+Create the viewer in a new vertical workspace split.
+.PP
+The split option must be first and requires an orientation plus exactly one target. A target beginning with a hyphen may be passed after
+.BR -- .
+.SH VIEWER
+Rendered documents support j/k or arrows, paging, g/G, / search, n/N and q/Escape return. Collections support movement, collapse/expand, filtering and Enter open. A directory viewer is a static listing closed with q or Escape. Closing an inline viewer returns to its shell; closing a split viewer closes that pane, subject to the last-pane rule.
+.SH FAILURES
+Malformed options, invalid or missing targets, and locked files are rejected. Missing document content produces the stable content-unavailable diagnostic. Cancellation opens nothing.
+.SH LIMITS
+Blog and notes collection targets traverse at most 100 entries to depth 100. Other directory viewers list one directory level.
+.SH NOTES
+Targets are read-only virtual paths. Viewer navigation is transient. Shell history and current directory remain owned by the originating shell pane, while a split viewer has no shell runtime.
 .SH EXAMPLES
 .nf
 $ open about.md
 $ open --split vertical projects
+$ open ~/notes
 .fi
 .SH SEE ALSO
-help(1), man(1)
+less(1), pane(1), projects(1), blog(1), notes(1)

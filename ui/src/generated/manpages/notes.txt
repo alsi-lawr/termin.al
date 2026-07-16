@@ -7,12 +7,34 @@ SYNOPSIS
      notes
 
 DESCRIPTION
-     Opens the published notes collection for keyboard or touch navigation.
+     Opens validated note publications beneath ~/notes as a hierarchical collec‐
+     tion.  Selecting a row opens its rendered Markdown document; returning from
+     the document restores the collection and its selection.
+
+VIEWER
+     Use j/k or arrows to move, h/l or left/right to collapse and expand, g/G or
+     Home/End to jump, Enter to toggle/open, and / to filter. Escape leaves fil‐
+     ter editing first. From the collection, q, Escape or Ctrl+C returns to  the
+     shell.  Mobile  controls  provide  movement, Filter/Clear, Toggle, Open and
+     Shell.
+
+FAILURES
+     Extra arguments are rejected. Missing or misclassified  note  content  pro‐
+     duces  the  stable content-unavailable diagnostic. Cancellation opens noth‐
+     ing.
+
+LIMITS
+     Loading traverses at most 100 virtual entries to a maximum depth of 100 be‐
+     neath ~/notes.
+
+NOTES
+     The collection is read-only and transient. Closing it preserves the  owning
+     pane's transcript, history and working directory.
 
 EXAMPLES
      $ notes
 
 SEE ALSO
-     help(1), man(1)
+     blog(1), projects(1), open(1)
 
 termin.al                                                               NOTES(1)

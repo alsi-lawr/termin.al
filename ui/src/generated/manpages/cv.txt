@@ -7,13 +7,22 @@ SYNOPSIS
      cv
 
 DESCRIPTION
-     Requests  the published CV document. Access may be denied when that virtual
-     entry is locked.
+     Requests  the  fixed  virtual  target ~/cv.md.  In the current browser-demo
+     corpus that entry is deliberately locked, so no viewer is opened.
+
+FAILURES
+     With no arguments, cv returns  the  stable  diagnostic  Access  is  locked:
+     ~/cv.md.   Extra arguments are rejected before target resolution. Cancella‐
+     tion opens nothing.
+
+NOTES
+     The command does not authenticate, unlock, download or expose  CV  content.
+     The virtual corpus remains read-only.
 
 EXAMPLES
      $ cv
 
 SEE ALSO
-     help(1), man(1)
+     about(1), login(1), open(1)
 
 termin.al                                                                  CV(1)

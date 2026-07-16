@@ -12,10 +12,18 @@ tools \- Open tools content.
 tools
 .fi
 .SH DESCRIPTION
-Opens the published tools document in the inline viewer.
+Opens the fixed virtual document
+.B ~/tools.md
+as rendered Markdown in the current pane's inline viewer.
+.SH VIEWER
+Use j/k or arrows to move, PageUp/b and PageDown/Space to page, g/G to jump, / to search, n/N for matches, and q or Escape to return. Mobile controls provide Escape, movement and Prefix.
+.SH FAILURES
+Extra arguments are rejected. Missing content produces the stable content-unavailable diagnostic; cancellation opens nothing.
+.SH NOTES
+The document is read-only. Returning preserves the shell transcript, history and current directory.
 .SH EXAMPLES
 .nf
 $ tools
 .fi
 .SH SEE ALSO
-help(1), man(1)
+skills(1), about(1), open(1)

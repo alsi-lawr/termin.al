@@ -7,17 +7,28 @@ SYNOPSIS
      edit <path>
 
 DESCRIPTION
-     Names  the future published-content editing entry point. The current public
-     corpus remains read-only.
+     Identifies  the  published-content editing command name, but editing is un‐
+     available in the current browser demo. No path is resolved and no editor or
+     viewer is opened.
+
+FAILURES
+     Every invocation returns the stable command-rejected diagnostic:
+
+     Published-content editing is unavailable until  authoring  work  is  imple‐
+     mented.
+
+     The same outcome is returned for a missing, valid or extra path argument.
+
+NOTES
+     No  virtual document, browser storage or pane state is modified. The public
+     corpus is read-only; this manual does not promise an authoring workflow  or
+     compatibility surface.
 
 EXAMPLES
      $ edit notes/sample-note.md
-
-NOTES
-     The command currently returns a stable unavailable-feature  diagnostic  and
-     does not modify content.
+     $ edit ~/about.md
 
 SEE ALSO
-     help(1), man(1)
+     open(1), less(1), login(1)
 
 termin.al                                                                EDIT(1)

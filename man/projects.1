@@ -12,10 +12,18 @@ projects \- Open projects content.
 projects
 .fi
 .SH DESCRIPTION
-Opens the published projects collection for keyboard or touch navigation.
+Opens the validated project README collection associated with the virtual
+.B ~/projects
+target. Rows are grouped by project collection path and show project name, repository metadata and tags; Enter opens the supplied rendered README.
+.SH VIEWER
+Use j/k or arrows to move, h/l or left/right to collapse and expand, g/G or Home/End to jump, Enter to toggle/open, and / to filter. An external repository link opens separately when activated. q, Escape or Ctrl+C returns from the collection; returning from a README restores the selector. Mobile controls expose movement, filtering, opening and Shell return.
+.SH FAILURES
+Extra arguments are rejected. If the virtual projects directory is missing, path resolution fails. Cancellation opens nothing.
+.SH NOTES
+Project rows come from validated project metadata rather than by reading arbitrary files from the projects directory. The viewer is read-only and transient; returning preserves the owning shell state.
 .SH EXAMPLES
 .nf
 $ projects
 .fi
 .SH SEE ALSO
-open(1), notes(1), blog(1)
+open(1), blog(1), notes(1)

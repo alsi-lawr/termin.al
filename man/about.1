@@ -12,10 +12,18 @@ about \- Open about content.
 about
 .fi
 .SH DESCRIPTION
-Opens the published about document in the inline viewer.
+Opens the fixed virtual document
+.B ~/about.md
+as rendered Markdown in the inline viewer owned by the current shell pane.
+.SH VIEWER
+The viewer supports j/k or arrow-key movement, PageUp/b and PageDown/Space paging, g/G jumps, / search, n/N match navigation, and q or Escape to return. Returning restores the same shell transcript, history and working directory.
+.SH FAILURES
+Extra arguments are rejected. A missing document produces the stable content-unavailable diagnostic; cancellation returns no viewer.
+.SH NOTES
+The published document and virtual filesystem are read-only. Mobile controls provide Escape, movement and the pane Prefix action.
 .SH EXAMPLES
 .nf
 $ about
 .fi
 .SH SEE ALSO
-help(1), man(1)
+open(1), help(1), man(1)

@@ -7,25 +7,43 @@ SYNOPSIS
      theme [list|set <name>|system]
 
 DESCRIPTION
-     Displays  or changes the terminal colour theme. Explicit selections persist
-     in browser storage; system mode follows the active operating-system prefer‐
-     ence and clears the stored selection.
+     Shows or changes the terminal colour theme for the whole browser workspace.
+     With no subcommand, theme prints the active name and whether it is explicit
+     or derived from the operating-system preference.
 
-OPTIONS
-     list   List available theme names.
+SUBCOMMANDS
+     list   Print  all six supported names and mark the active one: gruber-dark-
+            muted, gruber-dark, gruber-darker, gruber-light-muted,  gruber-light
+            and gruber-lighter.
 
      set name
-            Select one named theme.
+            Select one exact supported name and store it as the explicit browser
+            preference.
 
      system
-            Follow the operating-system colour preference.
+            Remove  the stored explicit preference and follow the operating-sys‐
+            tem colour scheme. Dark maps to gruber-dark-muted and light maps  to
+            gruber-light-muted.
+
+OUTPUT
+     Each valid form prints the resulting current theme or available-theme list.
+
+FAILURES
+     Unknown  names,  unknown  subcommands and extra or missing subcommand argu‐
+     ments are rejected with no preference change.
+
+NOTES
+     An explicit selection is stored under this site's browser local storage and
+     survives reloads in the same browser profile and origin.  System  mode  re‐
+     moves that value. Theme choice is workspace-wide, not pane-local.
 
 EXAMPLES
+     $ theme
      $ theme list
      $ theme set gruber-darker
      $ theme system
 
 SEE ALSO
-     help(1), man(1)
+     stats(1), pane(1)
 
 termin.al                                                               THEME(1)

@@ -12,12 +12,18 @@ logout \- End the authenticated session.
 logout
 .fi
 .SH DESCRIPTION
-Names the future session-ending entry point. Authentication is intentionally unavailable in the current public application.
+Identifies the session-ending command name, but authentication is unavailable in the current browser demo. There is no authenticated session for logout to end.
+.SH FAILURES
+Every invocation returns the stable command-rejected diagnostic:
+.PP
+Authentication is unavailable until the host authentication work is implemented.
+.PP
+Arguments do not change this outcome.
+.SH NOTES
+No shell, pane, theme preference, cookie, token or browser-storage value is cleared.
 .SH EXAMPLES
 .nf
 $ logout
 .fi
-.SH NOTES
-The command currently returns a stable unavailable-feature diagnostic and does not alter session state.
 .SH SEE ALSO
-help(1), man(1)
+login(1), whoami(1)

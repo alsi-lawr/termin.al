@@ -12,7 +12,13 @@ help \- Show commands grouped by purpose.
 help
 .fi
 .SH DESCRIPTION
-Lists registered commands by purpose using the live command registry. Use man(1) for the full manual of one command.
+Builds a terminal command index from the live registry and writes it to the current pane's scrollback. Commands are grouped as GNU-like, application and navigation commands; each row uses the registered summary and includes aliases when present.
+.SH OUTPUT
+The output is plain terminal text with NAME, SYNOPSIS, COMMANDS, EXAMPLES and SEE ALSO headings. It is a compact index, not the full generated manual corpus.
+.SH FAILURES
+Any argument is rejected.
+.SH NOTES
+Use man(1) to open the complete reference for one registered command. Help output reflects the current registry for this application load and is not browser-persisted.
 .SH EXAMPLES
 .nf
 $ help

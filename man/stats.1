@@ -12,10 +12,16 @@ stats \- Show aggregate site statistics.
 stats
 .fi
 .SH DESCRIPTION
-Shows the latest aggregate site statistics available to the session, including the current connection or freshness status.
+Prints the workspace's current aggregate statistics snapshot. The command reads the latest in-memory stats state each time it runs rather than caching its first output.
+.SH OUTPUT
+Available snapshots include STATUS, total SESSIONS and VIEWS, the current UTC day's counts, and page views sorted by content identifier. Stable status labels are LIVE, RECONNECTING, STALE, NO DATA and UNAVAILABLE. With no usable snapshot, only STATISTICS and STATUS UNAVAILABLE are printed.
+.SH FAILURES
+Any argument is rejected. Transport failure is represented by the current stable status rather than a command failure.
+.SH NOTES
+In demo mode the UTC date is derived from the fixture snapshot for repeatability. Accepted document opens may update the session snapshot, but each content identifier is submitted at most once per workspace lifetime. Stats command output and workspace state are not stored by this command.
 .SH EXAMPLES
 .nf
 $ stats
 .fi
 .SH SEE ALSO
-help(1), man(1)
+now(1), projects(1), whoami(1)

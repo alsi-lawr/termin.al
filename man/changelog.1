@@ -12,10 +12,18 @@ changelog \- Open changelog content.
 changelog
 .fi
 .SH DESCRIPTION
-Opens the published changelog document in the inline viewer.
+Opens the fixed virtual document
+.B ~/changelog.md
+as rendered Markdown in the current pane's inline viewer.
+.SH VIEWER
+Use j/k or arrows to move, PageUp/b and PageDown/Space to page, g/G to jump, / to search, n/N to move between matches, and q or Escape to return to the same shell. Mobile controls provide Escape, movement and Prefix.
+.SH FAILURES
+Extra arguments are rejected. Missing content produces the stable content-unavailable diagnostic; cancellation opens nothing.
+.SH NOTES
+The changelog is a read-only published document. Returning preserves the pane's transcript, history and working directory.
 .SH EXAMPLES
 .nf
 $ changelog
 .fi
 .SH SEE ALSO
-help(1), man(1)
+now(1), about(1), open(1)

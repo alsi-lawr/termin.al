@@ -12,10 +12,21 @@ pwd \- Print this shell pane's virtual directory.
 pwd
 .fi
 .SH DESCRIPTION
-Prints the virtual working directory of the current shell pane using termin.al path notation.
+Prints the canonical virtual working directory owned by the current shell pane. Virtual home is written as
+.B ~
+and descendants as paths such as
+.BR ~/notes .
+.SH OUTPUT
+Exactly one text output is added to the current pane transcript.
+.SH FAILURES
+Any argument is rejected.
+.SH NOTES
+Each shell pane owns its directory independently. The value survives clear(1) and pane-tree transforms while the pane exists, but is not browser-persisted across reloads.
 .SH EXAMPLES
 .nf
 $ pwd
+$ cd notes
+$ pwd
 .fi
 .SH SEE ALSO
-help(1), man(1)
+cd(1), ls(1), pane(1)

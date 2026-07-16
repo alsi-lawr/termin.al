@@ -7,13 +7,27 @@ SYNOPSIS
      pwd
 
 DESCRIPTION
-     Prints  the  virtual working directory of the current shell pane using ter‐
-     min.al path notation.
+     Prints  the  canonical virtual working directory owned by the current shell
+     pane. Virtual home is written  as  ~  and  descendants  as  paths  such  as
+     ~/notes.
+
+OUTPUT
+     Exactly one text output is added to the current pane transcript.
+
+FAILURES
+     Any argument is rejected.
+
+NOTES
+     Each  shell  pane  owns  its  directory  independently.  The value survives
+     clear(1) and pane-tree  transforms  while  the  pane  exists,  but  is  not
+     browser-persisted across reloads.
 
 EXAMPLES
      $ pwd
+     $ cd notes
+     $ pwd
 
 SEE ALSO
-     help(1), man(1)
+     cd(1), ls(1), pane(1)
 
 termin.al                                                                 PWD(1)

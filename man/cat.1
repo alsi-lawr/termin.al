@@ -12,10 +12,23 @@ cat \- Print raw virtual document content.
 cat <path> [path ...]
 .fi
 .SH DESCRIPTION
-Writes one or more virtual documents to terminal scrollback without Markdown rendering. Documents are read in argument order.
+Reads one or more files from termin.al's virtual filesystem and writes their raw document text to the current terminal scrollback. Paths are resolved relative to the current pane directory; absolute virtual paths begin with
+.BR ~ .
+Files are read in argument order without Markdown rendering, headings or separators.
+.SH OUTPUT
+Each successful operand creates one text output in the same order as its argument. An empty document produces an empty text output.
+.SH FAILURES
+One to 32 paths are required. Options before
+.B --
+are unsupported. Invalid, missing, directory, locked or unavailable operands reject the command. If any read fails or cancellation occurs, no accumulated partial output is returned.
+.SH LIMITS
+At most 32 file operands are accepted per invocation.
+.SH NOTES
+The virtual corpus is read-only; cat never reads the browser host or local machine filesystem.
 .SH EXAMPLES
 .nf
 $ cat about.md
+$ cat ~/skills.md ~/tools.md
 .fi
 .SH SEE ALSO
-help(1), man(1)
+head(1), tail(1), less(1), pwd(1)

@@ -12,23 +12,50 @@ ls \- List virtual files and directories.
 ls [-a] [-l] [--tree] [path]
 .fi
 .SH DESCRIPTION
-Lists entries in the current or selected virtual directory. Output is drawn from termin.al's read-only content tree; it does not inspect the host filesystem.
+Lists one virtual file or directory. The default path is the current pane directory; relative paths resolve there and
+.B ~
+addresses virtual home. Output comes only from termin.al's read-only corpus, never the host filesystem.
 .SH OPTIONS
 .TP
 .B -a
-Include hidden entries.
+Include hidden entries and add synthetic
+.B ./
+and
+.B ../
+rows for directory listings.
 .TP
 .B -l
-Use the long listing with type, size and timestamp.
+Use a long listing with read-only type permissions, UTF-8 byte size, UTC timestamp and name. Locked files show no permissions and the suffix
+.BR "[locked]" .
 .TP
 .B --tree
-Render the selected directory as a tree; this cannot be combined with -l.
+Render the selected directory recursively as a tree. This may be combined with
+.B -a
+but not with
+.BR -l .
+Short flags may be clustered and options may appear before or after the single path.
+.SH OUTPUT
+Short directory listings contain one name per line; directories end in
+.BR / .
+A file operand prints only that file. Tree output starts with the canonical root path and marks directories and locked files.
+.SH FAILURES
+Unknown flags, more than one path, every
+.B -l
+and
+.B --tree
+combination, invalid or missing paths, and direct locked-file operands are rejected. Tree mode also rejects file operands as not directories.
+.SH LIMITS
+Tree mode traverses to depth 8 and stops at the application's recursive-entry limit, currently 100. It preserves rendered entries and adds a
+.B runtime.truncated
+diagnostic when bounded.
+.SH NOTES
+Listing does not read document bodies. It can therefore display locked entries without unlocking them.
 .SH EXAMPLES
 .nf
 $ ls
-$ ls -l projects
+$ ls -al ~/notes
 $ ls --tree projects
 $ ls -a --tree
 .fi
 .SH SEE ALSO
-help(1), man(1)
+tree(1), find(1), cd(1), pwd(1)

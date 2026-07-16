@@ -7,20 +7,44 @@ SYNOPSIS
      tree [-a] [-L depth] [path]
 
 DESCRIPTION
-     Displays  a  bounded hierarchy rooted at a virtual directory. The traversal
-     is deterministic and never reaches outside the published content corpus.
+     Renders  a deterministic hierarchy rooted at one virtual directory. The de‐
+     fault path is the current pane directory. Relative paths  and  ~  use  ter‐
+     min.al's  read-only virtual path resolver; no host filesystem traversal oc‐
+     curs.
 
 OPTIONS
-     -a     Include hidden entries.
+     -a     Include hidden descendants. The synthetic ./ and ../ rows used by ls
+            listings are not added to tree output.
 
      -L depth
-            Limit traversal to a depth from 0 to 8.
+            Set the maximum descendant depth from 0 through  8.  A  depth  of  0
+            prints only the canonical root path. The option may appear before or
+            after the single path; a later value replaces an earlier one.
+
+OUTPUT
+     The  first  line is the canonical directory path. Descendants follow deter‐
+     ministic traversal order, with / for directories and  [locked]  for  locked
+     entries.
+
+FAILURES
+     Unknown  options,  a missing or out-of-range depth, more than one path, in‐
+     valid or missing paths, files and locked paths are rejected.
+
+LIMITS
+     Depth defaults to 8. Traversal also stops at the  application's  recursive-
+     entry  limit, currently 100; retained output is followed by a runtime.trun‐
+     cated diagnostic.
+
+NOTES
+     Tree reads directory metadata only and does not unlock or render documents.
+     Cancellation returns no tree.
 
 EXAMPLES
      $ tree
      $ tree -L 1 projects
+     $ tree -a ~/notes
 
 SEE ALSO
-     help(1), man(1)
+     ls(1), find(1), pwd(1)
 
 termin.al                                                                TREE(1)

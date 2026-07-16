@@ -7,17 +7,26 @@ SYNOPSIS
      login
 
 DESCRIPTION
-     Names  the  future authentication entry point. Authentication is intention‐
-     ally unavailable in the current public application.
+     Identifies  the authentication command name, but host authentication is un‐
+     available in the current browser demo. No GitHub  or  other  authentication
+     flow begins.
+
+FAILURES
+     Every invocation returns the stable command-rejected diagnostic:
+
+     Authentication  is unavailable until the host authentication work is imple‐
+     mented.
+
+     Arguments do not change this outcome.
+
+NOTES
+     No credential, token, cookie, session or browser-storage value is  created.
+     This manual makes no promise about a future authentication protocol.
 
 EXAMPLES
      $ login
 
-NOTES
-     The command currently returns a stable unavailable-feature  diagnostic  and
-     does not begin an authentication flow.
-
 SEE ALSO
-     help(1), man(1)
+     logout(1), whoami(1), cv(1)
 
 termin.al                                                               LOGIN(1)

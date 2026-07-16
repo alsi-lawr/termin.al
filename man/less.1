@@ -12,12 +12,21 @@ less \- Open raw virtual document text in a pager.
 less <path>
 .fi
 .SH DESCRIPTION
-Opens one virtual document in termin.al's raw pager. The pager keeps GNU-less-like presentation separate from the vi manpager presentation.
+Reads one virtual document as raw text and replaces the current shell presentation with termin.al's bounded less-style pager. Markdown is not rendered and the command does not run an external less process.
+.SH VIEWER
+At most 20 source lines are shown per page. Use j/k or arrows for one line, PageUp/b for one page back, PageDown/Space or Ctrl+f for one page forward, g/G for start/end, and q or Escape to close. The inverse prompt shows the document title and position.
+.PP
+Pane-prefix handling has precedence: Ctrl+b enters the pane command prefix instead of moving the pager back. On mobile, Esc and up/down operate the pager and Prefix enters the pane prefix; long lines wrap without horizontal scrolling.
+.SH FAILURES
+Exactly one path is required. Options before
+.BR -- ,
+invalid or missing paths, directories, locked files and unavailable documents are rejected. Cancellation opens no pager.
+.SH NOTES
+Closing returns to the same pane's shell transcript, history and working directory. Pager position is transient and resets on each open. The virtual corpus is read-only.
 .SH EXAMPLES
 .nf
-$ less notes/sample-note.md
+$ less notes/field-notes/filesystems/sample-note.md
+$ less ~/changelog.md
 .fi
-.SH NOTES
-Keys include j/k and the arrow keys, PageUp/b, PageDown/Space, g/G, Ctrl+f and q/Escape. Ctrl+b remains the pane-prefix key.
 .SH SEE ALSO
-man(1), cat(1)
+man(1), cat(1), open(1)

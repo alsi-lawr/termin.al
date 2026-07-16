@@ -7,17 +7,26 @@ SYNOPSIS
      logout
 
 DESCRIPTION
-     Names  the  future session-ending entry point. Authentication is intention‐
-     ally unavailable in the current public application.
+     Identifies  the session-ending command name, but authentication is unavail‐
+     able in the current browser demo. There is no authenticated session for lo‐
+     gout to end.
+
+FAILURES
+     Every invocation returns the stable command-rejected diagnostic:
+
+     Authentication is unavailable until the host authentication work is  imple‐
+     mented.
+
+     Arguments do not change this outcome.
+
+NOTES
+     No shell, pane, theme preference, cookie, token or browser-storage value is
+     cleared.
 
 EXAMPLES
      $ logout
 
-NOTES
-     The command currently returns a stable unavailable-feature  diagnostic  and
-     does not alter session state.
-
 SEE ALSO
-     help(1), man(1)
+     login(1), whoami(1)
 
 termin.al                                                              LOGOUT(1)

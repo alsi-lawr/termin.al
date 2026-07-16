@@ -7,26 +7,50 @@ SYNOPSIS
      ls [-a] [-l] [--tree] [path]
 
 DESCRIPTION
-     Lists entries in the current or selected virtual directory. Output is drawn
-     from  termin.al's  read-only  content  tree;  it  does not inspect the host
-     filesystem.
+     Lists  one  virtual file or directory. The default path is the current pane
+     directory; relative paths resolve there and ~ addresses virtual home.  Out‐
+     put  comes  only from termin.al's read-only corpus, never the host filesys‐
+     tem.
 
 OPTIONS
-     -a     Include hidden entries.
+     -a     Include hidden entries and add synthetic ./ and ../ rows for  direc‐
+            tory listings.
 
-     -l     Use the long listing with type, size and timestamp.
+     -l     Use a long listing with read-only type permissions, UTF-8 byte size,
+            UTC  timestamp  and  name.  Locked files show no permissions and the
+            suffix [locked].
 
      --tree
-            Render the selected directory as a tree;  this  cannot  be  combined
-            with -l.
+            Render the selected directory recursively as a  tree.  This  may  be
+            combined  with -a but not with -l.  Short flags may be clustered and
+            options may appear before or after the single path.
+
+OUTPUT
+     Short directory listings contain one name per line; directories end  in  /.
+     A file operand prints only that file. Tree output starts with the canonical
+     root path and marks directories and locked files.
+
+FAILURES
+     Unknown flags, more than one path, every -l and --tree combination, invalid
+     or  missing  paths, and direct locked-file operands are rejected. Tree mode
+     also rejects file operands as not directories.
+
+LIMITS
+     Tree mode traverses to depth 8 and stops at the application's recursive-en‐
+     try limit, currently 100. It preserves rendered entries  and  adds  a  run‐
+     time.truncated diagnostic when bounded.
+
+NOTES
+     Listing  does not read document bodies. It can therefore display locked en‐
+     tries without unlocking them.
 
 EXAMPLES
      $ ls
-     $ ls -l projects
+     $ ls -al ~/notes
      $ ls --tree projects
      $ ls -a --tree
 
 SEE ALSO
-     help(1), man(1)
+     tree(1), find(1), cd(1), pwd(1)
 
 termin.al                                                                  LS(1)

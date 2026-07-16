@@ -7,12 +7,31 @@ SYNOPSIS
      projects
 
 DESCRIPTION
-     Opens the published projects collection for keyboard or touch navigation.
+     Opens  the  validated project README collection associated with the virtual
+     ~/projects target. Rows are grouped by project  collection  path  and  show
+     project  name,  repository metadata and tags; Enter opens the supplied ren‐
+     dered README.
+
+VIEWER
+     Use j/k or arrows to move, h/l or left/right to collapse and expand, g/G or
+     Home/End to jump, Enter to toggle/open, and / to filter. An external repos‐
+     itory link opens separately when activated. q,  Escape  or  Ctrl+C  returns
+     from  the collection; returning from a README restores the selector. Mobile
+     controls expose movement, filtering, opening and Shell return.
+
+FAILURES
+     Extra arguments are rejected. If the virtual projects directory is missing,
+     path resolution fails. Cancellation opens nothing.
+
+NOTES
+     Project rows come from validated project metadata rather  than  by  reading
+     arbitrary  files  from  the projects directory. The viewer is read-only and
+     transient; returning preserves the owning shell state.
 
 EXAMPLES
      $ projects
 
 SEE ALSO
-     open(1), notes(1), blog(1)
+     open(1), blog(1), notes(1)
 
 termin.al                                                            PROJECTS(1)

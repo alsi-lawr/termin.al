@@ -12,10 +12,18 @@ whoami \- Show the current development capability.
 whoami
 .fi
 .SH DESCRIPTION
-Reports the anonymous development capability used by the public termin.al session.
+Prints the fixed capability identity used by the public browser demo.
+.SH OUTPUT
+The exact output is
+.BR anonymous .
+It describes the current unauthenticated development capability, not an operating-system account, GitHub identity or browser profile.
+.SH FAILURES
+Any argument is rejected.
+.SH NOTES
+The value is not read from credentials or browser storage and is unchanged by the unavailable login and logout commands.
 .SH EXAMPLES
 .nf
 $ whoami
 .fi
 .SH SEE ALSO
-help(1), man(1)
+login(1), logout(1), stats(1)

@@ -9,30 +9,51 @@ SYNOPSIS
      man --pager=less|vi <command>
 
 DESCRIPTION
-     Reads a project-authored section-1 manual for a registered command. The de‐
-     fault  and less presentations open the generated text in the raw pager. The
-     vi presentation opens the same text with a  highlighted  current  line  and
-     NORMAL status.
+     Opens  the  checked  section-1  manual  for  a  registered command. Command
+     aliases resolve through the live registry to one canonical manual. The  de‐
+     fault  and  explicit  less modes use the same less-style raw pager; vi mode
+     uses the same generated text with a highlighted  current  line  and  NORMAL
+     status.
 
 OPTIONS
      -P less|vi
-            Select the less or vi manpager presentation.
+            Select  the pager. This option must be first, followed by a separate
+            selector and exactly one command name.
 
      --pager=less|vi
-            Select the less or vi manpager presentation.
+            Select the pager with one option token, followed by exactly one com‐
+            mand name.
+
+     The two forms cannot be combined. The superseded  selector  vim  is  unsup‐
+     ported, and --pager vi or -Pvi are not accepted spellings.
+
+VIEWER
+     Both  modes  show  at most 20 source lines per page. j/k or arrows move one
+     line; PageUp/b moves back; PageDown/Space  or  Ctrl+f  moves  forward;  g/G
+     jumps  to start/end; q or Escape closes. In vi mode the current source line
+     is marked and the status reports NORMAL plus line position. In less mode an
+     inverse prompt reports the page position.
+
+     Ctrl+b remains the pane prefix and takes precedence over  pager  b.  Mobile
+     controls expose Esc, up/down and Prefix. Lines wrap to the pane width with‐
+     out horizontal scrolling.
+
+FAILURES
+     Missing or extra operands, unsupported option forms, an empty selector, un‐
+     supported  pagers and unregistered command names are rejected. A registered
+     command whose generated artifact is absent reports no manual entry.
+
+NOTES
+     All routes consume the same build-generated UTF-8 artifact. Closing returns
+     to the owning shell with its transcript, history and current directory  un‐
+     changed; pager position is not persisted.
 
 EXAMPLES
      $ man grep
-     $ man -P less grep
-     $ man --pager=vi pane
-
-NOTES
-     Manual  sources  are roff files generated to checked UTF-8 artifacts during
-     the production build. All presentations use the same artifact. Aliases  re‐
-     solve through the command registry to the canonical manual. Use q or Escape
-     to close either pager; Ctrl+b remains the pane-prefix key.
+     $ man -P less pane
+     $ man --pager=vi theme
 
 SEE ALSO
-     help(1), less(1)
+     help(1), less(1), pane(1)
 
 termin.al                                                                 MAN(1)

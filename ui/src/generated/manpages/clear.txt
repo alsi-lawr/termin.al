@@ -7,13 +7,27 @@ SYNOPSIS
      clear
 
 DESCRIPTION
-     Removes  terminal  scrollback  from the current shell pane. Command history
-     and the pane's working directory are preserved.
+     Removes  the  visible  terminal  transcript from the current shell pane. It
+     does not close an inline viewer because clear runs only from the shell pre‐
+     sentation.
+
+OUTPUT
+     No text is printed. The clear-scrollback effect is applied after  the  com‐
+     mand succeeds.
+
+FAILURES
+     Any argument is rejected and leaves the scrollback unchanged.
+
+NOTES
+     Command  history,  the  current virtual directory, other panes, pane layout
+     and browser theme preference are preserved. The cleared transcript  is  not
+     recoverable  through  history  because  history stores command sources, not
+     prior output.
 
 EXAMPLES
      $ clear
 
 SEE ALSO
-     help(1), man(1)
+     history(1), pane(1), pwd(1)
 
 termin.al                                                               CLEAR(1)

@@ -81,6 +81,6 @@ EXAMPLES
      $ grep -F -- '-literal' about.md
 
 SEE ALSO
-     help(1), man(1)
+     help(1), man(1), find(1), cat(1)
 
 termin.al                                                                GREP(1)

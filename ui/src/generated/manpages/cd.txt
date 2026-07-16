@@ -7,14 +7,29 @@ SYNOPSIS
      cd [path]
 
 DESCRIPTION
-     Changes  the  working  directory owned by the current shell pane. Each pane
-     keeps its own directory, so moving in one pane does not move another.
+     Changes the virtual working directory owned by the current shell pane. Rel‐
+     ative  paths  resolve  from  that pane's current directory; paths beginning
+     with ~ resolve from the virtual home directory, and ..  walks  toward  that
+     home.
+
+     With  no path, cd selects ~.  The command changes only path state and emits
+     no text output.
+
+FAILURES
+     More than one path, an option before --, an invalid path, a missing path, a
+     file path or a locked path is rejected without changing the directory.
+
+NOTES
+     Each shell pane retains its own directory across focus, swap, rotation  and
+     layout  changes. A newly created shell pane starts at ~.  Pane state is in-
+     memory and is not restored after a page reload.
 
 EXAMPLES
      $ cd projects
-     $ cd ..
+     $ cd ../notes
+     $ cd
 
 SEE ALSO
-     help(1), man(1)
+     pwd(1), ls(1), pane(1)
 
 termin.al                                                                  CD(1)

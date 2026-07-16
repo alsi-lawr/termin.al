@@ -7,19 +7,44 @@ SYNOPSIS
      find [path] [-name pattern]
 
 DESCRIPTION
-     Searches virtual entry names beneath a starting directory. The name expres‐
-     sion supports the simple wildcard matching documented below.
+     Traverses  virtual  entry  names  beneath  a  starting directory and prints
+     matching canonical paths. The default path is the  current  pane  directory
+     and the default pattern is *.  Paths are resolved only inside the read-only
+     virtual corpus.
 
 OPTIONS
      -name pattern
-            Match  entry  names with * and ? wildcards. The option may follow or
-            precede the path.
+            Match  each  entry's basename with the simple wildcards * and ?.  No
+            regular-expression syntax is interpreted. The option may appear  be‐
+            fore  or  after  the  single path operand; a later -name replaces an
+            earlier pattern.
+
+OUTPUT
+     The starting directory is included when its own basename  matches.  Descen‐
+     dants  follow  deterministic  virtual-filesystem  traversal order. No match
+     produces no text output.
+
+FAILURES
+     Unsupported options, a missing pattern, more  than  one  path,  invalid  or
+     missing  paths,  files  used as the starting path, and locked paths are re‐
+     jected.
+
+LIMITS
+     Traversal has a maximum depth of 8 and stops at  the  application's  recur‐
+     sive-entry  limit,  currently 100 in the browser demo. Truncation keeps the
+     matches already found and adds a runtime.truncated diagnostic.
+
+NOTES
+     Cancellation discards the command outcome. Locked descendants may be listed
+     by path because find matches directory  entries  without  reading  document
+     contents.
 
 EXAMPLES
      $ find -name '*.md'
      $ find projects -name '*project*'
+     $ find ~/notes -name 'sample-????.md'
 
 SEE ALSO
-     help(1), man(1)
+     tree(1), ls(1), grep(1)
 
 termin.al                                                                FIND(1)

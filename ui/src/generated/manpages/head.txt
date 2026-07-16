@@ -7,18 +7,37 @@ SYNOPSIS
      head [-n count] <path>
 
 DESCRIPTION
-     Prints  the  first requested lines of one virtual document. The document is
-     read as raw text rather than rendered Markdown.
+     Reads  one  virtual document as raw text and prints its first newline-sepa‐
+     rated lines. Paths resolve relative to the current pane directory  or  from
+     virtual home with ~.  The default count is 10.
 
 OPTIONS
      -n count
-            Print count initial lines. Count must be a supported positive  inte‐
-            ger.
+            Select  a  non-negative  decimal line count from 0 through 1000. The
+            option may precede or follow the single path operand; a later -n re‐
+            places an earlier count.
+
+OUTPUT
+     Markdown is not rendered. A count of 0 emits an empty text output; a  count
+     larger than the document returns all available text lines.
+
+FAILURES
+     Unsupported  options,  a  missing  or invalid count, more or fewer than one
+     path, invalid or missing paths, directories, locked files  and  unavailable
+     documents are rejected. Cancellation returns no output.
+
+LIMITS
+     The requested count is capped at 1000 lines.
+
+NOTES
+     The virtual document is read-only and no host filesystem path is accepted.
 
 EXAMPLES
-     $ head -n 3 about.md
+     $ head about.md
+     $ head -n 3 ~/changelog.md
+     $ head about.md -n 0
 
 SEE ALSO
-     help(1), man(1)
+     tail(1), cat(1), less(1)
 
 termin.al                                                                HEAD(1)

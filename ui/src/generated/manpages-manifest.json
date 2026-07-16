@@ -7,9 +7,9 @@
       "summary": "Open about content.",
       "sourcePath": "man/about.1",
       "artifactPath": "ui/src/generated/manpages/about.txt",
-      "byteCount": 352,
-      "lineCount": 18,
-      "sha256": "dba2295fdf2c2ff669cffd4828cb9dcc622cf07b79f4632bcad2edcc3136b147"
+      "byteCount": 1014,
+      "lineCount": 33,
+      "sha256": "9708fd845eecf504a96d7d8ecb8311d638473a029d81b1dfcdf302f1c088dc4c"
     },
     {
       "name": "blog",
@@ -18,9 +18,9 @@
       "summary": "Open blog content.",
       "sourcePath": "man/blog.1",
       "artifactPath": "ui/src/generated/manpages/blog.txt",
-      "byteCount": 361,
-      "lineCount": 18,
-      "sha256": "0f8df42b0a1f16b9f89cfa3e0a33f489023b1c24c038a2aa812a236b73070890"
+      "byteCount": 1467,
+      "lineCount": 41,
+      "sha256": "8dc49ec0e837f5ef6a00df5131553829cc6f41c0bf984e7c6533514c9cb17afb"
     },
     {
       "name": "cat",
@@ -29,9 +29,9 @@
       "summary": "Print raw virtual document content.",
       "sourcePath": "man/cat.1",
       "artifactPath": "ui/src/generated/manpages/cat.txt",
-      "byteCount": 469,
-      "lineCount": 19,
-      "sha256": "77d0f9487350b071d7e967ba6c707cfb0fb7d10ab74861dcb5fa1cd537312b46"
+      "byteCount": 1333,
+      "lineCount": 40,
+      "sha256": "d246f0631fbe7cceccc1f1c3ce95e1a7d920df5b8de9929c581e345620b63cbc"
     },
     {
       "name": "cd",
@@ -40,9 +40,9 @@
       "summary": "Change this shell pane's virtual directory.",
       "sourcePath": "man/cd.1",
       "artifactPath": "ui/src/generated/manpages/cd.txt",
-      "byteCount": 490,
-      "lineCount": 20,
-      "sha256": "b9ebef7803925b6e2b21648fb4a0a50b1e1e2fbb930bc2858f13399ed69b1431"
+      "byteCount": 1105,
+      "lineCount": 35,
+      "sha256": "02e75f22bf8ae671752be7cb617da6257c6ee4ddfe64ce1f798ab9e85fa7d001"
     },
     {
       "name": "changelog",
@@ -51,9 +51,9 @@
       "summary": "Open changelog content.",
       "sourcePath": "man/changelog.1",
       "artifactPath": "ui/src/generated/manpages/changelog.txt",
-      "byteCount": 372,
-      "lineCount": 18,
-      "sha256": "5b0011e0f0823d28cd36a15da4e6bacf6d1f8bc61cd9b85702da52662a25cf6a"
+      "byteCount": 970,
+      "lineCount": 32,
+      "sha256": "d1a4b658eb1b29847e187c8fc56eb537edf735c1b3a417f794eaca1c0a026ff7"
     },
     {
       "name": "clear",
@@ -62,9 +62,9 @@
       "summary": "Clear terminal scrollback.",
       "sourcePath": "man/clear.1",
       "artifactPath": "ui/src/generated/manpages/clear.txt",
-      "byteCount": 431,
-      "lineCount": 19,
-      "sha256": "cbefb945bcc90468008231c104d719fa37d12d454c16e3e40ef0c98a2f8bb254"
+      "byteCount": 946,
+      "lineCount": 33,
+      "sha256": "84c6837baf69de40099ef812e1728453d6e71ba6bd780de6bcad7c8c4ac84f5a"
     },
     {
       "name": "cv",
@@ -73,9 +73,9 @@
       "summary": "Open cv content.",
       "sourcePath": "man/cv.1",
       "artifactPath": "ui/src/generated/manpages/cv.txt",
-      "byteCount": 381,
-      "lineCount": 19,
-      "sha256": "f4fa9522d3cf305c69bb277c3b007d80e11d2e44d14e8f486d125c1facea7e09"
+      "byteCount": 772,
+      "lineCount": 28,
+      "sha256": "8f8277fdafc67a188445ac38cc97456ab1d4edf8229cfc84c50ab1e140b8a910"
     },
     {
       "name": "echo",
@@ -84,9 +84,9 @@
       "summary": "Print arguments as text.",
       "sourcePath": "man/echo.1",
       "artifactPath": "ui/src/generated/manpages/echo.txt",
-      "byteCount": 418,
-      "lineCount": 19,
-      "sha256": "5e1af91a9fde91f5144afc765f464094746941266b0c8ce96ede311bad87a0e4"
+      "byteCount": 835,
+      "lineCount": 30,
+      "sha256": "8eb522b04325ea4704bb20db9985b045219eea43702addaca1a4e6e77fbf6395"
     },
     {
       "name": "edit",
@@ -95,9 +95,9 @@
       "summary": "Edit published content.",
       "sourcePath": "man/edit.1",
       "artifactPath": "ui/src/generated/manpages/edit.txt",
-      "byteCount": 549,
-      "lineCount": 23,
-      "sha256": "b6864ebe17799dd142bd835c6f727cf1c85a2da33d705f2d3940d44994ee23dc"
+      "byteCount": 994,
+      "lineCount": 34,
+      "sha256": "6fde595b60b40469ceee01962c072aaf16e095d08f5a7a011da095c9913c2faf"
     },
     {
       "name": "find",
@@ -106,9 +106,9 @@
       "summary": "Find virtual paths by a simple wildcard name pattern.",
       "sourcePath": "man/find.1",
       "artifactPath": "ui/src/generated/manpages/find.txt",
-      "byteCount": 684,
-      "lineCount": 25,
-      "sha256": "e13d67186d7c2c62ee225b58d20bb7430fdfc4c0537c49daf5a5564038442ac1"
+      "byteCount": 1826,
+      "lineCount": 50,
+      "sha256": "e90607b4440bdc56b5ccf553f41a54fc3931a16cbcd1d13b2fde5c41d5ef85c1"
     },
     {
       "name": "grep",
@@ -117,9 +117,9 @@
       "summary": "Search virtual files with ECMAScript regular expressions.",
       "sourcePath": "man/grep.1",
       "artifactPath": "ui/src/generated/manpages/grep.txt",
-      "byteCount": 3793,
+      "byteCount": 3810,
       "lineCount": 86,
-      "sha256": "a2f900632cb4eaf3677c9faee7fb559f5e70ba08ac4401dfcefc0a522d392a20"
+      "sha256": "b1d4c3f3779351597b7c26ace4f8b39c293926675b02a87131f75d4ada9b9815"
     },
     {
       "name": "head",
@@ -128,9 +128,9 @@
       "summary": "Print initial raw document lines.",
       "sourcePath": "man/head.1",
       "artifactPath": "ui/src/generated/manpages/head.txt",
-      "byteCount": 590,
-      "lineCount": 24,
-      "sha256": "bba1c16a616ed63ca6c4bd7abf062bd99b9203ebad8c1c710b4fe56be34d8efe"
+      "byteCount": 1366,
+      "lineCount": 43,
+      "sha256": "b3673252e7087485e3f03e3d73126ab71b7924be2c60b4ab7ae7be046e1a9fbe"
     },
     {
       "name": "help",
@@ -139,9 +139,9 @@
       "summary": "Show commands grouped by purpose.",
       "sourcePath": "man/help.1",
       "artifactPath": "ui/src/generated/manpages/help.txt",
-      "byteCount": 437,
-      "lineCount": 20,
-      "sha256": "f85dc4494344145d3b80b39beec504f7a8f14a2cffba9b5d61ab4c1e4e6743ca"
+      "byteCount": 995,
+      "lineCount": 35,
+      "sha256": "ad0935f848109147a4f811d3d053fb4db42c4f023a3dcff47b0f57ae7fec7da2"
     },
     {
       "name": "history",
@@ -150,9 +150,9 @@
       "summary": "Show this shell pane's bounded command history.",
       "sourcePath": "man/history.1",
       "artifactPath": "ui/src/generated/manpages/history.txt",
-      "byteCount": 448,
-      "lineCount": 19,
-      "sha256": "855e14dbb53b03e59b20768e8719142a4f5d60e7773de6585b4c5210b59a722e"
+      "byteCount": 1134,
+      "lineCount": 37,
+      "sha256": "f4bfe69f21be8fe515b7374ab1372690450c77c85e3204cecb880db67440197b"
     },
     {
       "name": "less",
@@ -161,9 +161,9 @@
       "summary": "Open raw virtual document text in a pager.",
       "sourcePath": "man/less.1",
       "artifactPath": "ui/src/generated/manpages/less.txt",
-      "byteCount": 633,
-      "lineCount": 23,
-      "sha256": "2fe6b680a08059f5903f95be7d4ba66047fc082afc1e072d4dae62b97de7b47f"
+      "byteCount": 1569,
+      "lineCount": 42,
+      "sha256": "a2a1cb332ac097e1029ff2b6cf360a0e6c45e86c8bc8095ec8b4d20a46c714d4"
     },
     {
       "name": "login",
@@ -172,9 +172,9 @@
       "summary": "Authenticate with GitHub.",
       "sourcePath": "man/login.1",
       "artifactPath": "ui/src/generated/manpages/login.txt",
-      "byteCount": 568,
-      "lineCount": 23,
-      "sha256": "f5d37836eeca86c2fc38c8ddf903edbe68cb5b8df73814cebf9ecebb54e3d8b7"
+      "byteCount": 873,
+      "lineCount": 32,
+      "sha256": "b514a524004e80ebf9f6bc3ab69b12674f43b0569138cca4419feee8cf48e54c"
     },
     {
       "name": "logout",
@@ -183,9 +183,9 @@
       "summary": "End the authenticated session.",
       "sourcePath": "man/logout.1",
       "artifactPath": "ui/src/generated/manpages/logout.txt",
-      "byteCount": 567,
-      "lineCount": 23,
-      "sha256": "0afdfac7f08293c04416c68a3097d3d2df4d2f545c032c955c82f0d1eaca70a7"
+      "byteCount": 815,
+      "lineCount": 32,
+      "sha256": "f695d17f4dc039f832da2953b68a8bc657a911e66d1d09bd9b739ddf5dfcf059"
     },
     {
       "name": "ls",
@@ -194,9 +194,9 @@
       "summary": "List virtual files and directories.",
       "sourcePath": "man/ls.1",
       "artifactPath": "ui/src/generated/manpages/ls.txt",
-      "byteCount": 795,
-      "lineCount": 32,
-      "sha256": "031737840368735c6a6d9f5b17ce48e122d10598077403ea85a26aae8f1fe6b8"
+      "byteCount": 2007,
+      "lineCount": 56,
+      "sha256": "80bb1f4ddb20580e339336a25d1c5ee45354565f11258523ca7e400eb0ff0f07"
     },
     {
       "name": "man",
@@ -205,9 +205,9 @@
       "summary": "Show a command manual.",
       "sourcePath": "man/man.1",
       "artifactPath": "ui/src/generated/manpages/man.txt",
-      "byteCount": 1161,
-      "lineCount": 38,
-      "sha256": "c06ed24bf48e931c11f2ffced9c25b2a60d8cd4492f6e72643879618b078237a"
+      "byteCount": 2241,
+      "lineCount": 59,
+      "sha256": "62b504ede3d5fe56c55cea8ae5cdccc3e25cdd5409f5a85eb639ae6e5b69e5cd"
     },
     {
       "name": "notes",
@@ -216,9 +216,9 @@
       "summary": "Open notes content.",
       "sourcePath": "man/notes.1",
       "artifactPath": "ui/src/generated/manpages/notes.txt",
-      "byteCount": 366,
-      "lineCount": 18,
-      "sha256": "aa6bbd4dfd07ff705fcee0e523e64a34921df5af5cd433d635bd8ca107004116"
+      "byteCount": 1315,
+      "lineCount": 40,
+      "sha256": "980f744d60f187dc638e277d13c19f9aa35ee766189763b6a9261a676e72338b"
     },
     {
       "name": "now",
@@ -227,9 +227,9 @@
       "summary": "Open now content.",
       "sourcePath": "man/now.1",
       "artifactPath": "ui/src/generated/manpages/now.txt",
-      "byteCount": 342,
-      "lineCount": 18,
-      "sha256": "2cd2bc6ff2c6c8b53f739724e949d0bbca187cdc159a71ece86bf1babed3c869"
+      "byteCount": 983,
+      "lineCount": 32,
+      "sha256": "6e94494ebe0928545a9d706fe95c6991e58b48bc5452eada83c5b3dfc5bd765c"
     },
     {
       "name": "open",
@@ -238,9 +238,9 @@
       "summary": "Open virtual content inline or in a split viewer pane.",
       "sourcePath": "man/open.1",
       "artifactPath": "ui/src/generated/manpages/open.txt",
-      "byteCount": 723,
-      "lineCount": 27,
-      "sha256": "53dcc366072f6a6885c545831856988ee8187d5f29e07eeb3938e60d540a6cc5"
+      "byteCount": 2329,
+      "lineCount": 59,
+      "sha256": "6c5472c4a950816f5f10710b7c610c4259b8c5187d2f185361e8695696ba4849"
     },
     {
       "name": "pane",
@@ -249,9 +249,9 @@
       "summary": "Manage terminal panes.",
       "sourcePath": "man/pane.1",
       "artifactPath": "ui/src/generated/manpages/pane.txt",
-      "byteCount": 696,
-      "lineCount": 24,
-      "sha256": "51472a0a338b3d4a70bfbe3440172363ac2892aa4ec5cabfcc32898aa49f9179"
+      "byteCount": 3290,
+      "lineCount": 85,
+      "sha256": "4ed048f14d8935a530e1eef69a32fe1663c8cd6c62c39b2dfd77dd5f5f2d6276"
     },
     {
       "name": "projects",
@@ -260,9 +260,9 @@
       "summary": "Open projects content.",
       "sourcePath": "man/projects.1",
       "artifactPath": "ui/src/generated/manpages/projects.txt",
-      "byteCount": 392,
-      "lineCount": 18,
-      "sha256": "a4b7f0af79630656a2866baa05198e535574f3b79e5c2ef12556d6e165fce036"
+      "byteCount": 1355,
+      "lineCount": 37,
+      "sha256": "17831c47abc4d55ca2a2fc2a631c86038db6b95602ffb4071ff92997c26f9ffe"
     },
     {
       "name": "pwd",
@@ -271,9 +271,9 @@
       "summary": "Print this shell pane's virtual directory.",
       "sourcePath": "man/pwd.1",
       "artifactPath": "ui/src/generated/manpages/pwd.txt",
-      "byteCount": 417,
-      "lineCount": 19,
-      "sha256": "562a1b1c76d2806d27ca492103ced25e3633ac51c9a8bec8682c52f9832ee97b"
+      "byteCount": 843,
+      "lineCount": 33,
+      "sha256": "f21ebc94410bbe38853ff99e9a06bc5af05338f8d565b661ce13fda5c31c84cd"
     },
     {
       "name": "skills",
@@ -282,9 +282,9 @@
       "summary": "Open skills content.",
       "sourcePath": "man/skills.1",
       "artifactPath": "ui/src/generated/manpages/skills.txt",
-      "byteCount": 357,
-      "lineCount": 18,
-      "sha256": "832800271e57145fbd4e2f88649b87cf0db98d568da7a259cd2094631155f70d"
+      "byteCount": 913,
+      "lineCount": 32,
+      "sha256": "da06edf32efc82c0899635b619e2bbed9e99afe4f113cdfc96f2372e47b3fbea"
     },
     {
       "name": "stats",
@@ -293,9 +293,9 @@
       "summary": "Show aggregate site statistics.",
       "sourcePath": "man/stats.1",
       "artifactPath": "ui/src/generated/manpages/stats.txt",
-      "byteCount": 442,
-      "lineCount": 19,
-      "sha256": "f0462d358f42390c8b21ad650b09d41a19f2e5c85c4cbde1234c1a6fa1c1ce86"
+      "byteCount": 1302,
+      "lineCount": 36,
+      "sha256": "7bd77789f3adc25d6d908c171c112e086ce4ed9fd2c30cec3f0a5645751bcd4e"
     },
     {
       "name": "tail",
@@ -304,9 +304,9 @@
       "summary": "Print final raw document lines.",
       "sourcePath": "man/tail.1",
       "artifactPath": "ui/src/generated/manpages/tail.txt",
-      "byteCount": 569,
-      "lineCount": 23,
-      "sha256": "9d738a8e07fde568af8cd066d700c21a24bfc4e3cfb002df708dbe4e3fb6ab6e"
+      "byteCount": 1442,
+      "lineCount": 44,
+      "sha256": "e96eb686c46b263034ed1b8595c1b039eaaf6ea03752cfe726414459418b4394"
     },
     {
       "name": "theme",
@@ -315,9 +315,9 @@
       "summary": "List, select, or follow the system terminal theme.",
       "sourcePath": "man/theme.1",
       "artifactPath": "ui/src/generated/manpages/theme.txt",
-      "byteCount": 781,
-      "lineCount": 31,
-      "sha256": "6a199415d5b4a855c1fb884dbc6e5cbd6a0b09d652636b526cb759cd912460aa"
+      "byteCount": 1644,
+      "lineCount": 49,
+      "sha256": "a55798b51b57f1ee900459433dbc8551a44531ebf04a6d088efda974a78aba75"
     },
     {
       "name": "tools",
@@ -326,9 +326,9 @@
       "summary": "Open tools content.",
       "sourcePath": "man/tools.1",
       "artifactPath": "ui/src/generated/manpages/tools.txt",
-      "byteCount": 352,
-      "lineCount": 18,
-      "sha256": "aa1764ebc9deb3a911b2a4e29c2b43ea9baa9aceb98848658563d7d7a5df3acd"
+      "byteCount": 910,
+      "lineCount": 32,
+      "sha256": "91f909eeb95461104deeae106aeabfbeedf9377c7c3b1a8b5cd610b3b9990a26"
     },
     {
       "name": "tree",
@@ -337,9 +337,9 @@
       "summary": "Render a bounded virtual directory tree.",
       "sourcePath": "man/tree.1",
       "artifactPath": "ui/src/generated/manpages/tree.txt",
-      "byteCount": 628,
-      "lineCount": 26,
-      "sha256": "bd3cab563678f7df7de603a6e724c0a3518b0b3db78dcecdcd9265dbc0e103a4"
+      "byteCount": 1702,
+      "lineCount": 50,
+      "sha256": "ed04aa60b9bb960dcae6c8c649e37b62d9a15727d6201050916b2fae6f0bada7"
     },
     {
       "name": "whoami",
@@ -348,9 +348,9 @@
       "summary": "Show the current development capability.",
       "sourcePath": "man/whoami.1",
       "artifactPath": "ui/src/generated/manpages/whoami.txt",
-      "byteCount": 409,
-      "lineCount": 19,
-      "sha256": "53e3e2e3810edb5892c96bf5e73146dc60ad781733152b7f5bc4e5c4ba2da9d6"
+      "byteCount": 775,
+      "lineCount": 30,
+      "sha256": "2a2744f0fa10d8b7bcec2238be2810dbdae26596ecae9741967e12f22a28ddf1"
     }
   ]
 }

@@ -7,13 +7,24 @@ SYNOPSIS
      whoami
 
 DESCRIPTION
-     Reports  the  anonymous development capability used by the public termin.al
-     session.
+     Prints the fixed capability identity used by the public browser demo.
+
+OUTPUT
+     The  exact  output  is anonymous.  It describes the current unauthenticated
+     development capability, not an operating-system account, GitHub identity or
+     browser profile.
+
+FAILURES
+     Any argument is rejected.
+
+NOTES
+     The value is not read from credentials or browser storage and is  unchanged
+     by the unavailable login and logout commands.
 
 EXAMPLES
      $ whoami
 
 SEE ALSO
-     help(1), man(1)
+     login(1), logout(1), stats(1)
 
 termin.al                                                              WHOAMI(1)

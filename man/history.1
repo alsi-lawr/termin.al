@@ -12,10 +12,19 @@ history \- Show this shell pane's bounded command history.
 history
 .fi
 .SH DESCRIPTION
-Prints the bounded command history owned by the current shell pane, including the current history invocation.
+Prints the bounded command history owned by the current shell pane. Entries are numbered from 1 in retained order and preserve the submitted command source, including quoting.
+.SH OUTPUT
+The history invocation is already present in the execution context and therefore appears as the final entry. Number columns widen as required.
+.SH FAILURES
+Any argument is rejected.
+.SH LIMITS
+Each shell pane retains its latest 100 submitted commands. Older entries are discarded when the bound is exceeded.
+.SH NOTES
+History is pane-local and survives clear(1), directory changes and pane-tree transforms while that shell pane exists. It is discarded when the pane closes or the browser page reloads, and it does not include output text.
 .SH EXAMPLES
 .nf
+$ echo one
 $ history
 .fi
 .SH SEE ALSO
-help(1), man(1)
+clear(1), pane(1), pwd(1)

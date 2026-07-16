@@ -9,16 +9,60 @@
 pane \- Manage terminal panes.
 .SH SYNOPSIS
 .nf
-pane split|focus|select|resize|close|zoom|swap|rotate|layout
+pane split horizontal|vertical [shell|viewer|editor]
+pane focus left|right|up|down|next|<number>
+pane select <number>
+pane resize left|right|up|down
+pane close
+pane zoom
+pane swap previous|next
+pane rotate previous|next
+pane layout even-horizontal|even-vertical|main-horizontal|main-vertical|tiled|next
 .fi
 .SH DESCRIPTION
-Applies an explicit operation to the terminal workspace's pane tree. Pane focus, layout and content remain owned by existing workspace behavior.
+Applies one operation to the in-memory pane tree. Successful operations print the exact text
+.BR "Pane operation applied."
+Parse and workspace rejections print a command diagnostic.
+.SH SUBCOMMANDS
+.TP
+.B pane split horizontal|vertical [shell|viewer|editor]
+Split the invoking pane, create and focus a new pane, and select shell content by default. viewer creates a placeholder viewer; editor creates an empty editor buffer.
+.TP
+.B pane focus left|right|up|down|next|<number>
+Focus the nearest pane in a direction, the next pane in traversal order with wraparound, or a one-based pane number.
+.TP
+.B pane select <number>
+Focus a one-based pane number; this is the explicit numeric selection form.
+.TP
+.B pane resize left|right|up|down
+Move the nearest matching split boundary by five percentage points. Ratios are bounded from 10 through 90.
+.TP
+.B pane close
+Close the active pane and focus an adjacent survivor. The final pane cannot close. A dirty editor requests confirmation before removal.
+.TP
+.B pane zoom
+Toggle showing only the active pane; pane contents and layout remain retained.
+.TP
+.B pane swap previous|next
+Exchange the active pane with its adjacent pane in traversal order. There is no wraparound.
+.TP
+.B pane rotate previous|next
+Rotate all panes one position in traversal order. At least two panes are required.
+.TP
+.B pane layout even-horizontal|even-vertical|main-horizontal|main-vertical|tiled|next
+Apply one named automatic layout or cycle through those layouts. Manual split and resize operations return the layout to manual.
+.SH FAILURES
+Each subcommand requires exactly its documented arguments. Operations can be rejected for an unavailable pane number or direction, a missing adjacent pane, minimum pane size, an unavailable target, or an attempt to close the final pane.
+.SH NOTES
+Each shell pane owns independent scrollback, command history and working directory, preserved through focus, swap, rotation and layout changes. Closing a shell pane destroys that state and cancels its active work. Pane layout and contents are not persisted across page reloads.
+.PP
+Ctrl+b starts keyboard pane commands before viewer or pager key handling. Mobile layouts expose pane-selector tabs and a Prefix control.
 .SH EXAMPLES
 .nf
 $ pane split horizontal viewer
 $ pane focus next
+$ pane layout tiled
+$ pane close
 .fi
-.SH NOTES
-Ctrl+b keyboard prefix behavior and responsive pane layout are not changed by this command's manual or by either manpager presentation.
 .SH SEE ALSO
-open(1)
+open(1), cd(1), history(1), man(1)

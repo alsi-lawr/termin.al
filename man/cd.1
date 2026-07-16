@@ -12,11 +12,28 @@ cd \- Change this shell pane's virtual directory.
 cd [path]
 .fi
 .SH DESCRIPTION
-Changes the working directory owned by the current shell pane. Each pane keeps its own directory, so moving in one pane does not move another.
+Changes the virtual working directory owned by the current shell pane. Relative paths resolve from that pane's current directory; paths beginning with
+.B ~
+resolve from the virtual home directory, and
+.B ..
+walks toward that home.
+.PP
+With no path, cd selects
+.BR ~ .
+The command changes only path state and emits no text output.
+.SH FAILURES
+More than one path, an option before
+.BR -- ,
+an invalid path, a missing path, a file path or a locked path is rejected without changing the directory.
+.SH NOTES
+Each shell pane retains its own directory across focus, swap, rotation and layout changes. A newly created shell pane starts at
+.BR ~ .
+Pane state is in-memory and is not restored after a page reload.
 .SH EXAMPLES
 .nf
 $ cd projects
-$ cd ..
+$ cd ../notes
+$ cd
 .fi
 .SH SEE ALSO
-help(1), man(1)
+pwd(1), ls(1), pane(1)

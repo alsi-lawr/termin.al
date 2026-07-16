@@ -7,12 +7,27 @@ SYNOPSIS
      about
 
 DESCRIPTION
-     Opens the published about document in the inline viewer.
+     Opens the fixed virtual document ~/about.md as rendered Markdown in the in‐
+     line viewer owned by the current shell pane.
+
+VIEWER
+     The  viewer supports j/k or arrow-key movement, PageUp/b and PageDown/Space
+     paging, g/G jumps, / search, n/N match navigation, and q or Escape  to  re‐
+     turn. Returning restores the same shell transcript, history and working di‐
+     rectory.
+
+FAILURES
+     Extra  arguments  are rejected. A missing document produces the stable con‐
+     tent-unavailable diagnostic; cancellation returns no viewer.
+
+NOTES
+     The published document and virtual filesystem are  read-only.  Mobile  con‐
+     trols provide Escape, movement and the pane Prefix action.
 
 EXAMPLES
      $ about
 
 SEE ALSO
-     help(1), man(1)
+     open(1), help(1), man(1)
 
 termin.al                                                               ABOUT(1)
