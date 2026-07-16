@@ -26,15 +26,32 @@ module ContentWire =
           Source: SourceDto
           Cache: CacheDto }
 
-    type DocumentDto =
+    type PageDocumentDto =
         { Id: string
           Path: string
           Title: string
+          UpdatedAt: string
+          Body: string
+          Source: SourceDto
+          Cache: CacheDto }
+
+    type PublicationDocumentDto =
+        { Kind: string
+          Id: string
+          Slug: string
+          Path: string
+          Title: string
+          Summary: string
+          PublishedAt: string
           UpdatedAt: string
           Tags: string list
           Body: string
           Source: SourceDto
           Cache: CacheDto }
+
+    type DocumentDto =
+        | PageDocument of PageDocumentDto
+        | PublicationDocument of PublicationDocumentDto
 
     type ProjectDto =
         { Id: string
@@ -137,29 +154,71 @@ module ContentWire =
           Cache = catalog |> ContentDomain.Catalog.cache |> cache }
 
     let document (document: ContentDomain.ContentDocument) : DocumentDto =
-        { Id = document |> ContentDomain.ContentDocument.id |> ContentDomain.ContentId.value
-          Path =
+        let id =
+            document |> ContentDomain.ContentDocument.id |> ContentDomain.ContentId.value
+
+        let path =
             document
             |> ContentDomain.ContentDocument.path
             |> ContentDomain.VirtualPath.value
-          Title =
+
+        let title =
             document
             |> ContentDomain.ContentDocument.title
             |> ContentDomain.ContentTitle.value
-          UpdatedAt =
+
+        let updatedAt =
             document
             |> ContentDomain.ContentDocument.updatedAt
             |> ContentDomain.Timestamp.value
-          Tags =
-            document
-            |> ContentDomain.ContentDocument.tags
-            |> List.map ContentDomain.ContentTag.value
-          Body =
+
+        let body =
             document
             |> ContentDomain.ContentDocument.body
             |> ContentDomain.MarkdownBody.value
-          Source = document |> ContentDomain.ContentDocument.source |> source
-          Cache = document |> ContentDomain.ContentDocument.cache |> cache }
+
+        let documentSource = document |> ContentDomain.ContentDocument.source |> source
+        let documentCache = document |> ContentDomain.ContentDocument.cache |> cache
+
+        match document |> ContentDomain.ContentDocument.metadata with
+        | ContentDomain.ContentDocumentMetadata.Page ->
+            PageDocument
+                { Id = id
+                  Path = path
+                  Title = title
+                  UpdatedAt = updatedAt
+                  Body = body
+                  Source = documentSource
+                  Cache = documentCache }
+        | ContentDomain.ContentDocumentMetadata.Publication metadata ->
+            PublicationDocument
+                { Kind =
+                    metadata
+                    |> ContentDomain.PublicationMetadata.kind
+                    |> ContentDomain.PublicationKind.value
+                  Id = id
+                  Slug =
+                    metadata
+                    |> ContentDomain.PublicationMetadata.slug
+                    |> ContentDomain.ContentSlug.value
+                  Path = path
+                  Title = title
+                  Summary =
+                    metadata
+                    |> ContentDomain.PublicationMetadata.summary
+                    |> ContentDomain.ContentSummary.value
+                  PublishedAt =
+                    metadata
+                    |> ContentDomain.PublicationMetadata.publishedAt
+                    |> ContentDomain.Timestamp.value
+                  UpdatedAt = updatedAt
+                  Tags =
+                    metadata
+                    |> ContentDomain.PublicationMetadata.tags
+                    |> List.map ContentDomain.ContentTag.value
+                  Body = body
+                  Source = documentSource
+                  Cache = documentCache }
 
     let project (readme: ContentDomain.ProjectReadme) : ProjectDto =
         let project = readme |> ContentDomain.ProjectReadme.project
@@ -286,15 +345,31 @@ module ContentWire =
               "cache", cacheNode value.Cache ]
 
     let private documentNode (value: DocumentDto) =
-        objectOf
-            [ "id", text value.Id
-              "path", text value.Path
-              "title", text value.Title
-              "updatedAt", text value.UpdatedAt
-              "tags", value.Tags |> List.map text |> arrayOf
-              "body", text value.Body
-              "source", sourceNode value.Source
-              "cache", cacheNode value.Cache ]
+        match value with
+        | PageDocument page ->
+            objectOf
+                [ "kind", text "page"
+                  "id", text page.Id
+                  "path", text page.Path
+                  "title", text page.Title
+                  "updatedAt", text page.UpdatedAt
+                  "body", text page.Body
+                  "source", sourceNode page.Source
+                  "cache", cacheNode page.Cache ]
+        | PublicationDocument publication ->
+            objectOf
+                [ "kind", text publication.Kind
+                  "id", text publication.Id
+                  "slug", text publication.Slug
+                  "path", text publication.Path
+                  "title", text publication.Title
+                  "summary", text publication.Summary
+                  "publishedAt", text publication.PublishedAt
+                  "updatedAt", text publication.UpdatedAt
+                  "tags", publication.Tags |> List.map text |> arrayOf
+                  "body", text publication.Body
+                  "source", sourceNode publication.Source
+                  "cache", cacheNode publication.Cache ]
 
     let private projectNode (value: ProjectDto) =
         objectOf

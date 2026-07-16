@@ -20,25 +20,48 @@ function fixture(name: string): unknown {
 test("accepts every shared serialized content contract fixture", () => {
   const catalog = validateContentCatalog(fixture("catalog.json"));
   const document = validateContentDocument(fixture("document-about.json"));
+  const publication = validateContentDocument(fixture("document-publication.json"));
   const projects = validateContentProjects(fixture("projects.json"));
   const now = validateContentNow(fixture("now.json"));
   const changelog = validateContentChangelog(fixture("changelog.json"));
   const problem = validateContentProblem(fixture("problem-invalid-request.json"));
 
-  for (const result of [catalog, document, projects, now, changelog, problem]) {
+  for (const result of [
+    catalog,
+    document,
+    publication,
+    projects,
+    now,
+    changelog,
+    problem,
+  ]) {
     assert.equal(result.kind, "valid", result.kind === "invalid" ? result.message : "");
   }
 
   if (
     catalog.kind !== "valid" ||
     document.kind !== "valid" ||
+    publication.kind !== "valid" ||
     projects.kind !== "valid"
   ) {
-    assert.fail("Expected catalog, document, and projects fixture validation.");
+    assert.fail("Expected catalog, document, publication, and projects validation.");
   }
 
-  assert.equal(catalog.value.entries[2]?.kind, "file");
+  assert.equal(catalog.value.entries[3]?.kind, "file");
+  assert.equal(document.value.kind, "page");
   assert.equal(document.value.id.value, "about");
+  assert.equal(publication.value.kind, "blog");
+  if (publication.value.kind === "blog") {
+    assert.equal(publication.value.slug.value, "validated-metadata");
+    assert.equal(publication.value.summary, "The supplied publication summary.");
+    assert.equal(publication.value.publishedAt.value, "2026-07-10T00:00:00.000Z");
+    assert.equal(publication.value.updatedAt.value, "2026-07-15T00:00:04.000Z");
+    assert.deepEqual(
+      publication.value.tags.map((tag) => tag.value),
+      ["fsharp", "content"],
+    );
+    assert.doesNotMatch(publication.value.body, /supplied publication summary/u);
+  }
   assert.deepEqual(
     projects.value.projects.map((project) => project.repository.value),
     ["example-owner/sample-project", "example-owner/second-project"],

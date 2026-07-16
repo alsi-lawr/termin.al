@@ -23,6 +23,10 @@ module ContentContractsTests =
     let private virtualPath value =
         ContentDomain.VirtualPath.tryCreate "test.path" value |> requireValid
 
+    let private repositoryPath value =
+        ContentDomain.RepositoryPath.tryCreate "test.repositoryPath" value
+        |> requireValid
+
     let private byteSize value =
         ContentDomain.ByteSize.tryCreate "test.size" value |> requireValid
 
@@ -81,28 +85,58 @@ module ContentContractsTests =
                   timestamp "2026-07-15T00:00:01.000Z",
                   byteSize 0
               )
+              ContentDomain.Directory(
+                  catalogId "blog",
+                  virtualPath "~/blog",
+                  timestamp "2026-07-15T00:00:02.000Z",
+                  byteSize 0
+              )
               ContentDomain.File(
                   catalogId "about-document",
                   virtualPath "~/about.md",
-                  timestamp "2026-07-15T00:00:02.000Z",
+                  timestamp "2026-07-15T00:00:03.000Z",
                   byteSize 42,
                   contentId "about"
+              )
+              ContentDomain.File(
+                  catalogId "publication-document",
+                  virtualPath "~/blog/validated-metadata.md",
+                  timestamp "2026-07-15T00:00:04.000Z",
+                  byteSize 128,
+                  contentId "blog-validated-metadata"
               ) ]
         |> requireValid
 
     let private document () =
         let markdown =
             "---\n"
-            + "id: about\n"
-            + "title: About\n"
-            + "updatedAt: 2026-07-15T00:00:02.000Z\n"
-            + "tags: fsharp, typescript\n"
+            + "{\"title\":\"About\"}\n"
             + "---\n"
             + "# About\n\nA validated shared content fixture."
 
         ContentDomain.ContentDocument.tryCreate
+            (contentId "about")
             (virtualPath "~/about.md")
+            (timestamp "2026-07-15T00:00:03.000Z")
             (source "content/about.md" "https://github.com/example-owner/content/blob/main/content/about.md")
+            cache
+            markdown
+        |> requireValid
+
+    let private publicationDocument () =
+        let markdown =
+            "---\n"
+            + "{\"title\":\"Validated Metadata\",\"summary\":\"The supplied publication summary.\",\"publishedAt\":\"2026-07-10T00:00:00.000Z\",\"tags\":[\"fsharp\",\"content\"]}\n"
+            + "---\n"
+            + "# Body Heading\n\nThis first body paragraph is not the supplied summary."
+
+        ContentDomain.ContentDocument.tryCreate
+            (contentId "blog-validated-metadata")
+            (virtualPath "~/blog/validated-metadata.md")
+            (timestamp "2026-07-15T00:00:04.000Z")
+            (source
+                "blog/validated-metadata.md"
+                "https://github.com/example-owner/content/blob/main/blog/validated-metadata.md")
             cache
             markdown
         |> requireValid
@@ -190,6 +224,12 @@ module ContentContractsTests =
         |> ContentWire.serialize
         |> assertFixture "document-about.json"
 
+        publicationDocument ()
+        |> ContentWire.document
+        |> ContentWire.DocumentResponse
+        |> ContentWire.serialize
+        |> assertFixture "document-publication.json"
+
         let projectEntries = projects ()
 
         if List.length projectEntries <> 2 then
@@ -229,10 +269,45 @@ module ContentContractsTests =
         | Error _ -> ()
 
         let duplicateFrontMatter =
-            "---\nid: about\nid: duplicate\ntitle: About\nupdatedAt: 2026-07-15T00:00:02.000Z\n---\n# About"
+            "---\n{\"title\":\"About\",\"title\":\"Duplicate\"}\n---\n# About"
 
-        match ContentDomain.FrontMatter.tryParse duplicateFrontMatter with
+        match ContentDomain.FrontMatter.tryParse (repositoryPath "about.md") duplicateFrontMatter with
         | Ok _ -> failwith "Duplicate front matter keys should not validate."
+        | Error _ -> ()
+
+        let keyValueFrontMatter = "---\ntitle: About\n---\n# About"
+
+        match ContentDomain.FrontMatter.tryParse (repositoryPath "about.md") keyValueFrontMatter with
+        | Ok _ -> failwith "Superseded key/value front matter should not validate."
+        | Error _ -> ()
+
+        let frontMatterWithParallelAuthority =
+            "---\n{\"id\":\"about\",\"title\":\"About\"}\n---\n# About"
+
+        match ContentDomain.FrontMatter.tryParse (repositoryPath "about.md") frontMatterWithParallelAuthority with
+        | Ok _ -> failwith "Front matter identifiers should not remain a parallel authority."
+        | Error _ -> ()
+
+        let invalidPublicationDate =
+            "---\n{\"title\":\"Post\",\"summary\":\"Summary\",\"publishedAt\":\"2026-07-10\",\"tags\":[]}\n---\n# Post"
+
+        match ContentDomain.FrontMatter.tryParse (repositoryPath "blog/post.md") invalidPublicationDate with
+        | Ok _ -> failwith "Publication dates must use the validated timestamp semantics."
+        | Error _ -> ()
+
+        let validPublication =
+            "---\n{\"title\":\"Post\",\"summary\":\"Summary\",\"publishedAt\":\"2026-07-10T00:00:00.000Z\",\"tags\":[]}\n---\n# Post"
+
+        match
+            ContentDomain.ContentDocument.tryCreate
+                (contentId "post")
+                (virtualPath "~/notes/post.md")
+                (timestamp "2026-07-15T00:00:00.000Z")
+                (source "blog/post.md" "https://github.com/example-owner/content/blob/main/blog/post.md")
+                cache
+                validPublication
+        with
+        | Ok _ -> failwith "Repository and virtual publication paths must agree."
         | Error _ -> ()
 
         let duplicateProjectManifest =
@@ -262,6 +337,55 @@ module ContentContractsTests =
         | Ok _ -> failwith "Documents above the byte limit should not validate."
         | Error _ -> ()
 
+    let private testPublicationMetadata () =
+        let document = publicationDocument ()
+
+        if
+            document
+            |> ContentDomain.ContentDocument.updatedAt
+            |> ContentDomain.Timestamp.value
+            <> "2026-07-15T00:00:04.000Z"
+        then
+            failwith "Document update time must remain independent from publication time."
+
+        match document |> ContentDomain.ContentDocument.metadata with
+        | ContentDomain.ContentDocumentMetadata.Page -> failwith "A blog path must produce publication metadata."
+        | ContentDomain.ContentDocumentMetadata.Publication metadata ->
+            let kind =
+                metadata
+                |> ContentDomain.PublicationMetadata.kind
+                |> ContentDomain.PublicationKind.value
+
+            let slug =
+                metadata
+                |> ContentDomain.PublicationMetadata.slug
+                |> ContentDomain.ContentSlug.value
+
+            let summary =
+                metadata
+                |> ContentDomain.PublicationMetadata.summary
+                |> ContentDomain.ContentSummary.value
+
+            let publishedAt =
+                metadata
+                |> ContentDomain.PublicationMetadata.publishedAt
+                |> ContentDomain.Timestamp.value
+
+            let tags =
+                metadata
+                |> ContentDomain.PublicationMetadata.tags
+                |> List.map ContentDomain.ContentTag.value
+
+            if
+                kind <> "blog"
+                || slug <> "validated-metadata"
+                || summary <> "The supplied publication summary."
+                || publishedAt <> "2026-07-10T00:00:00.000Z"
+                || tags <> [ "fsharp"; "content" ]
+            then
+                failwith "Publication metadata must be validated and derived from its repository path."
+
     let run () =
         testSerializedFixtures ()
         testValidationFailures ()
+        testPublicationMetadata ()

@@ -3,6 +3,7 @@ import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   createVirtualFilesystem,
+  resolveVirtualPath,
   virtualHomeDirectory,
   type VirtualDocumentSupplier,
   type VirtualFilesystem,
@@ -197,13 +198,17 @@ test("opens fixture documents inline and directory targets in requested split ef
 test("builds blog and note listings with document-open data", async () => {
   const registry = createRegistry();
   const blog = succeeded(await execute("blog", registry));
+  const repeatedBlog = succeeded(await execute("blog", registry));
   const notes = succeeded(await execute("notes", registry));
   const blogEffect = blog.effects[0];
+  const repeatedBlogEffect = repeatedBlog.effects[0];
   const notesEffect = notes.effects[0];
 
   if (
     blogEffect === undefined ||
     blogEffect.kind !== "open-viewer" ||
+    repeatedBlogEffect === undefined ||
+    repeatedBlogEffect.kind !== "open-viewer" ||
     notesEffect === undefined ||
     notesEffect.kind !== "open-viewer"
   ) {
@@ -211,18 +216,84 @@ test("builds blog and note listings with document-open data", async () => {
   }
 
   assert.equal(blogEffect.viewer.kind, "publication-list");
+  assert.equal(repeatedBlogEffect.viewer.kind, "publication-list");
   assert.equal(notesEffect.viewer.kind, "publication-list");
 
   if (
     blogEffect.viewer.kind === "publication-list" &&
+    repeatedBlogEffect.viewer.kind === "publication-list" &&
     notesEffect.viewer.kind === "publication-list"
   ) {
     assert.equal(blogEffect.viewer.publicationKind, "blog");
-    assert.equal(blogEffect.viewer.entries[0]?.title, "Stable Interfaces");
-    assert.match(blogEffect.viewer.entries[0]?.summary ?? "", /synthetic post/u);
+    assert.deepEqual(
+      blogEffect.viewer.entries.map((entry) => ({
+        slug: entry.slug,
+        title: entry.title,
+        publishedAt: entry.publishedAt,
+        tags: entry.tags,
+      })),
+      [
+        {
+          slug: "deterministic-demo",
+          title: "Deterministic Demos",
+          publishedAt: "2026-01-12T00:00:00.000Z",
+          tags: ["demo", "offline"],
+        },
+        {
+          slug: "sample-post",
+          title: "Stable Interfaces",
+          publishedAt: "2026-01-05T00:00:00.000Z",
+          tags: ["typescript", "interfaces"],
+        },
+      ],
+    );
+    assert.equal(
+      blogEffect.viewer.entries[1]?.summary,
+      "Validated metadata about typed outcomes and explicit dependencies.",
+    );
+    assert.doesNotMatch(
+      blogEffect.viewer.entries[1]?.document.text ?? "",
+      /Validated metadata about typed outcomes/u,
+    );
+    assert.deepEqual(
+      repeatedBlogEffect.viewer.entries,
+      blogEffect.viewer.entries,
+      "Demo publication data must remain deterministic across reads.",
+    );
     assert.equal(notesEffect.viewer.publicationKind, "notes");
+    assert.equal(notesEffect.viewer.entries[0]?.title, "Local Paths");
+    assert.deepEqual(notesEffect.viewer.entries[0]?.tags, [
+      "filesystem",
+      "determinism",
+    ]);
     assert.equal(notesEffect.viewer.entries[0]?.document.source.path, "~/notes/sample-note.md");
   }
+
+  const samplePost = resolveVirtualPath(
+    demoContentCorpus.filesystem,
+    virtualHomeDirectory(),
+    "blog/sample-post.md",
+  );
+  const deterministicDemo = resolveVirtualPath(
+    demoContentCorpus.filesystem,
+    virtualHomeDirectory(),
+    "blog/deterministic-demo.md",
+  );
+
+  if (
+    samplePost.kind !== "found" ||
+    samplePost.node.kind !== "file" ||
+    deterministicDemo.kind !== "found" ||
+    deterministicDemo.node.kind !== "file"
+  ) {
+    assert.fail("Expected deterministic demo publication files.");
+  }
+
+  assert.equal(
+    samplePost.node.updatedAt > deterministicDemo.node.updatedAt,
+    true,
+    "Catalog update order must differ from publication order in this fixture.",
+  );
 });
 
 test("represents an empty public collection as an empty listing", async () => {

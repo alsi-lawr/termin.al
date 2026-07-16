@@ -106,7 +106,8 @@ module GitHubContentClient =
 
     type private ManifestDocument =
         { ManifestDocumentPath: ContentDomain.RepositoryPath
-          ManifestVirtualPath: ContentDomain.VirtualPath }
+          ManifestVirtualPath: ContentDomain.VirtualPath
+          ManifestUpdatedAt: ContentDomain.Timestamp }
 
     type private ManifestData =
         { ManifestCatalogEntries: ContentDomain.CatalogEntry list
@@ -752,7 +753,8 @@ module GitHubContentClient =
                                                     Some(
                                                         ContentDomain.ContentId.value parsedHandle,
                                                         { ManifestDocumentPath = parsedSourcePath
-                                                          ManifestVirtualPath = parsedPath }
+                                                          ManifestVirtualPath = parsedPath
+                                                          ManifestUpdatedAt = parsedUpdatedAt }
                                                     )
                                                 )
                                             | Error message, _
@@ -847,15 +849,19 @@ module GitHubContentClient =
 
         let buildDocument
             (repository: GitHubRepositoryData)
+            (documentId: ContentDomain.ContentId)
             (documentPath: ContentDomain.RepositoryPath)
             (virtualPath: ContentDomain.VirtualPath)
+            (updatedAt: ContentDomain.Timestamp)
             (payload: GitHubPayload)
             (markdown: string)
             =
             match documentUrl repository documentPath, cacheMetadata payload with
             | Ok url, Ok metadata ->
                 ContentDomain.ContentDocument.tryCreate
+                    documentId
                     virtualPath
+                    updatedAt
                     (repositorySource repository documentPath url)
                     metadata
                     markdown
@@ -1799,8 +1805,10 @@ module GitHubContentClient =
                                 return
                                     buildDocument
                                         input.CatalogRepository
+                                        documentId
                                         locator.ManifestDocumentPath
                                         locator.ManifestVirtualPath
+                                        locator.ManifestUpdatedAt
                                         documentPayload
                                         documentPayload.PayloadBody
                             | Error Missing when ContentDomain.ContentId.value documentId = "about" ->
@@ -1820,20 +1828,15 @@ module GitHubContentClient =
                                     | Error failure -> return Error(mapValidationFailure failure)
                                     | Ok profilePath ->
                                         let profileMarkdown =
-                                            String.concat
-                                                "\n"
-                                                [ "---"
-                                                  "id: about"
-                                                  "title: About"
-                                                  $"updatedAt: {ContentDomain.Timestamp.value (ContentDomain.Timestamp.create profilePayload.PayloadFetchedAt)}"
-                                                  "---"
-                                                  profileBody ]
+                                            String.concat "\n" [ "---"; "{\"title\":\"About\"}"; "---"; profileBody ]
 
                                         return
                                             buildDocument
                                                 profileRepository
+                                                documentId
                                                 profilePath
                                                 locator.ManifestVirtualPath
+                                                locator.ManifestUpdatedAt
                                                 profilePayload
                                                 profileMarkdown
                             | Error failure -> return Error(mapFetchFailure failure)

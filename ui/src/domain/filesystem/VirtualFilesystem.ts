@@ -182,10 +182,23 @@ export type VirtualTraversalOptions = Readonly<{
   signal: AbortSignal;
 }>;
 
+export type VirtualDocumentClassification =
+  | Readonly<{ kind: "page" }>
+  | Readonly<{
+      kind: "publication";
+      publicationKind: "blog" | "note";
+      slug: string;
+      title: string;
+      summary: string;
+      publishedAt: VirtualTimestamp;
+      tags: ReadonlyArray<string>;
+    }>;
+
 export type VirtualDocumentReadResult =
   | Readonly<{
       kind: "available";
       document: MarkdownDocument;
+      classification: VirtualDocumentClassification;
     }>
   | Readonly<{
       kind: "missing";

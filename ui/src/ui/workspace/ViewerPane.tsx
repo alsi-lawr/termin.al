@@ -222,6 +222,21 @@ function PublicationList({
               </time>
             </div>
             <p className="mt-2 text-text-primary">{entry.summary}</p>
+            {entry.tags.length === 0 ? null : (
+              <ul
+                className="mt-3 flex flex-wrap gap-1"
+                aria-label={`${entry.title} tags`}
+              >
+                {entry.tags.map((tag) => (
+                  <li
+                    key={tag}
+                    className="rounded border border-ui-subtle px-1.5 py-0.5 text-xs text-text-muted"
+                  >
+                    #{tag}
+                  </li>
+                ))}
+              </ul>
+            )}
             <button
               type="button"
               className="mt-3 rounded border border-ui-accent px-2 py-1 text-text-bright hover:bg-surface-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ui-focus"

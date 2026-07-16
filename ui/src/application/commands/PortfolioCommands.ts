@@ -14,6 +14,7 @@ import {
   listVirtualDirectory,
   resolveVirtualPath,
   type VirtualDocumentSupplier,
+  type VirtualDocumentClassification,
   type VirtualFileNode,
   type VirtualFilesystem,
   type VirtualPathFailure,
@@ -62,6 +63,10 @@ type OpenTargetResult =
 type LoadedDirectoryDocument = Readonly<{
   node: VirtualFileNode;
   document: MarkdownDocument;
+  publication: Extract<
+    VirtualDocumentClassification,
+    { kind: "publication" }
+  >;
 }>;
 
 type LoadedDirectoryDocumentsResult =
@@ -262,24 +267,6 @@ function noArguments(
   return invocation.arguments.length === 0 ? undefined : `Usage: ${usage}`;
 }
 
-function markdownTitle(document: MarkdownDocument, fallback: string): string {
-  const heading = document.text
-    .split(/\r?\n/u)
-    .find((line) => line.startsWith("# "));
-  const title = heading?.slice(2).trim();
-
-  return title === undefined || title.length === 0 ? fallback : title;
-}
-
-function markdownSummary(document: MarkdownDocument): string {
-  const summary = document.text
-    .split(/\r?\n\s*\r?\n/u)
-    .map((paragraph) => paragraph.trim())
-    .find((paragraph) => paragraph.length > 0 && !paragraph.startsWith("#"));
-
-  return summary ?? "No summary is available.";
-}
-
 function projectCard(project: ProjectReadme): ViewerProjectCard {
   return {
     id: project.id,
@@ -295,12 +282,15 @@ function projectCard(project: ProjectReadme): ViewerProjectCard {
 function publicationEntry({
   node,
   document,
+  publication,
 }: LoadedDirectoryDocument): ViewerPublicationEntry {
   return {
     id: node.id,
-    title: markdownTitle(document, node.name),
-    summary: markdownSummary(document),
-    publishedAt: node.updatedAt,
+    slug: publication.slug,
+    title: publication.title,
+    summary: publication.summary,
+    publishedAt: publication.publishedAt,
+    tags: publication.tags,
     document,
   };
 }
@@ -308,6 +298,7 @@ function publicationEntry({
 async function loadDirectoryDocuments(
   entries: ReadonlyArray<VirtualFileNode>,
   documents: VirtualDocumentSupplier,
+  publicationKind: "blog" | "note",
   signal: AbortSignal,
 ): Promise<LoadedDirectoryDocumentsResult> {
   const loaded = await Promise.all(
@@ -329,7 +320,18 @@ async function loadDirectoryDocuments(
 
   for (const entry of loaded) {
     if (entry.result.kind === "available") {
-      available.push({ node: entry.node, document: entry.result.document });
+      if (
+        entry.result.classification.kind !== "publication" ||
+        entry.result.classification.publicationKind !== publicationKind
+      ) {
+        return { kind: "missing" };
+      }
+
+      available.push({
+        node: entry.node,
+        document: entry.result.document,
+        publication: entry.result.classification,
+      });
     }
   }
 
@@ -380,12 +382,15 @@ async function openTarget(
     }
 
     if (resolution.node.path === "~/blog" || resolution.node.path === "~/notes") {
+      const documentPublicationKind =
+        resolution.node.path === "~/blog" ? "blog" : "note";
       const files = listing.entries.filter(
         (entry): entry is VirtualFileNode => entry.kind === "file",
       );
       const loaded = await loadDirectoryDocuments(
         files,
         documents,
+        documentPublicationKind,
         context.signal,
       );
 
@@ -401,7 +406,7 @@ async function openTarget(
       }
 
       const publicationKind =
-        resolution.node.path === "~/blog" ? "blog" : "notes";
+        documentPublicationKind === "blog" ? "blog" : "notes";
       const entries = loaded.documents
         .map(publicationEntry)
         .sort((left, right) =>

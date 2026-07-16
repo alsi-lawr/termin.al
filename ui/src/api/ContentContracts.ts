@@ -293,16 +293,33 @@ export type ContentCatalog = Readonly<{
   cache: ContentCache;
 }>;
 
-export type ContentDocument = Readonly<{
+export type ContentPageDocument = Readonly<{
+  kind: "page";
   id: ContentId;
   path: VirtualPath;
   title: string;
+  updatedAt: ContentTimestamp;
+  body: string;
+  source: ContentSource;
+  cache: ContentCache;
+}>;
+
+export type ContentPublicationDocument = Readonly<{
+  kind: "blog" | "note";
+  id: ContentId;
+  slug: ContentSlug;
+  path: VirtualPath;
+  title: string;
+  summary: string;
+  publishedAt: ContentTimestamp;
   updatedAt: ContentTimestamp;
   tags: ReadonlyArray<ContentTag>;
   body: string;
   source: ContentSource;
   cache: ContentCache;
 }>;
+
+export type ContentDocument = ContentPageDocument | ContentPublicationDocument;
 
 export type ContentProject = Readonly<{
   id: ContentId;
@@ -889,27 +906,26 @@ export function validateContentCatalog(value: unknown): ContentValidation<Conten
   return valid({ entries, source: source.value, cache: cache.value });
 }
 
-export function validateContentDocument(
-  value: unknown,
-): ContentValidation<ContentDocument> {
-  const object = requireObject(
-    value,
-    ["id", "path", "title", "updatedAt", "tags", "body", "source", "cache"],
-    "document",
-  );
+type ValidatedDocumentFields = Readonly<{
+  id: ContentId;
+  path: VirtualPath;
+  title: string;
+  updatedAt: ContentTimestamp;
+  body: string;
+  source: ContentSource;
+  cache: ContentCache;
+}>;
 
-  if (object.kind === "invalid") {
-    return object;
-  }
-
-  const idValue = requireString(object.value, "id");
-  const pathValue = requireString(object.value, "path");
-  const titleValue = requireString(object.value, "title");
-  const updatedAtValue = requireString(object.value, "updatedAt");
-  const tagsValue = requireArray(object.value, "tags");
-  const bodyValue = requireString(object.value, "body");
-  const source = validateContentSource(Reflect.get(object.value, "source"));
-  const cache = validateContentCache(Reflect.get(object.value, "cache"));
+function validateDocumentFields(
+  object: object,
+): ContentValidation<ValidatedDocumentFields> {
+  const idValue = requireString(object, "id");
+  const pathValue = requireString(object, "path");
+  const titleValue = requireString(object, "title");
+  const updatedAtValue = requireString(object, "updatedAt");
+  const bodyValue = requireString(object, "body");
+  const source = validateContentSource(Reflect.get(object, "source"));
+  const cache = validateContentCache(Reflect.get(object, "cache"));
 
   if (idValue.kind === "invalid") {
     return idValue;
@@ -925,10 +941,6 @@ export function validateContentDocument(
 
   if (updatedAtValue.kind === "invalid") {
     return updatedAtValue;
-  }
-
-  if (tagsValue.kind === "invalid") {
-    return tagsValue;
   }
 
   if (bodyValue.kind === "invalid") {
@@ -947,7 +959,6 @@ export function validateContentDocument(
   const path = validateVirtualPath(pathValue.value, "document.path");
   const title = validateSingleLine(titleValue.value, "document.title", 200);
   const updatedAt = validateContentTimestamp(updatedAtValue.value, "document.updatedAt");
-  const tags = validateTags(tagsValue.value, "document.tags");
   const body = validateBody(bodyValue.value, "document.body", true);
 
   if (id.kind === "invalid") {
@@ -966,10 +977,6 @@ export function validateContentDocument(
     return updatedAt;
   }
 
-  if (tags.kind === "invalid") {
-    return tags;
-  }
-
   if (body.kind === "invalid") {
     return body;
   }
@@ -979,11 +986,154 @@ export function validateContentDocument(
     path: path.value,
     title: title.value,
     updatedAt: updatedAt.value,
-    tags: tags.value,
     body: body.value,
     source: source.value,
     cache: cache.value,
   });
+}
+
+function validatePageDocument(value: unknown): ContentValidation<ContentPageDocument> {
+  const object = requireObject(
+    value,
+    ["kind", "id", "path", "title", "updatedAt", "body", "source", "cache"],
+    "page document",
+  );
+
+  if (object.kind === "invalid") {
+    return object;
+  }
+
+  const fields = validateDocumentFields(object.value);
+
+  if (fields.kind === "invalid") {
+    return fields;
+  }
+
+  const sourcePath = fields.value.source.path.value;
+
+  if (sourcePath.startsWith("blog/") || sourcePath.startsWith("notes/")) {
+    return invalid("Publication paths must use publication document metadata.");
+  }
+
+  return valid({ kind: "page", ...fields.value });
+}
+
+function validatePublicationDocument(
+  value: unknown,
+  kind: "blog" | "note",
+): ContentValidation<ContentPublicationDocument> {
+  const object = requireObject(
+    value,
+    [
+      "kind",
+      "id",
+      "slug",
+      "path",
+      "title",
+      "summary",
+      "publishedAt",
+      "updatedAt",
+      "tags",
+      "body",
+      "source",
+      "cache",
+    ],
+    "publication document",
+  );
+
+  if (object.kind === "invalid") {
+    return object;
+  }
+
+  const fields = validateDocumentFields(object.value);
+  const slugValue = requireString(object.value, "slug");
+  const summaryValue = requireString(object.value, "summary");
+  const publishedAtValue = requireString(object.value, "publishedAt");
+  const tagsValue = requireArray(object.value, "tags");
+
+  if (fields.kind === "invalid") {
+    return fields;
+  }
+
+  if (slugValue.kind === "invalid") {
+    return slugValue;
+  }
+
+  if (summaryValue.kind === "invalid") {
+    return summaryValue;
+  }
+
+  if (publishedAtValue.kind === "invalid") {
+    return publishedAtValue;
+  }
+
+  if (tagsValue.kind === "invalid") {
+    return tagsValue;
+  }
+
+  const slug = ContentSlug.tryCreate(slugValue.value, "document.slug");
+  const summary = validateSummary(summaryValue.value, "document.summary");
+  const publishedAt = validateContentTimestamp(
+    publishedAtValue.value,
+    "document.publishedAt",
+  );
+  const tags = validateTags(tagsValue.value, "document.tags");
+
+  if (slug.kind === "invalid") {
+    return slug;
+  }
+
+  if (summary.kind === "invalid") {
+    return summary;
+  }
+
+  if (publishedAt.kind === "invalid") {
+    return publishedAt;
+  }
+
+  if (tags.kind === "invalid") {
+    return tags;
+  }
+
+  const directory = kind === "blog" ? "blog" : "notes";
+  const expectedRepositoryPath = `${directory}/${slug.value.value}.md`;
+  const expectedVirtualPath = `~/${expectedRepositoryPath}`;
+
+  if (
+    fields.value.source.path.value !== expectedRepositoryPath ||
+    fields.value.path.value !== expectedVirtualPath
+  ) {
+    return invalid("Publication kind and slug must match the document paths.");
+  }
+
+  return valid({
+    kind,
+    ...fields.value,
+    slug: slug.value,
+    summary: summary.value,
+    publishedAt: publishedAt.value,
+    tags: tags.value,
+  });
+}
+
+export function validateContentDocument(
+  value: unknown,
+): ContentValidation<ContentDocument> {
+  if (!isObject(value)) {
+    return invalid("document must be an object with a supported kind.");
+  }
+
+  const kind = Reflect.get(value, "kind");
+
+  switch (kind) {
+    case "page":
+      return validatePageDocument(value);
+    case "blog":
+    case "note":
+      return validatePublicationDocument(value, kind);
+    default:
+      return invalid("document kind is unsupported.");
+  }
 }
 
 function validateContentProject(value: unknown): ContentValidation<ContentProject> {

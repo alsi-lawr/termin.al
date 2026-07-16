@@ -598,10 +598,7 @@ module GitHubContentClientTests =
                             (Some "\"content-v1\"")
                     | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
                     | path when path = documentPath ->
-                        response
-                            HttpStatusCode.OK
-                            "---\nid: about\ntitle: About\nupdatedAt: 2026-07-15T00:00:00.000Z\ntags: about\n---\n# About\n"
-                            (Some "\"about-v1\"")
+                        response HttpStatusCode.OK "---\n{\"title\":\"About\"}\n---\n# About\n" (Some "\"about-v1\"")
                     | path when path = projectsPath ->
                         response HttpStatusCode.OK emptyProjectsManifest (Some "\"projects-v1\"")
                     | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
@@ -644,6 +641,74 @@ module GitHubContentClientTests =
         then
             failwith "Different cache keys must retain independent parallel upstream requests."
 
+    let private testPublicationMetadata () =
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
+        let publicationPath =
+            "/repos/example-owner/content/contents/blog/validated-metadata.md?ref=main"
+
+        let manifest =
+            "{\"entries\":[{\"kind\":\"directory\",\"id\":\"home\",\"path\":\"~\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":0},{\"kind\":\"directory\",\"id\":\"blog\",\"path\":\"~/blog\",\"updatedAt\":\"2026-07-15T00:00:01.000Z\",\"size\":0},{\"kind\":\"file\",\"id\":\"validated-metadata-document\",\"path\":\"~/blog/validated-metadata.md\",\"updatedAt\":\"2026-07-15T00:00:04.000Z\",\"size\":256,\"documentHandle\":\"blog-validated-metadata\",\"sourcePath\":\"blog/validated-metadata.md\"}]}"
+
+        let markdown =
+            "---\n{\"title\":\"Validated Metadata\",\"summary\":\"The supplied publication summary.\",\"publishedAt\":\"2026-07-10T00:00:00.000Z\",\"tags\":[\"fsharp\",\"content\"]}\n---\n# Body Heading\n\nThis body paragraph is not the supplied summary."
+
+        let handler =
+            new FakeHandler(fun request ->
+                match request.PathAndQuery with
+                | "/repos/example-owner/content" ->
+                    response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
+                | path when path = catalogPath -> response HttpStatusCode.OK manifest None
+                | path when path = publicationPath -> response HttpStatusCode.OK markdown None
+                | _ -> response HttpStatusCode.NotFound "" None)
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.Parse("2026-07-15T00:00:00Z"))
+
+        use httpClient = createdHttpClient
+
+        let documentId =
+            match ContentDomain.ContentId.tryCreate "test.documentId" "blog-validated-metadata" with
+            | Ok value -> value
+            | Error failure -> failwithf "%s: %s" failure.Field failure.Message
+
+        let document =
+            contentClient.GetDocument(documentId, CancellationToken.None).GetAwaiter().GetResult()
+            |> expectOk
+
+        let updatedAt =
+            document
+            |> ContentDomain.ContentDocument.updatedAt
+            |> ContentDomain.Timestamp.value
+
+        match document |> ContentDomain.ContentDocument.metadata with
+        | ContentDomain.ContentDocumentMetadata.Page ->
+            failwith "A blog repository path must produce publication metadata."
+        | ContentDomain.ContentDocumentMetadata.Publication metadata ->
+            let summary =
+                metadata
+                |> ContentDomain.PublicationMetadata.summary
+                |> ContentDomain.ContentSummary.value
+
+            let publishedAt =
+                metadata
+                |> ContentDomain.PublicationMetadata.publishedAt
+                |> ContentDomain.Timestamp.value
+
+            let tags =
+                metadata
+                |> ContentDomain.PublicationMetadata.tags
+                |> List.map ContentDomain.ContentTag.value
+
+            if
+                updatedAt <> "2026-07-15T00:00:04.000Z"
+                || summary <> "The supplied publication summary."
+                || publishedAt <> "2026-07-10T00:00:00.000Z"
+                || tags <> [ "fsharp"; "content" ]
+            then
+                failwith "The live supplier must preserve validated publication metadata and update time."
+
     let private testPayloadCacheRetention () =
         let cacheDocumentId index = sprintf "cache-document-%03d" index
 
@@ -673,8 +738,7 @@ module GitHubContentClientTests =
                 let id = cacheDocumentId index
                 let path = cacheDocumentPath index
 
-                let body =
-                    $"---\nid: {id}\ntitle: Cache document {index}\nupdatedAt: 2026-07-15T00:00:00.000Z\ntags: cache\n---\n# {id}\n"
+                let body = $"---\n{{\"title\":\"Cache document {index}\"}}\n---\n# {id}\n"
 
                 id, path, body)
 
@@ -1512,6 +1576,7 @@ module GitHubContentClientTests =
         testCallerCancellationDoesNotCancelSharedFetch ()
         testFailedSharedFetchCanRetryImmediately ()
         testDifferentKeysRemainParallel ()
+        testPublicationMetadata ()
         testPayloadCacheRetention ()
         testRateMalformedAndTimeoutFailures ()
         testFractionalCatalogSize ()

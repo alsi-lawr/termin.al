@@ -25,6 +25,8 @@ function responseForPath(path: string): Response {
       return Response.json(fixture("changelog.json"));
     case "/api/content/document/about":
       return Response.json(fixture("document-about.json"));
+    case "/api/content/document/blog-validated-metadata":
+      return Response.json(fixture("document-publication.json"));
     default:
       throw new Error(`Unexpected content API request: ${path}`);
   }
@@ -91,8 +93,47 @@ test("loads the same-origin content corpus and forwards cancellation", async () 
       assert.fail("Expected the about document from the content API.");
     }
 
+    assert.equal(document.classification.kind, "page");
     assert.equal(document.document.text, "# About\n\nA validated shared content fixture.");
     assert.equal(paths.at(-1), "/api/content/document/about");
+
+    const publication = resolveVirtualPath(
+      result.corpus.filesystem,
+      virtualHomeDirectory(),
+      "blog/validated-metadata.md",
+    );
+
+    if (publication.kind !== "found" || publication.node.kind !== "file") {
+      assert.fail("Expected the catalog's publication document.");
+    }
+
+    const publicationDocument = await result.corpus.documents.read(
+      publication.node.documentHandle,
+      controller.signal,
+    );
+
+    if (
+      publicationDocument.kind !== "available" ||
+      publicationDocument.classification.kind !== "publication"
+    ) {
+      assert.fail("Expected publication metadata from the content API.");
+    }
+
+    assert.equal(publication.node.updatedAt, "2026-07-15T00:00:04.000Z");
+    assert.equal(
+      publicationDocument.classification.publishedAt,
+      "2026-07-10T00:00:00.000Z",
+    );
+    assert.equal(
+      publicationDocument.classification.summary,
+      "The supplied publication summary.",
+    );
+    assert.deepEqual(publicationDocument.classification.tags, ["fsharp", "content"]);
+    assert.doesNotMatch(
+      publicationDocument.document.text,
+      /The supplied publication summary\./u,
+    );
+    assert.equal(paths.at(-1), "/api/content/document/blog-validated-metadata");
 
     const project = result.corpus.projectReadmes[0];
 

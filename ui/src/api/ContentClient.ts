@@ -1,5 +1,6 @@
 import type { MarkdownDocument } from "../content/MarkdownDocument.ts";
 import {
+  createVirtualTimestamp,
   createVirtualFilesystem,
   type VirtualCorpusCatalog,
   type VirtualCorpusCatalogEntry,
@@ -465,7 +466,11 @@ export class HttpContentClient implements ContentClient {
         const local = localDocuments.get(handle);
 
         if (local !== undefined) {
-          return { kind: "available", document: local };
+          return {
+            kind: "available",
+            document: local,
+            classification: { kind: "page" },
+          };
         }
 
         const id = ContentId.tryCreate(handle, "document handle");
@@ -477,14 +482,34 @@ export class HttpContentClient implements ContentClient {
         const result = await this.readDocument(id.value, signal);
 
         switch (result.kind) {
-          case "available":
+          case "available": {
+            const document = {
+              text: result.value.body,
+              source: { path: result.value.path.value },
+            };
+
+            if (result.value.kind === "page") {
+              return {
+                kind: "available",
+                document,
+                classification: { kind: "page" },
+              };
+            }
+
             return {
               kind: "available",
-              document: {
-                text: result.value.body,
-                source: { path: result.value.path.value },
+              document,
+              classification: {
+                kind: "publication",
+                publicationKind: result.value.kind,
+                slug: result.value.slug.value,
+                title: result.value.title,
+                summary: result.value.summary,
+                publishedAt: createVirtualTimestamp(result.value.publishedAt.value),
+                tags: result.value.tags.map((tag) => tag.value),
               },
             };
+          }
           case "cancelled":
             return { kind: "cancelled" };
           case "problem":

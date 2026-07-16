@@ -24,9 +24,11 @@ export type ViewerProjectCard = Readonly<{
 
 export type ViewerPublicationEntry = Readonly<{
   id: VirtualNodeId;
+  slug: string;
   title: string;
   summary: string;
   publishedAt: VirtualTimestamp;
+  tags: ReadonlyArray<string>;
   document: MarkdownDocument;
 }>;
 
