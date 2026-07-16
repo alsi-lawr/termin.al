@@ -28,10 +28,6 @@ import {
   type CommandExecutionContext,
   type CommandInvocation,
 } from "./CommandRegistry.ts";
-import {
-  ConstrainedPosixPattern,
-  type ConstrainedPosixPatternDialect,
-} from "../../domain/text/ConstrainedPosixPattern.ts";
 
 export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
@@ -82,10 +78,10 @@ type FindOptions = Readonly<{
 }>;
 
 type GrepOptions = Readonly<{
-  caseSensitivity: "sensitive" | "ascii-insensitive";
-  dialect: ConstrainedPosixPatternDialect;
+  caseSensitivity: "sensitive" | "insensitive";
   filenamePolicy: "automatic" | "include" | "suppress";
   lineNumbers: boolean;
+  patternMode: "regular-expression" | "fixed";
   recursive: boolean;
   pattern: string;
   operands: ReadonlyArray<string>;
@@ -447,9 +443,9 @@ function parseGrepOptions(
 ): OptionParseResult<GrepOptions> {
   const boundary = optionBoundary(invocation);
   let caseSensitivity: GrepOptions["caseSensitivity"] = "sensitive";
-  let dialect: GrepOptions["dialect"] = "basic";
   let filenamePolicy: GrepOptions["filenamePolicy"] = "automatic";
   let lineNumbers = false;
+  let patternMode: GrepOptions["patternMode"] = "regular-expression";
   let recursive = false;
   const operands: string[] = [];
 
@@ -467,7 +463,7 @@ function parseGrepOptions(
 
     for (const flag of value.slice(1)) {
       if (flag === "i") {
-        caseSensitivity = "ascii-insensitive";
+        caseSensitivity = "insensitive";
         continue;
       }
 
@@ -482,20 +478,11 @@ function parseGrepOptions(
       }
 
       if (flag === "E") {
-        if (dialect === "fixed") {
-          return { kind: "invalid", message: "Options -E and -F are mutually exclusive." };
-        }
-
-        dialect = "extended";
-        continue;
+        return { kind: "invalid", message: "Unsupported option: -E." };
       }
 
       if (flag === "F") {
-        if (dialect === "extended") {
-          return { kind: "invalid", message: "Options -E and -F are mutually exclusive." };
-        }
-
-        dialect = "fixed";
+        patternMode = "fixed";
         continue;
       }
 
@@ -526,7 +513,7 @@ function parseGrepOptions(
   if (pattern === undefined || operands.length < 2) {
     return {
       kind: "invalid",
-      message: "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...",
+      message: "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
     };
   }
 
@@ -534,9 +521,9 @@ function parseGrepOptions(
     kind: "parsed",
     value: {
       caseSensitivity,
-      dialect,
       filenamePolicy,
       lineNumbers,
+      patternMode,
       recursive,
       pattern,
       operands: operands.slice(1),
@@ -1297,11 +1284,11 @@ function createGrepCommand(
       group: "gnu-like",
       name: "grep",
       aliases: [],
-      summary: "Search virtual files with constrained POSIX patterns.",
-      usage: "grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...",
+      summary: "Search virtual files with ECMAScript regular expressions.",
+      usage: "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
       examples: [
         "grep -n '^Typed' about.md",
-        "grep -ErH 'fixture|typed' projects notes",
+        "grep -rH 'fixture|typed' projects notes",
         "grep -F -- '-literal' about.md",
       ],
     },
@@ -1312,21 +1299,31 @@ function createGrepCommand(
         return rejectedOutcome("grep", parsed.message);
       }
 
-      const compilation = ConstrainedPosixPattern.compile(
-        parsed.value.pattern,
-        {
-          dialect: parsed.value.dialect,
-          caseSensitivity: parsed.value.caseSensitivity,
-        },
-        context.signal,
-      );
+      const matching = (() => {
+        if (parsed.value.patternMode === "fixed") {
+          const literal = parsed.value.caseSensitivity === "insensitive"
+            ? parsed.value.pattern.toLowerCase()
+            : parsed.value.pattern;
 
-      if (compilation.kind === "cancelled") {
-        return cancelledOutcome();
-      }
+          return { kind: "fixed", literal } as const;
+        }
 
-      if (compilation.kind === "invalid") {
-        return rejectedOutcome("grep", compilation.message);
+        try {
+          const flags = parsed.value.caseSensitivity === "insensitive" ? "iu" : "u";
+          return {
+            kind: "regular-expression",
+            expression: new RegExp(parsed.value.pattern, flags),
+          } as const;
+        } catch (error: unknown) {
+          return {
+            kind: "invalid",
+            message: error instanceof Error ? error.message : "Invalid regular expression.",
+          } as const;
+        }
+      })();
+
+      if (matching.kind === "invalid") {
+        return rejectedOutcome("grep", matching.message);
       }
 
       const plan = planGrepFiles(
@@ -1391,13 +1388,12 @@ function createGrepCommand(
             continue;
           }
 
-          const result = await compilation.pattern.findMatch(line, context.signal);
+          const matchesLine = matching.kind === "fixed"
+            ? (parsed.value.caseSensitivity === "insensitive" ? line.toLowerCase() : line)
+              .includes(matching.literal)
+            : matching.expression.test(line);
 
-          if (result.kind === "cancelled") {
-            return cancelledOutcome();
-          }
-
-          if (result.kind === "unmatched") {
+          if (!matchesLine) {
             continue;
           }
 

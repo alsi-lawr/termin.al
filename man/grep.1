@@ -1,35 +1,48 @@
 .\" termin.al-name: grep
-.\" termin.al-usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...
-.\" termin.al-summary: Search virtual files with constrained POSIX patterns.
+.\" termin.al-usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...
+.\" termin.al-summary: Search virtual files with ECMAScript regular expressions.
 .TH GREP 1 "" "termin.al" "termin.al Manual"
 .ftr B R
 .ftr I R
 .ftr BI R
 .SH NAME
-grep \- Search virtual files with constrained POSIX patterns.
+grep \- Search virtual files with ECMAScript regular expressions.
 .SH SYNOPSIS
 .nf
-grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...
+grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...
 .fi
 .SH DESCRIPTION
 Searches one or more explicit virtual file or directory operands in the order given. Standard input is not supported. A directory operand is rejected unless
 .B -r
 is present.
 .PP
+By default,
+.I pattern
+is compiled by the browser as an ECMAScript regular expression with the
+.B u
+flag. The
+.B -i
+option adds the ECMAScript
+.B i
+flag. Native regular-expression syntax and matching behavior therefore follow the browser running termin.al.
+.PP
 Options may be clustered. The
 .B --
 terminator makes every following argument an operand, including a pattern beginning with a hyphen. The
 .B -E
-and
-.B -F
-options are mutually exclusive, as are
+option is not supported.
 .B -H
 and
-.BR -h .
+.B -h
+are mutually exclusive.
 .SH OPTIONS
 .TP
 .B -i
-Ignore case for ASCII letters only. Characters outside ASCII are compared exactly; no locale or Unicode lowercase conversion is performed.
+Ignore case. Regular expressions use the browser's
+.B iu
+flags. With
+.BR -F ,
+the pattern and each logical line are compared after JavaScript lowercase conversion.
 .TP
 .B -n
 Prefix each matching logical line with its one-based line number.
@@ -37,62 +50,20 @@ Prefix each matching logical line with its one-based line number.
 .B -r
 Traverse directory operands recursively in deterministic virtual-filesystem order, subject to the configured entry limit and a maximum depth of 8.
 .TP
-.B -E
-Interpret the pattern as the constrained extended regular expression described below.
-.TP
 .B -F
-Interpret every supported Unicode scalar in the pattern literally. Newline remains invalid.
+Search for the pattern as a direct literal substring instead of compiling a regular expression. Regular-expression metacharacters have no special meaning.
 .TP
 .B -H
 Always prefix matches with the source filename.
 .TP
 .B -h
 Never prefix matches with the source filename.
-.SH BASIC REGULAR EXPRESSIONS
-The default dialect supports Unicode-scalar literals, escaped metacharacter literals, dot except newline, complete or group boundary anchors
-.B ^
-and
-.BR $ ,
-bracket lists and scalar-order ranges such as
-.B [abc]
-and
-.BR [a-z] ,
-negated bracket expressions, and
-.BR * .
+.SH REGULAR EXPRESSIONS
+The default mode accepts ordinary ECMAScript regular-expression syntax supported by the browser, including groups, alternation, quantifiers, character classes, assertions, escapes and Unicode-aware constructs available with the
+.B u
+flag.
 .PP
-Intervals are written
-.BR \e{m\e} ,
-.BR \e{m,n\e}
-or
-.BR \e{m,\e} .
-Bounds are decimal values from 0 through 255. Structural groups are written
-.BR \e(...\e)
-and do not expose captures. Empty patterns and empty groups match epsilon.
-.PP
-Basic expressions do not provide alternation. GNU
-.BR \e| ,
-.B \e+
-and
-.B \e?
-operators are rejected with guidance to use
-.BR -E .
-Backreferences are not supported.
-.SH EXTENDED REGULAR EXPRESSIONS
-With
-.BR -E ,
-the constrained extended dialect supports the same literals, dot, anchors and bracket expressions, plus
-.BR * ,
-.BR + ,
-.BR ? ,
-unescaped intervals, unescaped groups, concatenation and
-.B |
-alternation. Repetition binds before concatenation, which binds before alternation. Empty branches and groups are epsilon. Escaped basic grouping and interval operators are rejected rather than reinterpreted.
-.SH UNSUPPORTED PATTERNS
-All dialects reject newline and isolated surrogates. The regular-expression dialects also reject backreferences; lookahead, lookbehind and atomic or possessive constructs; GNU word, digit, space and boundary operators; POSIX named classes; collating symbols; equivalence classes; locale-dependent or multicharacter collation; JavaScript-only regular-expression syntax; unknown escapes; and malformed or misplaced anchors, brackets, ranges, groups, repetitions or intervals.
-.PP
-Diagnostics use the form
-.B Invalid regular expression at offset n: reason.
-Offsets are zero-based Unicode-scalar positions. Matching is performed by a bounded Thompson NFA and does not invoke the browser's native regular-expression engine.
+If native construction fails, grep rejects the command with the browser's regular-expression diagnostic. grep does not translate the pattern or reinterpret native error positions.
 .SH LINES AND OUTPUT
 Input is split on newline. A final newline does not create a phantom logical line, an empty file has no logical lines, and carriage return remains part of line content. An empty pattern therefore matches every actual logical line.
 .PP
@@ -102,13 +73,13 @@ At most 1,000 matching lines and 1 MiB of UTF-8 output are emitted. The command 
 .BR runtime.truncated .
 Recursive entry truncation is reported separately with the same diagnostic code.
 .SH FAILURES AND CANCELLATION
-Files are read sequentially. Missing, locked and unavailable operands or descendants are collected in deterministic operand order. If any such failure occurs, the command fails without returning matches from successful operands. Cancellation is checked during traversal, reads and bounded matching work and discards all accumulated matches.
-.SH LIMITS
-Patterns are limited to 256 Unicode scalars and 1,024 UTF-16 code units. Compiled programs are limited to 2,048 instructions. These constrained dialects do not claim full GNU grep behavior or locale-dependent POSIX compatibility.
+Files are read sequentially. Missing, locked and unavailable operands or descendants are collected in deterministic operand order. If any such failure occurs, the command fails without returning matches from successful operands.
+.PP
+Cancellation is checked during traversal and reads, between files and logical lines, and before output is returned. One native regular-expression operation is synchronous and is not interrupted after it begins.
 .SH EXAMPLES
 .nf
 $ grep -n '^Typed' about.md
-$ grep -ErH 'fixture|typed' projects notes
+$ grep -rH 'fixture|typed' projects notes
 $ grep -F -- '-literal' about.md
 .fi
 .SH SEE ALSO

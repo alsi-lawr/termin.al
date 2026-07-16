@@ -442,13 +442,13 @@ test("implements line readers, terminal history, manual pages, and pager effects
 
   assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
   assert.match(manual, /^GREP\(1\).*GREP\(1\)$/mu);
-  assert.match(manual, /\nNAME\n     grep - Search virtual files with constrained POSIX patterns\./u);
+  assert.match(manual, /\nNAME\n     grep - Search virtual files with ECMAScript regular expressions\./u);
   assert.match(
     manual,
-    /\nSYNOPSIS\n     grep \[-i\] \[-n\] \[-r\] \[-E\|-F\] \[-H\|-h\] \[--\] pattern file\.\.\./u,
+    /\nSYNOPSIS\n     grep \[-i\] \[-n\] \[-r\] \[-F\] \[-H\|-h\] \[--\] pattern file\.\.\./u,
   );
   assert.match(manual, /\nOPTIONS\n     -i/u);
-  assert.match(manual, /\nBASIC REGULAR EXPRESSIONS\n/u);
+  assert.match(manual, /\nREGULAR EXPRESSIONS\n/u);
   assert.match(manual, /\nLINES AND OUTPUT\n/u);
   assert.match(manual, /\nEXAMPLES\n     \$ grep -n '\^Typed' about\.md/u);
   assert.match(manual, /\nSEE ALSO\n     help\(1\), man\(1\)/u);
@@ -682,38 +682,42 @@ test("marks bounded find results", async () => {
   assert.equal(shallowTree, "~");
 });
 
-test("implements grep dialects, clusters, option termination, and stable rejections", async () => {
+test("uses native regex syntax, Unicode and ignore-case behavior, and fixed literals", async () => {
   const fixture = createGrepFixture(
     [grepFileEntry("one", "~/one.txt", "one")],
-    [{ handle: "one", path: "~/one.txt", text: "aa\nAAbb\n.*[x]\n-literal\nÄ" }],
+    [{ handle: "one", path: "~/one.txt", text: "aa\nAAbb\n.*[x]\n-literal\nÄ\n😀\n(" }],
   );
 
-  assert.equal(outputText(await execute("grep 'a\\{2\\}' one.txt", fixture.registry)), "aa");
-  assert.equal(outputText(await execute("grep -E '^a+$' one.txt", fixture.registry)), "aa");
+  assert.equal(outputText(await execute("grep '^a+$' one.txt", fixture.registry)), "aa");
+  assert.equal(outputText(await execute("grep '(?=aa)aa' one.txt", fixture.registry)), "aa");
+  assert.equal(outputText(await execute("grep '^.$' one.txt", fixture.registry)), "Ä\n😀\n(");
+  assert.equal(outputText(await execute("grep -i '^ä$' one.txt", fixture.registry)), "Ä");
   assert.equal(outputText(await execute("grep -F '.*[x]' one.txt", fixture.registry)), ".*[x]");
   assert.equal(
-    outputText(await execute("grep -EinH 'aa+' one.txt", fixture.registry)),
+    outputText(await execute("grep -inH 'aa+' one.txt", fixture.registry)),
     "~/one.txt:1:aa\n~/one.txt:2:AAbb",
   );
+  assert.equal(outputText(await execute("grep -iF ä one.txt", fixture.registry)), "Ä");
+  assert.equal(outputText(await execute("grep -F '(' one.txt", fixture.registry)), "(");
   assert.equal(outputText(await execute("grep -- -literal one.txt", fixture.registry)), "-literal");
-  assert.deepEqual(succeeded(await execute("grep -i ä one.txt", fixture.registry)).outputs, []);
   assert.deepEqual(succeeded(await execute("grep absent one.txt", fixture.registry)).outputs, []);
 
   const failures: ReadonlyArray<readonly [string, string]> = [
-    ["grep", "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file..."],
-    ["grep pattern", "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file..."],
+    ["grep", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file..."],
+    ["grep pattern", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file..."],
     ["grep -z pattern one.txt", "Unsupported option: -z."],
-    ["grep -EF pattern one.txt", "Options -E and -F are mutually exclusive."],
+    ["grep -E pattern one.txt", "Unsupported option: -E."],
     ["grep -Hh pattern one.txt", "Options -H and -h are mutually exclusive."],
-    [
-      "grep -E '(?=a)' one.txt",
-      "Invalid regular expression at offset 0: lookaround and atomic groups are not supported.",
-    ],
   ];
 
   for (const [source, expected] of failures) {
     assert.equal(failureMessage(await execute(source, fixture.registry)), expected, source);
   }
+
+  assert.match(
+    failureMessage(await execute("grep '(' one.txt", fixture.registry)),
+    /^Invalid regular expression:/u,
+  );
 });
 
 test("preserves grep operand order and applies exact filename and line prefixes", async () => {
@@ -768,7 +772,10 @@ test("uses logical lines without a trailing phantom and preserves carriage retur
     "1:hit\r\n2:\n3:hit",
   );
   assert.equal(outputText(await execute("grep -n '^$' lines.txt", fixture.registry)), "2:");
-  assert.equal(outputText(await execute("grep -n '^hit.$' lines.txt", fixture.registry)), "1:hit\r");
+  assert.equal(
+    outputText(await execute("grep -n '^hit\\r$' lines.txt", fixture.registry)),
+    "1:hit\r",
+  );
   assert.deepEqual(succeeded(await execute("grep '' empty.txt", fixture.registry)).outputs, []);
 });
 
@@ -872,36 +879,6 @@ test("cancellation discards accumulated grep output", async () => {
   const outcome = await executeWithSignal("grep hit a.txt b.txt", registry, controller.signal);
 
   assert.equal(outcome.kind, "cancelled");
-});
-
-test("queued cancellation interrupts pathological grep matching without output", async () => {
-  const controller = new AbortController();
-  const fixture = createGrepFixture(
-    [
-      grepFileEntry("prior", "~/prior.txt", "prior"),
-      grepFileEntry("pathological", "~/pathological.txt", "pathological"),
-    ],
-    [
-      { handle: "prior", path: "~/prior.txt", text: "b" },
-      {
-        handle: "pathological",
-        path: "~/pathological.txt",
-        text: "a".repeat(20_000),
-      },
-    ],
-  );
-  setTimeout(() => {
-    controller.abort();
-  }, 0);
-
-  const outcome = await executeWithSignal(
-    "grep -E '((a?){255})*b' prior.txt pathological.txt",
-    fixture.registry,
-    controller.signal,
-  );
-
-  assert.equal(outcome.kind, "cancelled");
-  assert.equal("outputs" in outcome, false);
 });
 
 test("reports empty, missing, unsupported-option, and cancelled command outcomes", async () => {

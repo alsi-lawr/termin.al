@@ -113,13 +113,13 @@
     {
       "name": "grep",
       "section": 1,
-      "usage": "grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...",
-      "summary": "Search virtual files with constrained POSIX patterns.",
+      "usage": "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
+      "summary": "Search virtual files with ECMAScript regular expressions.",
       "sourcePath": "man/grep.1",
       "artifactPath": "ui/src/generated/manpages/grep.txt",
-      "byteCount": 5180,
-      "lineCount": 111,
-      "sha256": "53ec15e4bb550ba5c6a84a2390fb7995583b0a82d820a7a8fb15ed46e4e8fbe7"
+      "byteCount": 3793,
+      "lineCount": 86,
+      "sha256": "a2f900632cb4eaf3677c9faee7fb559f5e70ba08ac4401dfcefc0a522d392a20"
     },
     {
       "name": "head",
