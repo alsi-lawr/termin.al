@@ -54,6 +54,11 @@ module Stats =
         | RateLimited
         | Unavailable
 
+    type SubscriptionResult =
+        | Subscribed of ChannelReader<string> * Guid * Snapshot
+        | SubscriptionUnavailable
+        | SubscriptionStopped
+
     type private PersistedState =
         { TotalSessions: int64
           TotalPageViews: int64
@@ -415,7 +420,9 @@ module Stats =
             dataPath |> Option.map (fun path -> Path.Combine(path, "statistics.json.tmp"))
 
         let initial = load dataPath (now ())
+        let lifecycleGate = obj ()
         let mutable stopped = false
+        let mutable shutdownTask: Task<unit> option = None
 
         let initialState: State =
             match initial with
@@ -455,12 +462,17 @@ module Stats =
                             state.Persisted |> Option.map (snapshot state.Writable) |> reply.Reply
                             return! loop state
                         | Subscribe(id, writer, reply) ->
-                            state.Persisted |> Option.map (snapshot state.Writable) |> reply.Reply
+                            match state.Persisted with
+                            | Some persisted ->
+                                snapshot state.Writable persisted |> Some |> reply.Reply
 
-                            return!
-                                loop
-                                    { state with
-                                        Subscribers = Map.add id writer state.Subscribers }
+                                return!
+                                    loop
+                                        { state with
+                                            Subscribers = Map.add id writer state.Subscribers }
+                            | None ->
+                                reply.Reply None
+                                return! loop state
                         | Unsubscribe id ->
                             return!
                                 loop
@@ -571,18 +583,32 @@ module Stats =
             agent.PostAndAsyncReply(fun reply -> RecordView(sessionId, contentId, allowedContentIds, timestamp, reply))
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-        member _.Subscribe() : Task<ChannelReader<string> * Guid * Snapshot option> =
-            let id = Guid.NewGuid()
-            let options = BoundedChannelOptions(1)
-            options.FullMode <- BoundedChannelFullMode.DropOldest
-            let channel = Channel.CreateBounded<string>(options)
-
+        member _.Subscribe() : Task<SubscriptionResult> =
             task {
-                let! initial =
-                    agent.PostAndAsyncReply(fun reply -> Subscribe(id, channel.Writer, reply))
-                    |> Async.StartAsTask
+                let registration =
+                    lock lifecycleGate (fun () ->
+                        if stopped then
+                            None
+                        else
+                            let id = Guid.NewGuid()
+                            let options = BoundedChannelOptions(1)
+                            options.FullMode <- BoundedChannelFullMode.DropOldest
+                            let channel = Channel.CreateBounded<string>(options)
 
-                return channel.Reader, id, initial
+                            let work =
+                                agent.PostAndAsyncReply(fun reply -> Subscribe(id, channel.Writer, reply))
+                                |> Async.StartImmediateAsTask
+
+                            Some(channel.Reader, id, work))
+
+                match registration with
+                | None -> return SubscriptionStopped
+                | Some(reader, id, work) ->
+                    let! initial = work
+
+                    match initial with
+                    | Some snapshot -> return Subscribed(reader, id, snapshot)
+                    | None -> return SubscriptionUnavailable
             }
 
         member _.Unsubscribe(id: Guid) = agent.Post(Unsubscribe id)
@@ -593,10 +619,21 @@ module Stats =
             :> Task
 
         member _.Shutdown() =
-            lock agent (fun () ->
-                if not stopped then
-                    agent.PostAndReply Stop
-                    stopped <- true)
+            let work =
+                lock lifecycleGate (fun () ->
+                    match shutdownTask with
+                    | Some work -> work
+                    | None ->
+                        stopped <- true
+
+                        let work =
+                            agent.PostAndAsyncReply Stop
+                            |> Async.StartImmediateAsTask
+
+                        shutdownTask <- Some work
+                        work)
+
+            work.GetAwaiter().GetResult()
 
     let private sameOrigin (context: HttpContext) (requireOrigin: bool) =
         let origin = context.Request.Headers.Origin.ToString()
@@ -836,10 +873,9 @@ module Stats =
                         cancellationToken
                     )
             else
-                let! current = store.GetSnapshot cancellationToken
-
-                match current with
-                | None ->
+                match! store.Subscribe() with
+                | SubscriptionUnavailable
+                | SubscriptionStopped ->
                     context.Response.StatusCode <- StatusCodes.Status503ServiceUnavailable
                     context.Response.ContentType <- "application/problem+json"
 
@@ -848,22 +884,18 @@ module Stats =
                             "{\"title\":\"Statistics are unavailable.\",\"status\":503,\"code\":\"stats-unavailable\"}",
                             cancellationToken
                         )
-                | Some _ ->
+                | Subscribed(reader, subscriptionId, initial) ->
                     setSessionCookie allowLocalHttp randomBytes context |> ignore
                     context.Response.StatusCode <- StatusCodes.Status200OK
                     context.Response.ContentType <- "text/event-stream"
                     context.Response.Headers.CacheControl <- "no-store"
                     context.Response.Headers.Append("X-Accel-Buffering", "no")
-                    let! reader, subscriptionId, initial = store.Subscribe()
 
                     try
                         try
                             do! context.Response.WriteAsync("retry: 5000\n", cancellationToken)
 
-                            match initial with
-                            | Some value ->
-                                do! context.Response.WriteAsync($"data: {snapshotJson value}\n\n", cancellationToken)
-                            | None -> ()
+                            do! context.Response.WriteAsync($"data: {snapshotJson initial}\n\n", cancellationToken)
 
                             do! context.Response.Body.FlushAsync(cancellationToken)
                             let mutable connected = true

@@ -303,6 +303,10 @@ module StatsTests =
             if unavailable.GetSnapshot(CancellationToken.None).GetAwaiter().GetResult().IsSome then
                 failwith "A never-valid corrupt store must be unavailable."
 
+            match unavailable.Subscribe().GetAwaiter().GetResult() with
+            | Stats.SubscriptionUnavailable -> ()
+            | result -> failwithf "A never-valid store must reject subscriptions, received %A." result
+
             unavailable.Shutdown())
 
         withTemporaryDirectory (fun path ->
@@ -335,6 +339,12 @@ module StatsTests =
             if readOnly.StorageState <> Stats.ReadOnly || readOnly.TotalPageViews <> 1L then
                 failwith "An unremovable temporary sibling must leave the valid main snapshot available read-only."
 
+            let subscriptionId =
+                match readOnlyStore.Subscribe().GetAwaiter().GetResult() with
+                | Stats.Subscribed(_, subscriptionId, initial) when initial.StorageState = Stats.ReadOnly ->
+                    subscriptionId
+                | result -> failwithf "A readable read-only snapshot must remain subscribable, received %A." result
+
             match record readOnlyStore "another-session" "sample-project" with
             | Stats.Unavailable -> ()
             | result -> failwithf "A cleanup-failed store must reject writes as unavailable, received %A." result
@@ -342,6 +352,7 @@ module StatsTests =
             if File.ReadAllText(mainPath) <> persisted then
                 failwith "Temporary-sibling cleanup failure must not damage the valid main statistics file."
 
+            readOnlyStore.Unsubscribe subscriptionId
             readOnlyStore.Shutdown())
 
     let private runRateAndSubscriptionChecks () =
@@ -358,7 +369,10 @@ module StatsTests =
             | Stats.RateLimited -> ()
             | result -> failwithf "Duplicate attempts must consume the per-session rate budget, received %A." result
 
-            let reader, subscriptionId, _ = store.Subscribe().GetAwaiter().GetResult()
+            let reader, subscriptionId =
+                match store.Subscribe().GetAwaiter().GetResult() with
+                | Stats.Subscribed(reader, subscriptionId, _) -> reader, subscriptionId
+                | result -> failwithf "Expected an available subscription, received %A." result
 
             record store "published-session" "about" |> expectAccepted |> ignore
             record store "published-session" "sample-project" |> expectAccepted |> ignore
@@ -378,6 +392,82 @@ module StatsTests =
 
             store.Unsubscribe subscriptionId
             store.Shutdown())
+
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+            store.Shutdown()
+
+            match
+                store
+                    .Subscribe()
+                    .WaitAsync(TimeSpan.FromSeconds(1.0))
+                    .GetAwaiter()
+                    .GetResult()
+            with
+            | Stats.SubscriptionStopped -> ()
+            | result -> failwithf "Expected a post-shutdown subscription to stop immediately, received %A." result)
+
+        withTemporaryDirectory (fun path ->
+            let store = Stats.createStoreAt path (fun () -> now)
+            let subscription = store.Subscribe()
+            let shutdown = Task.Run(fun () -> store.Shutdown())
+
+            Task
+                .WhenAll(subscription :> Task, shutdown)
+                .WaitAsync(TimeSpan.FromSeconds(1.0))
+                .GetAwaiter()
+                .GetResult()
+
+            match subscription.GetAwaiter().GetResult() with
+            | Stats.Subscribed(reader, subscriptionId, _) ->
+                reader
+                    .Completion
+                    .WaitAsync(TimeSpan.FromSeconds(1.0))
+                    .GetAwaiter()
+                    .GetResult()
+
+                store.Unsubscribe subscriptionId
+            | result -> failwithf "Expected a pre-stop registration to complete, received %A." result)
+
+        withTemporaryDirectory (fun path ->
+            for iteration in 1..25 do
+                let iterationPath = Path.Combine(path, string iteration)
+                let store = Stats.createStoreAt iterationPath (fun () -> now)
+                use barrier = new Barrier(2)
+
+                let subscription =
+                    Task.Run<Stats.SubscriptionResult>(
+                        Func<Task<Stats.SubscriptionResult>>(fun () ->
+                            barrier.SignalAndWait()
+                            store.Subscribe())
+                    )
+
+                let shutdown =
+                    Task.Run(fun () ->
+                        barrier.SignalAndWait()
+                        store.Shutdown())
+
+                Task
+                    .WhenAll(subscription :> Task, shutdown)
+                    .WaitAsync(TimeSpan.FromSeconds(1.0))
+                    .GetAwaiter()
+                    .GetResult()
+
+                match subscription.GetAwaiter().GetResult() with
+                | Stats.Subscribed(reader, subscriptionId, _) ->
+                    reader
+                        .Completion
+                        .WaitAsync(TimeSpan.FromSeconds(1.0))
+                        .GetAwaiter()
+                        .GetResult()
+
+                    store.Unsubscribe subscriptionId
+                | Stats.SubscriptionStopped -> ()
+                | result ->
+                    failwithf
+                        "Expected a legal concurrent subscription outcome in iteration %d, received %A."
+                        iteration
+                        result)
 
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
