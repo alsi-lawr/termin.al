@@ -172,16 +172,17 @@ export function HierarchicalCollectionPane({
   const selectedLeaf = selectedCollectionLeaf(collection.roots, state);
 
   useEffect(() => {
-    if (isActive && openedLeaf === undefined) {
-      selectorRef.current?.focus({ preventScroll: true });
+    if (!isActive || openedLeaf !== undefined) {
+      return;
     }
-  }, [focusVersion, isActive, openedLeaf, state.mode.kind]);
 
-  useEffect(() => {
     if (state.mode.kind === "filtering") {
       filterRef.current?.focus({ preventScroll: true });
+      return;
     }
-  }, [state.mode.kind]);
+
+    selectorRef.current?.focus({ preventScroll: true });
+  }, [focusVersion, isActive, openedLeaf, state.mode.kind]);
 
   const applyOperation = (operation: CollectionOperation): void => {
     if (operation.kind === "activate") {
@@ -263,7 +264,7 @@ export function HierarchicalCollectionPane({
           <span>/</span>
           <input
             ref={filterRef}
-            type="search"
+            type="text"
             value={state.mode.query}
             className="min-w-0 flex-1 border-b border-surface-border bg-transparent px-1 py-0.5 text-text-primary outline-none focus:border-ui-focus"
             aria-label={`Filter ${collection.title}`}
