@@ -46,6 +46,7 @@ import {
   type MarkdownViewerSearch,
 } from "./MarkdownViewerSearch.ts";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
+import { lessPrompt } from "./LessPrompt.ts";
 import {
   beginCollectionSelectorFilter,
   collectionSelectorBrowseOperationFromKey,
@@ -572,6 +573,55 @@ export function ViewerPane({
     }
   };
 
+  if (
+    activeViewer.kind === "document" &&
+    activeViewer.presentation === "raw-pager"
+  ) {
+    const status = rawPagerStatus(rawPagerState);
+    const pageText = rawPagerPageLines(
+      activeViewer.document.text,
+      rawPagerState,
+    )
+      .map((line) => line.text)
+      .join("");
+
+    return (
+      <section
+        ref={viewerRef}
+        className="flex h-full min-h-0 flex-col bg-surface-deepest font-mono text-sm text-text-primary outline-none"
+        tabIndex={0}
+        aria-label={title + " viewer"}
+        onFocus={onActivate}
+        onKeyDown={handleKeyDown}
+        onClick={handleClick}
+      >
+        <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
+          <pre
+            className="min-h-full whitespace-pre-wrap wrap-break-words text-text-bright"
+            aria-label="Current less page"
+          >
+            {pageText}
+          </pre>
+        </div>
+        <div
+          className="shrink-0 bg-text-primary px-1 text-surface-deepest"
+          role="status"
+          aria-live="polite"
+          aria-label="Less prompt"
+        >
+          {lessPrompt(title, status)}
+        </div>
+        <MobilePaneControls
+          ctrlPressed={mobileCtrlPressed}
+          onCtrlToggle={onToggleMobileCtrl}
+          onCtrlConsumed={onConsumeMobileCtrl}
+          onControl={handleMobileControl}
+          onPrefix={triggerPrefix}
+        />
+      </section>
+    );
+  }
+
   const content = (() => {
     switch (activeViewer.kind) {
       case "placeholder":
@@ -581,31 +631,6 @@ export function ViewerPane({
           </p>
         );
       case "document":
-        if (activeViewer.presentation === "raw-pager") {
-          return (
-            <>
-              <pre
-                className="mt-2 whitespace-pre-wrap wrap-break-words text-text-bright"
-                aria-label="Current raw pager page"
-              >
-                {rawPagerPageLines(activeViewer.document.text, rawPagerState)
-                  .map((line) => (
-                    <span
-                      key={line.lineNumber}
-                      className={line.isCurrent ? "bg-surface-highlight text-ui-accent" : undefined}
-                      aria-current={line.isCurrent ? "true" : undefined}
-                    >
-                      {line.text}
-                    </span>
-                  ))}
-              </pre>
-              <p className="mt-3 text-xs text-text-muted">
-                ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · Esc/q return
-              </p>
-            </>
-          );
-        }
-
         return (
           <>
             {markdownSearch.kind === "editing" ? (
@@ -683,22 +708,6 @@ export function ViewerPane({
         {content}
       </div>
       {activeViewer.kind !== "document" ? null : (() => {
-        if (activeViewer.presentation === "raw-pager") {
-          const status = rawPagerStatus(rawPagerState);
-          const position = status.kind === "empty"
-            ? "No lines"
-            : `Line ${status.currentLine}/${status.totalLines}`;
-
-          return (
-            <ViewerNavigationStatusLine
-              mode="NORMAL"
-              documentIdentity={title}
-              position={position}
-              match="No search"
-            />
-          );
-        }
-
         const position = markdownPositionStatus.kind === "empty"
           ? "No blocks"
           : `Block ${markdownPositionStatus.currentBlock}/${markdownPositionStatus.totalBlocks}`;

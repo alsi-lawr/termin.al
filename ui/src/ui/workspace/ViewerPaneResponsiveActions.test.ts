@@ -37,7 +37,7 @@ function isViewerPaneModule(
   );
 }
 
-test("keeps viewer return touch-accessible but hidden at desktop width", async () => {
+async function renderViewerPane(viewer: unknown): Promise<string> {
   const vite = await createServer({
     appType: "custom",
     server: { middlewareMode: true, hmr: false },
@@ -53,7 +53,7 @@ test("keeps viewer return touch-accessible but hidden at desktop width", async (
     }
 
     const rendered = createElement(loadedModule.ViewerPane, {
-      viewer: { kind: "placeholder", title: "Preview" },
+      viewer,
       isActive: true,
       focusVersion: 0,
       onActivate: () => undefined,
@@ -74,14 +74,64 @@ test("keeps viewer return touch-accessible but hidden at desktop width", async (
       assert.fail("Expected ViewerPane to render.");
     }
 
-    const markup = renderToStaticMarkup(rendered);
-
-    assert.equal(markup.includes('tabindex="0"'), true);
-    assert.match(
-      markup,
-      /<button[^>]*class="[^"]*md:hidden[^"]*"[^>]*>Return<\/button>/u,
-    );
+    return renderToStaticMarkup(rendered);
   } finally {
     await vite.close();
   }
+}
+
+test("keeps viewer return touch-accessible but hidden at desktop width", async () => {
+  const markup = await renderViewerPane({
+    kind: "placeholder",
+    title: "Preview",
+  });
+
+  assert.equal(markup.includes('tabindex="0"'), true);
+  assert.match(
+    markup,
+    /<button[^>]*class="[^"]*md:hidden[^"]*"[^>]*>Return<\/button>/u,
+  );
+});
+
+test("renders less as raw text with an inverse prompt above mobile controls", async () => {
+  const text = Array.from(
+    { length: 25 },
+    (_, index) => `line ${index + 1}\n`,
+  ).join("");
+  const markup = await renderViewerPane({
+    kind: "document",
+    title: "sample-note.md",
+    presentation: "raw-pager",
+    document: {
+      text,
+      source: { path: "~/notes/sample-note.md" },
+    },
+  });
+
+  assert.equal(markup.includes('aria-label="Current less page"'), true);
+  assert.equal(markup.includes("line 1\n"), true);
+  assert.equal(markup.includes("line 20\n"), true);
+  assert.equal(markup.includes("line 21\n"), false);
+  assert.equal(markup.includes("<h2"), false);
+  assert.equal(markup.includes(">Return</button>"), false);
+  assert.equal(markup.includes('aria-label="Viewer navigation status"'), false);
+  assert.equal(markup.includes("aria-current"), false);
+  assert.equal(markup.includes("bg-surface-highlight"), false);
+  assert.equal(markup.includes("PageUp/b"), false);
+  assert.equal(
+    markup.includes(
+      'class="shrink-0 bg-text-primary px-1 text-surface-deepest"',
+    ),
+    true,
+  );
+
+  const promptPosition = markup.indexOf(
+    'aria-label="Less prompt">sample-note.md 80%</div>',
+  );
+  const mobileControlsPosition = markup.indexOf(
+    'aria-label="Mobile terminal controls"',
+  );
+
+  assert.notEqual(promptPosition, -1);
+  assert.equal(mobileControlsPosition > promptPosition, true);
 });
