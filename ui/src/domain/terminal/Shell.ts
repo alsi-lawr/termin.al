@@ -1209,23 +1209,26 @@ export function reduceShellState(
       }
 
       const effects = commandEffects(action.outcome);
-      const existingHistory = clearsScrollback(effects) ? [] : state.history;
+      const clearsTranscript = clearsScrollback(effects);
       const secretPrompt = requestedSecretPrompt(effects);
       const currentDirectory = changedCurrentDirectory(effects);
       const storedOutcome = historyOutcome(action.outcome);
+      const history = clearsTranscript
+        ? []
+        : appendBounded(state.history, state.scrollbackLimit, {
+            id: createHistoryEntryId(
+              state.sessionId,
+              state.nextHistorySequence,
+            ),
+            command: state.lifecycle.command,
+            outcome: storedOutcome,
+          });
 
       return {
         ...state,
         currentDirectory: currentDirectory ?? state.currentDirectory,
         lifecycle: { kind: "idle" },
-        history: appendBounded(existingHistory, state.scrollbackLimit, {
-          id: createHistoryEntryId(
-            state.sessionId,
-            state.nextHistorySequence,
-          ),
-          command: state.lifecycle.command,
-          outcome: storedOutcome,
-        }),
+        history,
         secretPrompt:
           secretPrompt === undefined
             ? state.secretPrompt

@@ -8,6 +8,7 @@ import type {
 } from "../../domain/terminal/Shell.ts";
 import { TerminalHistoryRow } from "./TerminalHistoryRow";
 import { TerminalPrompt } from "./TerminalPrompt";
+import { synchronizeTerminalViewport } from "./TerminalViewportScroll.ts";
 
 type TerminalViewportProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
@@ -22,7 +23,7 @@ type TerminalViewportProps = Readonly<{
 }>;
 
 function scrollToLatestOutput(element: HTMLDivElement): void {
-  element.scrollTop = element.scrollHeight;
+  synchronizeTerminalViewport(element);
 }
 
 export function TerminalViewportContent({
@@ -37,7 +38,7 @@ export function TerminalViewportContent({
   transientDiagnostic,
 }: TerminalViewportProps): ReactElement {
   return (
-    <div className="flex min-h-full flex-col">
+    <div className="flex flex-col">
       <div
         role="log"
         aria-label="Terminal output"
@@ -61,7 +62,7 @@ export function TerminalViewportContent({
         </div>
       )}
 
-      <div className="mt-auto">
+      <div>
         <TerminalPrompt
           currentDirectory={currentDirectory}
           promptLabel={promptLabel}

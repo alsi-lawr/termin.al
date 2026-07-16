@@ -74,6 +74,18 @@ function settleSucceeded(state: ShellState, message: string): ShellState {
   });
 }
 
+function settleClear(state: ShellState): ShellState {
+  return reduceShellState(state, {
+    kind: "command.settled",
+    commandId: runningCommandId(state),
+    outcome: {
+      kind: "succeeded",
+      outputs: [],
+      effects: [{ kind: "clear-scrollback" }],
+    },
+  });
+}
+
 function projectsDirectoryPath() {
   const resolution = resolveVirtualDirectory(
     demoContentCorpus.filesystem,
@@ -128,6 +140,19 @@ test("reduces command execution and captures stable command cwd history", () => 
   );
   assert.deepEqual(thirdSettled.lifecycle, { kind: "idle" });
   assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
+});
+
+test("clear removes the complete transcript and preserves command history", () => {
+  const withTranscript = settleSucceeded(submit(createState(), "pwd"), "~");
+  const cleared = settleClear(submit(withTranscript, "clear"));
+
+  assert.deepEqual(cleared.history, []);
+  assert.deepEqual(
+    cleared.commandHistory.map((entry) => entry.source),
+    ["pwd", "clear"],
+  );
+  assert.deepEqual(cleared.lifecycle, { kind: "idle" });
+  assert.deepEqual(cleared.pendingEffect, { kind: "none" });
 });
 
 test("keeps each shell current directory immutable and records submission context", () => {

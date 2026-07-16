@@ -18,7 +18,7 @@ function isTerminalViewportModule(
   );
 }
 
-test("anchors the active prompt without a manual latest-output control", async () => {
+test("grows the transcript and active prompt naturally from the top", async () => {
   const vite = await createServer({
     appType: "custom",
     server: { middlewareMode: true },
@@ -52,8 +52,8 @@ test("anchors the active prompt without a manual latest-output control", async (
     const markup = renderToStaticMarkup(rendered);
 
     assert.equal(markup.includes("Latest output"), false);
-    assert.equal(markup.includes("min-h-full"), true);
-    assert.equal(markup.includes("mt-auto"), true);
+    assert.equal(markup.includes("min-h-full"), false);
+    assert.equal(markup.includes("mt-auto"), false);
     assert.equal(markup.includes("anonymous@termin.al"), true);
   } finally {
     await vite.close();
