@@ -1,29 +1,115 @@
 .\" termin.al-name: grep
-.\" termin.al-usage: grep [-i] [-n] <pattern> [path]
-.\" termin.al-summary: Search raw virtual document text.
+.\" termin.al-usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...
+.\" termin.al-summary: Search virtual files with constrained POSIX patterns.
 .TH GREP 1 "" "termin.al" "termin.al Manual"
 .ftr B R
 .ftr I R
 .ftr BI R
 .SH NAME
-grep \- Search raw virtual document text.
+grep \- Search virtual files with constrained POSIX patterns.
 .SH SYNOPSIS
 .nf
-grep [-i] [-n] <pattern> [path]
+grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...
 .fi
 .SH DESCRIPTION
-Searches the raw text of virtual documents. When no path is supplied, the command searches readable documents beneath the current directory within the traversal bound.
+Searches one or more explicit virtual file or directory operands in the order given. Standard input is not supported. A directory operand is rejected unless
+.B -r
+is present.
+.PP
+Options may be clustered. The
+.B --
+terminator makes every following argument an operand, including a pattern beginning with a hyphen. The
+.B -E
+and
+.B -F
+options are mutually exclusive, as are
+.B -H
+and
+.BR -h .
 .SH OPTIONS
 .TP
 .B -i
-Compare text after Unicode lowercase conversion.
+Ignore case for ASCII letters only. Characters outside ASCII are compared exactly; no locale or Unicode lowercase conversion is performed.
 .TP
 .B -n
-Prefix matching lines with their line number.
+Prefix each matching logical line with its one-based line number.
+.TP
+.B -r
+Traverse directory operands recursively in deterministic virtual-filesystem order, subject to the configured entry limit and a maximum depth of 8.
+.TP
+.B -E
+Interpret the pattern as the constrained extended regular expression described below.
+.TP
+.B -F
+Interpret every supported Unicode scalar in the pattern literally. Newline remains invalid.
+.TP
+.B -H
+Always prefix matches with the source filename.
+.TP
+.B -h
+Never prefix matches with the source filename.
+.SH BASIC REGULAR EXPRESSIONS
+The default dialect supports Unicode-scalar literals, escaped metacharacter literals, dot except newline, complete or group boundary anchors
+.B ^
+and
+.BR $ ,
+bracket lists and scalar-order ranges such as
+.B [abc]
+and
+.BR [a-z] ,
+negated bracket expressions, and
+.BR * .
+.PP
+Intervals are written
+.BR \e{m\e} ,
+.BR \e{m,n\e}
+or
+.BR \e{m,\e} .
+Bounds are decimal values from 0 through 255. Structural groups are written
+.BR \e(...\e)
+and do not expose captures. Empty patterns and empty groups match epsilon.
+.PP
+Basic expressions do not provide alternation. GNU
+.BR \e| ,
+.B \e+
+and
+.B \e?
+operators are rejected with guidance to use
+.BR -E .
+Backreferences are not supported.
+.SH EXTENDED REGULAR EXPRESSIONS
+With
+.BR -E ,
+the constrained extended dialect supports the same literals, dot, anchors and bracket expressions, plus
+.BR * ,
+.BR + ,
+.BR ? ,
+unescaped intervals, unescaped groups, concatenation and
+.B |
+alternation. Repetition binds before concatenation, which binds before alternation. Empty branches and groups are epsilon. Escaped basic grouping and interval operators are rejected rather than reinterpreted.
+.SH UNSUPPORTED PATTERNS
+All dialects reject newline and isolated surrogates. The regular-expression dialects also reject backreferences; lookahead, lookbehind and atomic or possessive constructs; GNU word, digit, space and boundary operators; POSIX named classes; collating symbols; equivalence classes; locale-dependent or multicharacter collation; JavaScript-only regular-expression syntax; unknown escapes; and malformed or misplaced anchors, brackets, ranges, groups, repetitions or intervals.
+.PP
+Diagnostics use the form
+.B Invalid regular expression at offset n: reason.
+Offsets are zero-based Unicode-scalar positions. Matching is performed by a bounded Thompson NFA and does not invoke the browser's native regular-expression engine.
+.SH LINES AND OUTPUT
+Input is split on newline. A final newline does not create a phantom logical line, an empty file has no logical lines, and carriage return remains part of line content. An empty pattern therefore matches every actual logical line.
+.PP
+By default, one explicit file omits the filename prefix. Multiple operands or recursive mode include it. Filename comes first, then an optional line number, then the line text. A successful search with no match produces no output.
+.PP
+At most 1,000 matching lines and 1 MiB of UTF-8 output are emitted. The command stops before an additional line would exceed either bound and reports
+.BR runtime.truncated .
+Recursive entry truncation is reported separately with the same diagnostic code.
+.SH FAILURES AND CANCELLATION
+Files are read sequentially. Missing, locked and unavailable operands or descendants are collected in deterministic operand order. If any such failure occurs, the command fails without returning matches from successful operands. Cancellation is checked during traversal, reads and bounded matching work and discards all accumulated matches.
+.SH LIMITS
+Patterns are limited to 256 Unicode scalars and 1,024 UTF-16 code units. Compiled programs are limited to 2,048 instructions. These constrained dialects do not claim full GNU grep behavior or locale-dependent POSIX compatibility.
 .SH EXAMPLES
 .nf
-$ grep -n fixture about.md
-$ grep -i typed
+$ grep -n '^Typed' about.md
+$ grep -ErH 'fixture|typed' projects notes
+$ grep -F -- '-literal' about.md
 .fi
 .SH SEE ALSO
 help(1), man(1)

@@ -6,8 +6,10 @@ import { createManpageCorpus } from "../../content/ManpageCorpus.ts";
 import {
   createVirtualFilesystem,
   virtualHomeDirectory,
+  type VirtualCorpusCatalogEntry,
   type VirtualDirectoryPath,
   type VirtualDocumentSupplier,
+  type VirtualFilesystem,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createShellId,
@@ -60,6 +62,98 @@ function createRegistry(
       recursiveEntryLimit,
     }),
   });
+}
+
+type GrepFixtureFile = Readonly<{
+  handle: string;
+  path: string;
+  text: string;
+}>;
+
+type GrepFixture = Readonly<{
+  documents: VirtualDocumentSupplier;
+  filesystem: VirtualFilesystem;
+  registry: CommandRegistry;
+}>;
+
+function createGrepFixture(
+  entries: ReadonlyArray<VirtualCorpusCatalogEntry>,
+  files: ReadonlyArray<GrepFixtureFile>,
+  recursiveEntryLimit = 100,
+): GrepFixture {
+  const filesystem = createVirtualFilesystem({
+    entries: [
+      {
+        kind: "directory",
+        id: "root",
+        path: "~",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        size: 0,
+      },
+      ...entries,
+    ],
+  });
+  const filesByHandle = new Map(files.map((file) => [file.handle, file]));
+  const documents: VirtualDocumentSupplier = {
+    read: (handle, signal) => {
+      if (signal.aborted) {
+        return Promise.resolve({ kind: "cancelled" });
+      }
+
+      const file = filesByHandle.get(handle);
+
+      if (file === undefined) {
+        return Promise.resolve({ kind: "missing", handle });
+      }
+
+      return Promise.resolve({
+        kind: "available",
+        document: { text: file.text, source: { path: file.path } },
+        classification: { kind: "page" },
+      });
+    },
+  };
+  const registry = createCommandRegistry({
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents,
+      manpages: generatedManpages,
+      recursiveEntryLimit,
+    }),
+  });
+
+  return { documents, filesystem, registry };
+}
+
+function grepFileEntry(id: string, path: string, handle: string): VirtualCorpusCatalogEntry {
+  return {
+    kind: "file",
+    id,
+    path,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    size: 1,
+    documentHandle: handle,
+  };
+}
+
+function grepDirectoryEntry(id: string, path: string): VirtualCorpusCatalogEntry {
+  return {
+    kind: "directory",
+    id,
+    path,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    size: 0,
+  };
+}
+
+function grepLockedEntry(id: string, path: string): VirtualCorpusCatalogEntry {
+  return {
+    kind: "locked-file",
+    id,
+    path,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    size: 1,
+  };
 }
 
 function commandRequest(
@@ -156,6 +250,22 @@ function failureMessage(outcome: CommandOutcome): string {
   }
 
   return diagnostic.message;
+}
+
+function failureMessages(outcome: CommandOutcome): ReadonlyArray<string> {
+  if (outcome.kind !== "failed") {
+    assert.fail("Expected a failed command outcome.");
+  }
+
+  return outcome.diagnostics.map((diagnostic) => diagnostic.message);
+}
+
+function runtimeTruncations(outcome: CommandOutcome): ReadonlyArray<string> {
+  return succeeded(outcome).outputs.flatMap((output) =>
+    output.kind === "diagnostic" && output.diagnostic.code === "runtime.truncated"
+      ? [output.diagnostic.message]
+      : [],
+  );
 }
 
 test("registers the accepted read-only GNU-like corpus without list", () => {
@@ -332,10 +442,15 @@ test("implements line readers, terminal history, manual pages, and pager effects
 
   assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
   assert.match(manual, /^GREP\(1\).*GREP\(1\)$/mu);
-  assert.match(manual, /\nNAME\n     grep - Search raw virtual document text\./u);
-  assert.match(manual, /\nSYNOPSIS\n     grep \[-i\] \[-n\] <pattern> \[path\]/u);
+  assert.match(manual, /\nNAME\n     grep - Search virtual files with constrained POSIX patterns\./u);
+  assert.match(
+    manual,
+    /\nSYNOPSIS\n     grep \[-i\] \[-n\] \[-r\] \[-E\|-F\] \[-H\|-h\] \[--\] pattern file\.\.\./u,
+  );
   assert.match(manual, /\nOPTIONS\n     -i/u);
-  assert.match(manual, /\nEXAMPLES\n     \$ grep -n fixture about\.md/u);
+  assert.match(manual, /\nBASIC REGULAR EXPRESSIONS\n/u);
+  assert.match(manual, /\nLINES AND OUTPUT\n/u);
+  assert.match(manual, /\nEXAMPLES\n     \$ grep -n '\^Typed' about\.md/u);
   assert.match(manual, /\nSEE ALSO\n     help\(1\), man\(1\)/u);
 
   const pagerEffect = pager.effects.find(
@@ -546,22 +661,9 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   assert.equal(boundedDiagnostic.diagnostic.message, "ls stopped after 1 entries.");
 });
 
-test("searches with documented flags and marks bounded recursive results", async () => {
+test("marks bounded find results", async () => {
   const registry = createRegistry(2);
   const find = succeeded(await execute("find -name '*.md'", registry));
-  const grep = succeeded(await execute("grep -in typed", createRegistry()));
-  const unicodeGrep = outputText(
-    await execute(
-      "grep -i ä about.md",
-      createRegistry(100, {
-        read: () => Promise.resolve({
-          kind: "available",
-          document: { text: "Ä", source: { path: "~/about.md" } },
-          classification: { kind: "page" },
-        }),
-      }),
-    ),
-  );
   const shallowTree = outputText(await execute("tree -L 0", createRegistry()));
 
   const findText = find.outputs.find((output) => output.kind === "text");
@@ -577,9 +679,199 @@ test("searches with documented flags and marks bounded recursive results", async
 
   assert.match(findText.text, /about\.md/u);
   assert.equal(truncation.diagnostic.code, "runtime.truncated");
-  assert.match(outputText(grep), /:3:Typed domain modelling/u);
-  assert.equal(unicodeGrep, "~/about.md:Ä");
   assert.equal(shallowTree, "~");
+});
+
+test("implements grep dialects, clusters, option termination, and stable rejections", async () => {
+  const fixture = createGrepFixture(
+    [grepFileEntry("one", "~/one.txt", "one")],
+    [{ handle: "one", path: "~/one.txt", text: "aa\nAAbb\n.*[x]\n-literal\nÄ" }],
+  );
+
+  assert.equal(outputText(await execute("grep 'a\\{2\\}' one.txt", fixture.registry)), "aa");
+  assert.equal(outputText(await execute("grep -E '^a+$' one.txt", fixture.registry)), "aa");
+  assert.equal(outputText(await execute("grep -F '.*[x]' one.txt", fixture.registry)), ".*[x]");
+  assert.equal(
+    outputText(await execute("grep -EinH 'aa+' one.txt", fixture.registry)),
+    "~/one.txt:1:aa\n~/one.txt:2:AAbb",
+  );
+  assert.equal(outputText(await execute("grep -- -literal one.txt", fixture.registry)), "-literal");
+  assert.deepEqual(succeeded(await execute("grep -i ä one.txt", fixture.registry)).outputs, []);
+  assert.deepEqual(succeeded(await execute("grep absent one.txt", fixture.registry)).outputs, []);
+
+  const failures: ReadonlyArray<readonly [string, string]> = [
+    ["grep", "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file..."],
+    ["grep pattern", "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file..."],
+    ["grep -z pattern one.txt", "Unsupported option: -z."],
+    ["grep -EF pattern one.txt", "Options -E and -F are mutually exclusive."],
+    ["grep -Hh pattern one.txt", "Options -H and -h are mutually exclusive."],
+    [
+      "grep -E '(?=a)' one.txt",
+      "Invalid regular expression at offset 0: lookaround and atomic groups are not supported.",
+    ],
+  ];
+
+  for (const [source, expected] of failures) {
+    assert.equal(failureMessage(await execute(source, fixture.registry)), expected, source);
+  }
+});
+
+test("preserves grep operand order and applies exact filename and line prefixes", async () => {
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("a", "~/a.txt", "a"),
+      grepFileEntry("b", "~/b.txt", "b"),
+      grepDirectoryEntry("dir", "~/dir"),
+      grepFileEntry("c", "~/dir/c.txt", "c"),
+    ],
+    [
+      { handle: "a", path: "~/a.txt", text: "hit a" },
+      { handle: "b", path: "~/b.txt", text: "miss\nhit b" },
+      { handle: "c", path: "~/dir/c.txt", text: "miss\nhit c" },
+    ],
+  );
+
+  assert.equal(outputText(await execute("grep hit a.txt", fixture.registry)), "hit a");
+  assert.equal(outputText(await execute("grep -H hit a.txt", fixture.registry)), "~/a.txt:hit a");
+  assert.equal(
+    outputText(await execute("grep -n hit a.txt b.txt", fixture.registry)),
+    "~/a.txt:1:hit a\n~/b.txt:2:hit b",
+  );
+  assert.equal(
+    outputText(await execute("grep -hn hit b.txt a.txt b.txt", fixture.registry)),
+    "2:hit b\n1:hit a\n2:hit b",
+  );
+  assert.equal(
+    outputText(await execute("grep -rn hit dir", fixture.registry)),
+    "~/dir/c.txt:2:hit c",
+  );
+  assert.equal(
+    failureMessage(await execute("grep hit dir", fixture.registry)),
+    "Is a directory: ~/dir; use -r to search recursively.",
+  );
+});
+
+test("uses logical lines without a trailing phantom and preserves carriage returns", async () => {
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("lines", "~/lines.txt", "lines"),
+      grepFileEntry("empty", "~/empty.txt", "empty"),
+    ],
+    [
+      { handle: "lines", path: "~/lines.txt", text: "hit\r\n\nhit\n" },
+      { handle: "empty", path: "~/empty.txt", text: "" },
+    ],
+  );
+
+  assert.equal(
+    outputText(await execute("grep -n '' lines.txt", fixture.registry)),
+    "1:hit\r\n2:\n3:hit",
+  );
+  assert.equal(outputText(await execute("grep -n '^$' lines.txt", fixture.registry)), "2:");
+  assert.equal(outputText(await execute("grep -n '^hit.$' lines.txt", fixture.registry)), "1:hit\r");
+  assert.deepEqual(succeeded(await execute("grep '' empty.txt", fixture.registry)).outputs, []);
+});
+
+test("aggregates grep path, locked, and read failures without partial matches", async () => {
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("good", "~/good.txt", "good"),
+      grepFileEntry("unavailable", "~/unavailable.txt", "unavailable"),
+      grepLockedEntry("locked", "~/locked.txt"),
+      grepDirectoryEntry("dir", "~/dir"),
+      grepFileEntry("nested", "~/dir/a.txt", "nested"),
+      grepLockedEntry("nested-locked", "~/dir/b.txt"),
+    ],
+    [
+      { handle: "good", path: "~/good.txt", text: "hit" },
+      { handle: "nested", path: "~/dir/a.txt", text: "hit nested" },
+    ],
+  );
+  const failed = await execute(
+    "grep -r hit good.txt missing.txt unavailable.txt locked.txt dir",
+    fixture.registry,
+  );
+
+  assert.deepEqual(failureMessages(failed), [
+    "Path not found: ~/missing.txt",
+    "Content is unavailable.",
+    "Access is locked: ~/locked.txt",
+    "Access is locked: ~/dir/b.txt",
+  ]);
+  assert.equal(failed.kind, "failed");
+});
+
+test("caps grep output by matching lines, UTF-8 bytes, and recursive traversal", async () => {
+  const lineLimited = createGrepFixture(
+    [grepFileEntry("many", "~/many.txt", "many")],
+    [{ handle: "many", path: "~/many.txt", text: Array.from({ length: 1001 }, () => "x").join("\n") }],
+  );
+  const byteLine = "x".repeat(600_000);
+  const byteLimited = createGrepFixture(
+    [grepFileEntry("large", "~/large.txt", "large")],
+    [{ handle: "large", path: "~/large.txt", text: `${byteLine}\n${byteLine}` }],
+  );
+  const traversalLimited = createGrepFixture(
+    [
+      grepDirectoryEntry("dir", "~/dir"),
+      grepFileEntry("a", "~/dir/a.txt", "a"),
+      grepFileEntry("b", "~/dir/b.txt", "b"),
+    ],
+    [
+      { handle: "a", path: "~/dir/a.txt", text: "x" },
+      { handle: "b", path: "~/dir/b.txt", text: "x" },
+    ],
+    1,
+  );
+  const lineOutcome = await execute("grep x many.txt", lineLimited.registry);
+  const byteOutcome = await execute("grep x large.txt", byteLimited.registry);
+  const traversalOutcome = await execute("grep -r x dir", traversalLimited.registry);
+
+  assert.equal(outputText(lineOutcome).split("\n").length, 1000);
+  assert.deepEqual(runtimeTruncations(lineOutcome), [
+    "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
+  ]);
+  assert.equal(outputText(byteOutcome), byteLine);
+  assert.deepEqual(runtimeTruncations(byteOutcome), [
+    "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
+  ]);
+  assert.deepEqual(runtimeTruncations(traversalOutcome), ["grep stopped after 1 entries."]);
+});
+
+test("cancellation discards accumulated grep output", async () => {
+  const controller = new AbortController();
+  const filesystem = createVirtualFilesystem({
+    entries: [
+      grepDirectoryEntry("root", "~"),
+      grepFileEntry("a", "~/a.txt", "a"),
+      grepFileEntry("b", "~/b.txt", "b"),
+    ],
+  });
+  const documents: VirtualDocumentSupplier = {
+    read: (handle) => {
+      if (handle === "b") {
+        controller.abort();
+        return Promise.resolve({ kind: "cancelled" });
+      }
+
+      return Promise.resolve({
+        kind: "available",
+        document: { text: "hit", source: { path: "~/a.txt" } },
+        classification: { kind: "page" },
+      });
+    },
+  };
+  const registry = createCommandRegistry({
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents,
+      manpages: generatedManpages,
+      recursiveEntryLimit: 100,
+    }),
+  });
+  const outcome = await executeWithSignal("grep hit a.txt b.txt", registry, controller.signal);
+
+  assert.equal(outcome.kind, "cancelled");
 });
 
 test("reports empty, missing, unsupported-option, and cancelled command outcomes", async () => {

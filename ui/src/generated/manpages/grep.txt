@@ -1,24 +1,109 @@
 GREP(1)                         termin.al Manual                         GREP(1)
 
 NAME
-     grep - Search raw virtual document text.
+     grep - Search virtual files with constrained POSIX patterns.
 
 SYNOPSIS
-     grep [-i] [-n] <pattern> [path]
+     grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...
 
 DESCRIPTION
-     Searches  the  raw text of virtual documents. When no path is supplied, the
-     command searches readable documents beneath the  current  directory  within
-     the traversal bound.
+     Searches one or more explicit virtual file or directory operands in the or‐
+     der given. Standard input is not supported. A directory operand is rejected
+     unless -r is present.
+
+     Options  may be clustered. The -- terminator makes every following argument
+     an operand, including a pattern beginning with a hyphen. The -E and -F  op‐
+     tions are mutually exclusive, as are -H and -h.
 
 OPTIONS
-     -i     Compare text after Unicode lowercase conversion.
+     -i     Ignore  case  for  ASCII  letters only. Characters outside ASCII are
+            compared exactly; no locale or Unicode lowercase conversion is  per‐
+            formed.
 
-     -n     Prefix matching lines with their line number.
+     -n     Prefix each matching logical line with its one-based line number.
+
+     -r     Traverse  directory  operands  recursively in deterministic virtual-
+            filesystem order, subject to the configured entry limit and a  maxi‐
+            mum depth of 8.
+
+     -E     Interpret the pattern as the constrained extended regular expression
+            described below.
+
+     -F     Interpret  every  supported Unicode scalar in the pattern literally.
+            Newline remains invalid.
+
+     -H     Always prefix matches with the source filename.
+
+     -h     Never prefix matches with the source filename.
+
+BASIC REGULAR EXPRESSIONS
+     The default dialect supports Unicode-scalar literals, escaped metacharacter
+     literals, dot except newline, complete or group boundary anchors ^  and  $,
+     bracket  lists  and  scalar-order  ranges  such as [abc] and [a-z], negated
+     bracket expressions, and *.
+
+     Intervals are written \{m\}, \{m,n\} or \{m,\}.  Bounds are decimal  values
+     from 0 through 255. Structural groups are written \(...\) and do not expose
+     captures. Empty patterns and empty groups match epsilon.
+
+     Basic  expressions do not provide alternation. GNU \|, \+ and \?  operators
+     are rejected with guidance to use -E.  Backreferences are not supported.
+
+EXTENDED REGULAR EXPRESSIONS
+     With -E, the constrained extended dialect supports the same literals,  dot,
+     anchors  and  bracket  expressions,  plus *, +, ?, unescaped intervals, un‐
+     escaped groups, concatenation and | alternation.  Repetition  binds  before
+     concatenation,  which  binds  before alternation. Empty branches and groups
+     are epsilon. Escaped basic grouping and  interval  operators  are  rejected
+     rather than reinterpreted.
+
+UNSUPPORTED PATTERNS
+     All dialects reject newline and isolated surrogates. The regular-expression
+     dialects  also  reject  backreferences; lookahead, lookbehind and atomic or
+     possessive constructs; GNU word, digit, space and boundary operators; POSIX
+     named classes; collating symbols; equivalence classes; locale-dependent  or
+     multicharacter  collation;  JavaScript-only  regular-expression syntax; un‐
+     known escapes;  and  malformed  or  misplaced  anchors,  brackets,  ranges,
+     groups, repetitions or intervals.
+
+     Diagnostics  use  the  form Invalid regular expression at offset n: reason.
+     Offsets are zero-based Unicode-scalar positions. Matching is performed by a
+     bounded Thompson NFA and does not invoke the browser's  native  regular-ex‐
+     pression engine.
+
+LINES AND OUTPUT
+     Input  is split on newline. A final newline does not create a phantom logi‐
+     cal line, an empty file has no logical lines, and carriage  return  remains
+     part of line content. An empty pattern therefore matches every actual logi‐
+     cal line.
+
+     By  default, one explicit file omits the filename prefix. Multiple operands
+     or recursive mode include it. Filename comes first, then an  optional  line
+     number,  then  the line text. A successful search with no match produces no
+     output.
+
+     At most 1,000 matching lines and 1 MiB of UTF-8  output  are  emitted.  The
+     command  stops  before an additional line would exceed either bound and re‐
+     ports runtime.truncated.  Recursive entry truncation is reported separately
+     with the same diagnostic code.
+
+FAILURES AND CANCELLATION
+     Files are read sequentially. Missing, locked and  unavailable  operands  or
+     descendants are collected in deterministic operand order. If any such fail‐
+     ure  occurs,  the  command  fails without returning matches from successful
+     operands. Cancellation is  checked  during  traversal,  reads  and  bounded
+     matching work and discards all accumulated matches.
+
+LIMITS
+     Patterns  are  limited  to 256 Unicode scalars and 1,024 UTF-16 code units.
+     Compiled programs are limited to 2,048 instructions. These constrained  di‐
+     alects  do  not claim full GNU grep behavior or locale-dependent POSIX com‐
+     patibility.
 
 EXAMPLES
-     $ grep -n fixture about.md
-     $ grep -i typed
+     $ grep -n '^Typed' about.md
+     $ grep -ErH 'fixture|typed' projects notes
+     $ grep -F -- '-literal' about.md
 
 SEE ALSO
      help(1), man(1)

@@ -28,6 +28,10 @@ import {
   type CommandExecutionContext,
   type CommandInvocation,
 } from "./CommandRegistry.ts";
+import {
+  ConstrainedPosixPattern,
+  type ConstrainedPosixPatternDialect,
+} from "../../domain/text/ConstrainedPosixPattern.ts";
 
 export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
@@ -78,10 +82,13 @@ type FindOptions = Readonly<{
 }>;
 
 type GrepOptions = Readonly<{
-  ignoreCase: boolean;
+  caseSensitivity: "sensitive" | "ascii-insensitive";
+  dialect: ConstrainedPosixPatternDialect;
+  filenamePolicy: "automatic" | "include" | "suppress";
   lineNumbers: boolean;
+  recursive: boolean;
   pattern: string;
-  path: string;
+  operands: ReadonlyArray<string>;
 }>;
 
 type LineReaderOptions = Readonly<{
@@ -102,15 +109,17 @@ type ReadFileResult =
     }>
   | Readonly<{ kind: "cancelled" }>;
 
-type GrepFileSelection =
+type GrepFailure = Extract<CommandOutcome, { kind: "failed" }>;
+
+type GrepPlannedInput =
+  | Readonly<{ kind: "file"; file: VirtualFileNode }>
+  | Readonly<{ kind: "failure"; failure: GrepFailure }>;
+
+type GrepFilePlan =
   | Readonly<{
-      kind: "files";
-      files: ReadonlyArray<VirtualFileNode>;
-      truncated: boolean;
-    }>
-  | Readonly<{
-      kind: "failed";
-      outcome: CommandOutcome;
+      kind: "planned";
+      inputs: ReadonlyArray<GrepPlannedInput>;
+      traversalTruncated: boolean;
     }>
   | Readonly<{ kind: "cancelled" }>;
 
@@ -123,6 +132,8 @@ type DisplayEntry = Readonly<{
 
 const maximumRecursiveDepth = 8;
 const maximumRequestedLineCount = 1000;
+const maximumGrepMatchingLines = 1000;
+const maximumGrepOutputBytes = 1024 * 1024;
 
 function succeededOutcome(
   outputs: ReadonlyArray<ShellOutput>,
@@ -435,8 +446,11 @@ function parseGrepOptions(
   invocation: CommandInvocation,
 ): OptionParseResult<GrepOptions> {
   const boundary = optionBoundary(invocation);
-  let ignoreCase = false;
+  let caseSensitivity: GrepOptions["caseSensitivity"] = "sensitive";
+  let dialect: GrepOptions["dialect"] = "basic";
+  let filenamePolicy: GrepOptions["filenamePolicy"] = "automatic";
   let lineNumbers = false;
+  let recursive = false;
   const operands: string[] = [];
 
   for (let index = 0; index < invocation.arguments.length; index += 1) {
@@ -453,12 +467,53 @@ function parseGrepOptions(
 
     for (const flag of value.slice(1)) {
       if (flag === "i") {
-        ignoreCase = true;
+        caseSensitivity = "ascii-insensitive";
         continue;
       }
 
       if (flag === "n") {
         lineNumbers = true;
+        continue;
+      }
+
+      if (flag === "r") {
+        recursive = true;
+        continue;
+      }
+
+      if (flag === "E") {
+        if (dialect === "fixed") {
+          return { kind: "invalid", message: "Options -E and -F are mutually exclusive." };
+        }
+
+        dialect = "extended";
+        continue;
+      }
+
+      if (flag === "F") {
+        if (dialect === "extended") {
+          return { kind: "invalid", message: "Options -E and -F are mutually exclusive." };
+        }
+
+        dialect = "fixed";
+        continue;
+      }
+
+      if (flag === "H") {
+        if (filenamePolicy === "suppress") {
+          return { kind: "invalid", message: "Options -H and -h are mutually exclusive." };
+        }
+
+        filenamePolicy = "include";
+        continue;
+      }
+
+      if (flag === "h") {
+        if (filenamePolicy === "include") {
+          return { kind: "invalid", message: "Options -H and -h are mutually exclusive." };
+        }
+
+        filenamePolicy = "suppress";
         continue;
       }
 
@@ -468,17 +523,23 @@ function parseGrepOptions(
 
   const pattern = operands[0];
 
-  if (pattern === undefined || operands.length > 2) {
-    return { kind: "invalid", message: "Usage: grep [-i] [-n] <pattern> [path]" };
+  if (pattern === undefined || operands.length < 2) {
+    return {
+      kind: "invalid",
+      message: "Usage: grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...",
+    };
   }
 
   return {
     kind: "parsed",
     value: {
-      ignoreCase,
+      caseSensitivity,
+      dialect,
+      filenamePolicy,
       lineNumbers,
+      recursive,
       pattern,
-      path: operands[1] ?? ".",
+      operands: operands.slice(1),
     },
   };
 }
@@ -794,52 +855,102 @@ function executeTree(
   return succeededOutcome(outputs);
 }
 
-function selectedFiles(
+function failedGrepOutcome(outcome: CommandOutcome): GrepFailure {
+  if (outcome.kind !== "failed") {
+    throw new Error("Grep path failures must produce failed command outcomes.");
+  }
+
+  return outcome;
+}
+
+function planGrepFiles(
   filesystem: VirtualFilesystem,
   context: CommandExecutionContext,
-  path: string,
+  options: GrepOptions,
   recursiveEntryLimit: number,
-): GrepFileSelection {
-  const resolution = resolveVirtualPath(
-    filesystem,
-    context.currentDirectory,
-    path,
-  );
+): GrepFilePlan {
+  const inputs: GrepPlannedInput[] = [];
+  let traversalTruncated = false;
 
-  if (resolution.kind !== "found") {
-    return { kind: "failed", outcome: failureOutcome("grep", resolution) };
+  for (const operand of options.operands) {
+    if (context.signal.aborted) {
+      return { kind: "cancelled" };
+    }
+
+    const resolution = resolveVirtualPath(
+      filesystem,
+      context.currentDirectory,
+      operand,
+    );
+
+    if (resolution.kind !== "found") {
+      inputs.push({
+        kind: "failure",
+        failure: failedGrepOutcome(failureOutcome("grep", resolution)),
+      });
+      continue;
+    }
+
+    if (resolution.node.kind === "file") {
+      inputs.push({ kind: "file", file: resolution.node });
+      continue;
+    }
+
+    if (resolution.node.kind === "locked-file") {
+      inputs.push({
+        kind: "failure",
+        failure: failedGrepOutcome(
+          rejectedOutcome("grep", `Access is locked: ${resolution.path}`),
+        ),
+      });
+      continue;
+    }
+
+    if (!options.recursive) {
+      inputs.push({
+        kind: "failure",
+        failure: failedGrepOutcome(
+          rejectedOutcome(
+            "grep",
+            `Is a directory: ${resolution.path}; use -r to search recursively.`,
+          ),
+        ),
+      });
+      continue;
+    }
+
+    const traversal = traverseVirtualDirectory({
+      filesystem,
+      directory: resolution.node,
+      limit: recursiveEntryLimit,
+      maximumDepth: maximumRecursiveDepth,
+      signal: context.signal,
+    });
+
+    if (traversal.kind === "cancelled") {
+      return { kind: "cancelled" };
+    }
+
+    traversalTruncated = traversalTruncated || traversal.kind === "truncated";
+
+    for (const entry of traversal.entries) {
+      if (entry.node.kind === "file") {
+        inputs.push({ kind: "file", file: entry.node });
+        continue;
+      }
+
+      if (entry.node.kind === "locked-file") {
+        inputs.push({
+          kind: "failure",
+          failure: failedGrepOutcome(
+            rejectedOutcome("grep", `Access is locked: ${entry.node.path}`),
+          ),
+        });
+      }
+    }
   }
 
-  if (resolution.node.kind === "file") {
-    return { kind: "files", files: [resolution.node], truncated: false };
-  }
-
-  if (resolution.node.kind === "locked-file") {
-    return {
-      kind: "failed",
-      outcome: rejectedOutcome("grep", `Access is locked: ${resolution.path}`),
-    };
-  }
-
-  const traversal = traverseVirtualDirectory({
-    filesystem,
-    directory: resolution.node,
-    limit: recursiveEntryLimit,
-    maximumDepth: maximumRecursiveDepth,
-    signal: context.signal,
-  });
-
-  if (traversal.kind === "cancelled") {
-    return { kind: "cancelled" };
-  }
-
-  return {
-    kind: "files",
-    files: traversal.entries.flatMap((entry) =>
-      entry.node.kind === "file" ? [entry.node] : [],
-    ),
-    truncated: traversal.kind === "truncated",
-  };
+  return { kind: "planned", inputs, traversalTruncated };
 }
 
 function createLsCommand(
@@ -1110,6 +1221,72 @@ function createFindCommand(
   };
 }
 
+function aggregateGrepFailures(failures: ReadonlyArray<GrepFailure>): GrepFailure {
+  const first = failures[0];
+
+  if (first === undefined) {
+    throw new Error("Grep failure aggregation requires at least one failure.");
+  }
+
+  return {
+    kind: "failed",
+    failure: first.failure,
+    diagnostics: failures.flatMap((failure) => failure.diagnostics),
+  };
+}
+
+function grepLogicalLines(text: string): ReadonlyArray<string> {
+  if (text.length === 0) {
+    return [];
+  }
+
+  const lines = text.split("\n");
+
+  if (text.endsWith("\n")) {
+    lines.pop();
+  }
+
+  return lines;
+}
+
+function grepIncludesFilename(options: GrepOptions): boolean {
+  switch (options.filenamePolicy) {
+    case "include":
+      return true;
+    case "suppress":
+      return false;
+    case "automatic":
+      return options.recursive || options.operands.length > 1;
+  }
+}
+
+function grepOutputLine(
+  sourcePath: string,
+  line: string,
+  lineNumber: number,
+  includeFilename: boolean,
+  includeLineNumber: boolean,
+): string {
+  const filename = includeFilename ? `${sourcePath}:` : "";
+  const number = includeLineNumber ? `${lineNumber}:` : "";
+  return `${filename}${number}${line}`;
+}
+
+function grepOutputTruncation(): ShellOutput {
+  const diagnostic: ShellDiagnostic = {
+    kind: "runtime",
+    id: createShellDiagnosticId("grep-output-truncated"),
+    code: "runtime.truncated",
+    message: "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
+  };
+
+  return {
+    kind: "diagnostic",
+    id: createShellOutputId("grep-output-truncated"),
+    diagnostic,
+  };
+}
+
 function createGrepCommand(
   filesystem: VirtualFilesystem,
   documents: VirtualDocumentSupplier,
@@ -1120,9 +1297,13 @@ function createGrepCommand(
       group: "gnu-like",
       name: "grep",
       aliases: [],
-      summary: "Search raw virtual document text.",
-      usage: "grep [-i] [-n] <pattern> [path]",
-      examples: ["grep -n fixture about.md", "grep -i typed"],
+      summary: "Search virtual files with constrained POSIX patterns.",
+      usage: "grep [-i] [-n] [-r] [-E|-F] [-H|-h] [--] pattern file...",
+      examples: [
+        "grep -n '^Typed' about.md",
+        "grep -ErH 'fixture|typed' projects notes",
+        "grep -F -- '-literal' about.md",
+      ],
     },
     execute: async (invocation, context) => {
       const parsed = parseGrepOptions(invocation);
@@ -1131,33 +1312,57 @@ function createGrepCommand(
         return rejectedOutcome("grep", parsed.message);
       }
 
-      const selection = selectedFiles(
-        filesystem,
-        context,
-        parsed.value.path,
-        recursiveEntryLimit,
+      const compilation = ConstrainedPosixPattern.compile(
+        parsed.value.pattern,
+        {
+          dialect: parsed.value.dialect,
+          caseSensitivity: parsed.value.caseSensitivity,
+        },
+        context.signal,
       );
 
-      if (selection.kind === "cancelled") {
+      if (compilation.kind === "cancelled") {
         return cancelledOutcome();
       }
 
-      if (selection.kind === "failed") {
-        return selection.outcome;
+      if (compilation.kind === "invalid") {
+        return rejectedOutcome("grep", compilation.message);
       }
 
-      const pattern = parsed.value.ignoreCase
-        ? parsed.value.pattern.toLowerCase()
-        : parsed.value.pattern;
-      const matches: string[] = [];
+      const plan = planGrepFiles(
+        filesystem,
+        context,
+        parsed.value,
+        recursiveEntryLimit,
+      );
 
-      for (const file of selection.files) {
+      if (plan.kind === "cancelled") {
+        return cancelledOutcome();
+      }
+
+      const matches: string[] = [];
+      const failures: GrepFailure[] = [];
+      const includeFilename = grepIncludesFilename(parsed.value);
+      const encoder = new TextEncoder();
+      let outputBytes = 0;
+      let outputTruncated = false;
+
+      for (const input of plan.inputs) {
+        if (context.signal.aborted) {
+          return cancelledOutcome();
+        }
+
+        if (input.kind === "failure") {
+          failures.push(input.failure);
+          continue;
+        }
+
         const document = await readFile(
           "grep",
           filesystem,
           documents,
           context,
-          file.path,
+          input.file.path,
         );
 
         if (document.kind === "cancelled") {
@@ -1165,10 +1370,15 @@ function createGrepCommand(
         }
 
         if (document.kind === "failed") {
-          return document.outcome;
+          failures.push(failedGrepOutcome(document.outcome));
+          continue;
         }
 
-        const lines = document.text.split("\n");
+        if (outputTruncated) {
+          continue;
+        }
+
+        const lines = grepLogicalLines(document.text);
 
         for (let index = 0; index < lines.length; index += 1) {
           if (context.signal.aborted) {
@@ -1181,22 +1391,56 @@ function createGrepCommand(
             continue;
           }
 
-          const candidate = parsed.value.ignoreCase ? line.toLowerCase() : line;
+          const result = compilation.pattern.findMatch(line, context.signal);
 
-          if (!candidate.includes(pattern)) {
+          if (result.kind === "cancelled") {
+            return cancelledOutcome();
+          }
+
+          if (result.kind === "unmatched") {
             continue;
           }
 
-          const linePrefix = parsed.value.lineNumbers ? `:${index + 1}` : "";
-          matches.push(`${document.sourcePath}${linePrefix}:${line}`);
+          const outputLine = grepOutputLine(
+            document.sourcePath,
+            line,
+            index + 1,
+            includeFilename,
+            parsed.value.lineNumbers,
+          );
+          const separatorBytes = matches.length === 0 ? 0 : 1;
+          const nextBytes = outputBytes + separatorBytes + encoder.encode(outputLine).byteLength;
+
+          if (
+            matches.length === maximumGrepMatchingLines ||
+            nextBytes > maximumGrepOutputBytes
+          ) {
+            outputTruncated = true;
+            break;
+          }
+
+          matches.push(outputLine);
+          outputBytes = nextBytes;
         }
+      }
+
+      if (context.signal.aborted) {
+        return cancelledOutcome();
+      }
+
+      if (failures.length > 0) {
+        return aggregateGrepFailures(failures);
       }
 
       const outputs: ShellOutput[] =
         matches.length === 0 ? [] : [textOutput("grep-output", matches.join("\n"))];
 
-      if (selection.truncated) {
+      if (plan.traversalTruncated) {
         outputs.push(truncationOutput("grep", recursiveEntryLimit));
+      }
+
+      if (outputTruncated) {
+        outputs.push(grepOutputTruncation());
       }
 
       return succeededOutcome(outputs);
