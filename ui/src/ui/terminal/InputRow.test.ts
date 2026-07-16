@@ -20,7 +20,7 @@ function isInputRowModule(
 test("renders a non-collapsing cursor cell at an empty prompt", async () => {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: false },
   });
 
   try {

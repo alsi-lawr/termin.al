@@ -84,7 +84,7 @@ test("does not render secret-bearing execution errors from shell history", async
 
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: false },
   });
 
   try {

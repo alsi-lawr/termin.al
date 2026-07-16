@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --mode demo",
-    "dev:live": "vite --mode live",
+    "dev": "vite --mode demo --port 5173 --strictPort",
+    "dev:live": "vite --mode live --port 5173 --strictPort",
     "build": "tsc -b && vite build",
     "lint": "oxlint .",
     "test": "node --experimental-strip-types --test \"src/**/*.test.ts\"",
-    "preview": "vite preview"
+    "preview": "vite preview --port 5175 --strictPort"
   },
   "dependencies": {
     "@tailwindcss/vite": "4.3.2",

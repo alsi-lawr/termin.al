@@ -20,7 +20,7 @@ function isMarkdownViewerSearchFormModule(
 test("keeps the search input native and the Find action mobile-only", async () => {
   const vite = await createServer({
     appType: "custom",
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: false },
   });
 
   try {
