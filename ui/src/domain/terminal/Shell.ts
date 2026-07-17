@@ -1,4 +1,4 @@
-import type { ArgumentLexerError, SourceOffset } from "./ArgumentLexer.ts";
+import type { ShellSyntaxError, SourceOffset } from "./ArgumentLexer.ts";
 import {
   createCompletionEdit,
   createCompletionPrefixEdit,
@@ -83,7 +83,10 @@ export type ShellDiagnostic =
       code:
         | "parse.unterminated-single-quote"
         | "parse.unterminated-double-quote"
-        | "parse.trailing-escape";
+        | "parse.trailing-escape"
+        | "parse.unsupported-background-operator"
+        | "parse.unexpected-operator"
+        | "parse.trailing-operator";
       message: string;
       position: SourceOffset;
     }>
@@ -92,6 +95,13 @@ export type ShellDiagnostic =
       id: ShellDiagnosticId;
       code: "command.empty" | "command.not-found" | "command.rejected";
       message: string;
+    }>
+  | Readonly<{
+      kind: "command";
+      id: ShellDiagnosticId;
+      code: "command.pipeline-unsupported";
+      message: string;
+      position: SourceOffset;
     }>
   | Readonly<{
       kind: "runtime";
@@ -160,7 +170,7 @@ export type CommandFailure =
     }>
   | Readonly<{
       kind: "parse-error";
-      error: ArgumentLexerError;
+      error: ShellSyntaxError;
     }>
   | Readonly<{
       kind: "command-not-found";
@@ -170,6 +180,10 @@ export type CommandFailure =
       kind: "command-rejected";
       commandName: string;
       message: string;
+    }>
+  | Readonly<{
+      kind: "unsupported-pipeline";
+      position: SourceOffset;
     }>
   | Readonly<{
       kind: "execution-error";

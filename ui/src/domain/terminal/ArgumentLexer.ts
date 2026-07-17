@@ -9,11 +9,32 @@ export type ArgumentIndex = number & {
   readonly [argumentIndexBrand]: "ArgumentIndex";
 };
 
+export type ShellOperator = ";" | "&&" | "||" | "|";
+
 export type LexedArgument = Readonly<{
+  kind: "argument";
   value: string;
   sourceStart: SourceOffset;
   sourceEnd: SourceOffset;
 }>;
+
+export type LexedOptionTerminator = Readonly<{
+  kind: "option-terminator";
+  argumentIndex: ArgumentIndex;
+  sourceStart: SourceOffset;
+  sourceEnd: SourceOffset;
+}>;
+
+export type LexedOperator = Readonly<{
+  kind: "operator";
+  operator: ShellOperator;
+  position: SourceOffset;
+}>;
+
+export type ArgumentLexerToken =
+  | LexedArgument
+  | LexedOptionTerminator
+  | LexedOperator;
 
 export type OptionTerminator =
   | Readonly<{ kind: "absent" }>
@@ -36,13 +57,28 @@ export type ArgumentLexerError =
   | Readonly<{
       kind: "trailing-escape";
       position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "unsupported-background-operator";
+      position: SourceOffset;
     }>;
+
+export type CommandListParseError =
+  | Readonly<{
+      kind: "unexpected-operator";
+      position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "trailing-operator";
+      position: SourceOffset;
+    }>;
+
+export type ShellSyntaxError = ArgumentLexerError | CommandListParseError;
 
 export type ArgumentLexerResult =
   | Readonly<{
       kind: "success";
-      arguments: ReadonlyArray<LexedArgument>;
-      optionTerminator: OptionTerminator;
+      tokens: ReadonlyArray<ArgumentLexerToken>;
     }>
   | Readonly<{
       kind: "error";
@@ -79,14 +115,41 @@ function createArgumentIndex(value: number): ArgumentIndex {
   return value as ArgumentIndex;
 }
 
+function shellOperatorAt(
+  source: string,
+  position: number,
+): ShellOperator | undefined {
+  const character = source[position];
+  const nextCharacter = source[position + 1];
+
+  if (character === ";") {
+    return ";";
+  }
+
+  if (character === "&" && nextCharacter === "&") {
+    return "&&";
+  }
+
+  if (character === "|" && nextCharacter === "|") {
+    return "||";
+  }
+
+  if (character === "|") {
+    return "|";
+  }
+
+  return undefined;
+}
+
 export function lexArguments(source: string): ArgumentLexerResult {
-  const argumentsList: LexedArgument[] = [];
-  let optionTerminator: OptionTerminator = { kind: "absent" };
+  const tokens: ArgumentLexerToken[] = [];
   let mode: LexerMode = unquotedMode;
   let value = "";
   let argumentStart = 0;
   let argumentOpen = false;
   let argumentUsesSyntax = false;
+  let argumentIndex = 0;
+  let optionTerminatorSeen = false;
 
   const beginArgument = (position: number): void => {
     if (argumentOpen) {
@@ -105,24 +168,35 @@ export function lexArguments(source: string): ArgumentLexerResult {
     const sourceStart = createSourceOffset(argumentStart, source);
     const sourceEnd = createSourceOffset(position, source);
     const isOptionTerminator =
-      optionTerminator.kind === "absent" &&
-      value === "--" &&
-      !argumentUsesSyntax;
+      !optionTerminatorSeen && value === "--" && !argumentUsesSyntax;
 
     if (isOptionTerminator) {
-      optionTerminator = {
-        kind: "present",
-        argumentIndex: createArgumentIndex(argumentsList.length),
+      tokens.push({
+        kind: "option-terminator",
+        argumentIndex: createArgumentIndex(argumentIndex),
         sourceStart,
         sourceEnd,
-      };
+      });
+      optionTerminatorSeen = true;
     } else {
-      argumentsList.push({ value, sourceStart, sourceEnd });
+      tokens.push({ kind: "argument", value, sourceStart, sourceEnd });
+      argumentIndex += 1;
     }
 
     value = "";
     argumentOpen = false;
     argumentUsesSyntax = false;
+  };
+
+  const appendOperator = (operator: ShellOperator, position: number): void => {
+    finishArgument(position);
+    tokens.push({
+      kind: "operator",
+      operator,
+      position: createSourceOffset(position, source),
+    });
+    argumentIndex = 0;
+    optionTerminatorSeen = false;
   };
 
   for (let position = 0; position < source.length; position += 1) {
@@ -168,6 +242,28 @@ export function lexArguments(source: string): ArgumentLexerResult {
     if (whitespacePattern.test(character)) {
       finishArgument(position);
       continue;
+    }
+
+    const operator = shellOperatorAt(source, position);
+
+    if (operator !== undefined) {
+      appendOperator(operator, position);
+
+      if (operator === "&&" || operator === "||") {
+        position += 1;
+      }
+
+      continue;
+    }
+
+    if (character === "&") {
+      return {
+        kind: "error",
+        error: {
+          kind: "unsupported-background-operator",
+          position: createSourceOffset(position, source),
+        },
+      };
     }
 
     if (character === "'") {
@@ -235,9 +331,5 @@ export function lexArguments(source: string): ArgumentLexerResult {
 
   finishArgument(source.length);
 
-  return {
-    kind: "success",
-    arguments: argumentsList,
-    optionTerminator,
-  };
+  return { kind: "success", tokens };
 }
