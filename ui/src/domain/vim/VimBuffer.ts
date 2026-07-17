@@ -98,6 +98,18 @@ export const VimCapability: Readonly<{
   ReadOnly: { kind: "read-only" },
 };
 
+type VimCapabilityOperation =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "text-mutation"; source: string }>
+  | Readonly<{ kind: "register-mutation"; source: string }>
+  | Readonly<{ kind: "history-mutation"; source: string }>
+  | Readonly<{ kind: "write-effect"; source: string }>
+  | Readonly<{ kind: "quit" }>;
+
+type VimCapabilityGate =
+  | Readonly<{ kind: "allowed" }>
+  | Readonly<{ kind: "handled"; buffer: VimBuffer }>;
+
 export type VimCommandEffect =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "write" }>
@@ -122,6 +134,7 @@ export type VimStatus =
       kind: "no-search-match";
       query: string;
     }>
+  | Readonly<{ kind: "no-previous-search" }>
   | Readonly<{
       kind: "read-only";
       source: string;
@@ -591,17 +604,38 @@ function invalidInput(buffer: VimBuffer, source: string): VimBuffer {
   };
 }
 
-function rejectReadOnly(buffer: VimBuffer, source: string): VimBuffer {
-  return {
-    ...buffer,
-    commandEffect: { kind: "none" },
-    pending: { kind: "none" },
-    status: { kind: "read-only", source },
-  };
-}
+function gateVimCapability(
+  buffer: VimBuffer,
+  operation: VimCapabilityOperation,
+): VimCapabilityGate {
+  switch (buffer.capability.kind) {
+    case "editable":
+      return { kind: "allowed" };
+    case "read-only":
+      if (operation.kind === "none") {
+        return { kind: "allowed" };
+      }
 
-function isReadOnly(buffer: VimBuffer): boolean {
-  return buffer.capability.kind === "read-only";
+      if (operation.kind === "quit") {
+        return {
+          kind: "handled",
+          buffer: {
+            ...resetPending(buffer),
+            commandEffect: { kind: "quit" },
+          },
+        };
+      }
+
+      return {
+        kind: "handled",
+        buffer: {
+          ...buffer,
+          commandEffect: { kind: "none" },
+          pending: { kind: "none" },
+          status: { kind: "read-only", source: operation.source },
+        },
+      };
+  }
 }
 
 function appendSaturatedDecimal(count: number, digit: number): number {
@@ -963,10 +997,6 @@ function operatorSource(operator: VimOperator): "d" | "c" | "y" {
 }
 
 function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
-  if (isReadOnly(buffer)) {
-    return rejectReadOnly(buffer, pendingSource(buffer) + operatorSource(operator));
-  }
-
   if (isVimVisualMode(buffer.mode)) {
     return applyVisualOperator(buffer, operator);
   }
@@ -1431,6 +1461,16 @@ function searchFailure(
   };
 }
 
+function noPreviousSearchFailure(
+  buffer: VimBuffer,
+  context: VimCommandContext,
+): VimBuffer {
+  return {
+    ...searchFailure(buffer, "", "no-search-match", context),
+    status: { kind: "no-previous-search" },
+  };
+}
+
 function searchMotionRange(
   cursorOffset: number,
   targetOffset: number,
@@ -1696,8 +1736,13 @@ function continueBlockChange(
 }
 
 export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
-  if (isReadOnly(buffer)) {
-    return rejectReadOnly(buffer, "insert");
+  const capability = gateVimCapability(buffer, {
+    kind: "text-mutation",
+    source: "insert",
+  });
+
+  if (capability.kind === "handled") {
+    return capability.buffer;
   }
 
   if (buffer.mode.kind !== "insert" || text.length === 0) {
@@ -1750,8 +1795,13 @@ function deleteVimInsertRange(
 }
 
 export function backspaceVimInsertText(buffer: VimBuffer): VimBuffer {
-  if (isReadOnly(buffer)) {
-    return rejectReadOnly(buffer, "backspace");
+  const capability = gateVimCapability(buffer, {
+    kind: "text-mutation",
+    source: "backspace",
+  });
+
+  if (capability.kind === "handled") {
+    return capability.buffer;
   }
 
   if (buffer.mode.kind !== "insert") {
@@ -1772,8 +1822,13 @@ export function backspaceVimInsertText(buffer: VimBuffer): VimBuffer {
 }
 
 export function deleteVimInsertText(buffer: VimBuffer): VimBuffer {
-  if (isReadOnly(buffer)) {
-    return rejectReadOnly(buffer, "delete");
+  const capability = gateVimCapability(buffer, {
+    kind: "text-mutation",
+    source: "delete",
+  });
+
+  if (capability.kind === "handled") {
+    return capability.buffer;
   }
 
   if (buffer.mode.kind !== "insert") {
@@ -1799,8 +1854,13 @@ export function replaceVimInsertText(
   text: string,
   cursorOffset: number,
 ): VimBuffer {
-  if (isReadOnly(buffer)) {
-    return rejectReadOnly(buffer, "insert");
+  const capability = gateVimCapability(buffer, {
+    kind: "text-mutation",
+    source: "insert",
+  });
+
+  if (capability.kind === "handled") {
+    return capability.buffer;
   }
 
   if (buffer.mode.kind !== "insert") {
@@ -2185,7 +2245,14 @@ function selectSearchMatch(
   }
 
   const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-  const match = searchObjectMatchFrom(matches.values, cursorOffset, direction);
+  const stepCount = matches.values.length === 0
+    ? 0
+    : ((context.count - 1) % matches.values.length) + 1;
+  let match = searchObjectMatchFrom(matches.values, cursorOffset, direction);
+
+  for (let iteration = 1; iteration < stepCount && match !== undefined; iteration += 1) {
+    match = searchMatchFrom(matches.values, match.start, direction);
+  }
 
   if (match === undefined || match.start === match.end) {
     return searchFailure(
@@ -2278,6 +2345,122 @@ function insertAtLineEnd(buffer: VimBuffer): VimBuffer {
   });
 }
 
+const noCapabilityOperation: VimCapabilityOperation = { kind: "none" };
+
+function operatorCapabilityOperation(
+  operator: VimOperator,
+  source: string,
+): VimCapabilityOperation {
+  return operator === "yank"
+    ? { kind: "register-mutation", source }
+    : { kind: "text-mutation", source };
+}
+
+function literalCapabilityClassification(
+  buffer: VimBuffer,
+  value: string,
+): VimCapabilityOperation {
+  if (
+    buffer.pending.kind === "prefix" ||
+    buffer.pending.kind === "find" ||
+    buffer.pending.kind === "section" ||
+    buffer.pending.kind === "mark" ||
+    buffer.pending.kind === "text-object"
+  ) {
+    return noCapabilityOperation;
+  }
+
+  const source = pendingSource(buffer) + value;
+  const visual = isVimVisualMode(buffer.mode);
+
+  if (
+    (value === "i" || value === "a") &&
+    (visual || buffer.pending.kind === "operator")
+  ) {
+    return noCapabilityOperation;
+  }
+
+  if (
+    visual &&
+    (value === "p" || value === "P" || value === "I" ||
+      value === "A" || value === "u")
+  ) {
+    return noCapabilityOperation;
+  }
+
+  switch (value) {
+    case "d":
+    case "c":
+    case "x":
+    case "p":
+    case "P":
+    case "i":
+    case "a":
+    case "I":
+    case "A":
+      return { kind: "text-mutation", source };
+    case "y":
+      return { kind: "register-mutation", source };
+    case "u":
+      return { kind: "history-mutation", source };
+    case "q":
+      return buffer.mode.kind === "normal" && buffer.pending.kind === "none"
+        ? { kind: "quit" }
+        : noCapabilityOperation;
+    default:
+      return noCapabilityOperation;
+  }
+}
+
+function normalKeyCapabilityClassification(
+  buffer: VimBuffer,
+  key: VimNormalKey,
+): VimCapabilityOperation {
+  switch (key.kind) {
+    case "operator":
+      return operatorCapabilityOperation(
+        key.operator,
+        pendingSource(buffer) + operatorSource(key.operator),
+      );
+    case "delete-character":
+      return literalCapabilityClassification(buffer, "x");
+    case "paste-after":
+      return literalCapabilityClassification(buffer, "p");
+    case "paste-before":
+      return literalCapabilityClassification(buffer, "P");
+    case "undo":
+      return literalCapabilityClassification(buffer, "u");
+    case "redo":
+      return isVimVisualMode(buffer.mode)
+        ? noCapabilityOperation
+        : {
+            kind: "history-mutation",
+            source: "Ctrl+r",
+          };
+    case "insert-before":
+      return literalCapabilityClassification(buffer, "i");
+    case "insert-after":
+      return literalCapabilityClassification(buffer, "a");
+    case "insert-line-start":
+      return literalCapabilityClassification(buffer, "I");
+    case "insert-line-end":
+      return literalCapabilityClassification(buffer, "A");
+    case "literal":
+      return literalCapabilityClassification(buffer, key.value);
+    case "motion":
+    case "digit":
+    case "enter-visual-character":
+    case "enter-visual-line":
+    case "enter-visual-block":
+    case "enter-command":
+    case "enter-search":
+    case "search-next":
+    case "search-previous":
+    case "escape":
+      return noCapabilityOperation;
+  }
+}
+
 function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
   if (buffer.pending.kind === "prefix") {
     return applyPrefixContinuation(buffer, value);
@@ -2312,13 +2495,6 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
     }
 
     return appendCount(buffer, digit);
-  }
-
-  if (
-    isReadOnly(buffer) &&
-    ["d", "c", "y", "x", "p", "P", "u", "i", "a", "I", "A"].includes(value)
-  ) {
-    return rejectReadOnly(buffer, pendingSource(buffer) + value);
   }
 
   switch (value) {
@@ -2470,12 +2646,7 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
         commandContext(buffer),
       );
     case "q":
-      return isReadOnly(buffer)
-        ? {
-            ...resetPending(buffer),
-            commandEffect: { kind: "quit" },
-          }
-        : invalidInput(buffer, pendingSource(buffer) + value);
+      return invalidInput(buffer, pendingSource(buffer) + value);
     case "i":
       return buffer.pending.kind === "operator" || isVimVisualMode(buffer.mode)
         ? beginTextObject(buffer, false, value)
@@ -2515,8 +2686,9 @@ export function applyNormalVimKey(
       return resetPending(buffer);
     }
 
-    return isReadOnly(buffer)
-      ? { ...resetPending(buffer), commandEffect: { kind: "quit" } }
+    const capability = gateVimCapability(buffer, { kind: "quit" });
+    return capability.kind === "handled"
+      ? capability.buffer
       : resetPending(buffer);
   }
 
@@ -2526,6 +2698,13 @@ export function applyNormalVimKey(
     buffer.mode.kind === "search"
   ) {
     return buffer;
+  }
+
+  const classification = normalKeyCapabilityClassification(buffer, key);
+  const capability = gateVimCapability(buffer, classification);
+
+  if (capability.kind === "handled") {
+    return capability.buffer;
   }
 
   if (key.kind === "motion") {
@@ -2554,9 +2733,7 @@ export function applyNormalVimKey(
     case "undo":
       return applyLiteral(buffer, "u");
     case "redo":
-      return isReadOnly(buffer)
-        ? rejectReadOnly(buffer, "Ctrl+r")
-        : isVimVisualMode(buffer.mode)
+      return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + "Ctrl+r")
         : redo(buffer);
     case "enter-visual-character":
@@ -2631,13 +2808,6 @@ export function backspaceVimCommandInput(buffer: VimBuffer): VimBuffer {
 export function parseVimCommand(source: string): VimCommandParseResult {
   switch (source.trim()) {
     case "w":
-    case "w!":
-    case "write":
-    case "write!":
-    case "wq":
-    case "wq!":
-    case "x":
-    case "xit":
       return { kind: "recognized", command: { kind: "write" } };
     case "q":
       return { kind: "recognized", command: { kind: "quit" } };
@@ -2648,23 +2818,60 @@ export function parseVimCommand(source: string): VimCommandParseResult {
   }
 }
 
+function writeCapabilityClassification(
+  source: string,
+): VimCapabilityOperation {
+  switch (source.trim()) {
+    case "w":
+    case "w!":
+    case "write":
+    case "write!":
+    case "wq":
+    case "wq!":
+    case "x":
+    case "xit":
+      return { kind: "write-effect", source: ":" + source };
+    default:
+      return { kind: "none" };
+  }
+}
+
 export function submitVimCommand(buffer: VimBuffer): VimBuffer {
   if (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") {
     return buffer;
   }
 
   if (buffer.mode.kind === "search") {
-    if (buffer.mode.input.length === 0) {
-      return enterNormalMode(buffer);
-    }
-
-    const query = buffer.mode.input;
     const direction = buffer.mode.direction;
     const context = buffer.mode.context;
+
+    if (buffer.mode.input.length === 0 && buffer.search.kind === "none") {
+      return noPreviousSearchFailure(buffer, context);
+    }
+
+    const query = buffer.mode.input.length === 0 && buffer.search.kind === "active"
+      ? buffer.search.query
+      : buffer.mode.input;
+
     const matches = searchMatches(joinLines(buffer.lines), query);
 
     if (matches.kind === "invalid") {
       return searchFailure(buffer, query, "invalid-search", context);
+    }
+
+    if (context.kind === "operator") {
+      const capability = gateVimCapability(
+        buffer,
+        operatorCapabilityOperation(context.operator, buffer.mode.prompt + query),
+      );
+
+      if (capability.kind === "handled") {
+        return {
+          ...capability.buffer,
+          mode: VimMode.Normal,
+          selection: { kind: "none" },
+        };
+      }
     }
 
     return moveToSearchMatch(
@@ -2683,14 +2890,12 @@ export function submitVimCommand(buffer: VimBuffer): VimBuffer {
   }
 
   const parsed = parseVimCommand(buffer.mode.input);
+  const classification = writeCapabilityClassification(buffer.mode.input);
+  const capability = gateVimCapability(buffer, classification);
 
-  if (
-    isReadOnly(buffer) &&
-    parsed.kind === "recognized" &&
-    parsed.command.kind === "write"
-  ) {
+  if (capability.kind === "handled") {
     return {
-      ...rejectReadOnly(buffer, ":" + buffer.mode.input),
+      ...capability.buffer,
       mode: VimMode.Normal,
       selection: { kind: "none" },
     };

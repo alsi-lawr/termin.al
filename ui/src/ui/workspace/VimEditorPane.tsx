@@ -89,6 +89,8 @@ function bufferStatusLabel(buffer: VimBuffer): string | undefined {
       return `Invalid pattern: ${buffer.status.query}`;
     case "no-search-match":
       return `Pattern not found: ${buffer.status.query}`;
+    case "no-previous-search":
+      return "No previous search pattern";
     case "read-only":
       return `Read-only: ${buffer.status.source}`;
   }
@@ -296,11 +298,7 @@ export function VimEditorPane({
   const handlePaste = (
     event: ClipboardEvent<HTMLTextAreaElement>,
   ): void => {
-    if (
-      buffer.capability.kind === "read-only" &&
-      buffer.mode.kind !== "command" &&
-      buffer.mode.kind !== "search"
-    ) {
+    if (buffer.mode.kind === "normal" || isVimVisualMode(buffer.mode)) {
       event.preventDefault();
       onBufferChange(applyNormalVimKey(buffer, { kind: "paste-after" }));
       return;
