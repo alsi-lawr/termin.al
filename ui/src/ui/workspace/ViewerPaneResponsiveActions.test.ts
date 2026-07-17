@@ -128,7 +128,10 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.equal(markup.includes('aria-label="Current less page"'), true);
   assert.equal(markup.includes("line 1\n"), true);
   assert.equal(markup.includes("line 20\n"), true);
-  assert.equal(markup.includes("line 21\n"), false);
+  assert.equal(
+    markup.match(/data-raw-pager-measure-line=""/gu)?.length,
+    25,
+  );
   assert.equal(markup.includes("<h2"), false);
   assert.equal(markup.includes(">Return</button>"), false);
   assert.equal(markup.includes('aria-label="Viewer navigation status"'), false);

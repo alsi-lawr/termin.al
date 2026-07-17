@@ -5,6 +5,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type ReactElement,
+  type RefObject,
 } from "react";
 import {
   viewerTitle,
@@ -19,9 +20,13 @@ import {
 import {
   applyRawPagerOperation,
   createRawPagerState,
+  rawPagerLogicalLines,
   rawPagerPageLines,
   rawPagerStatus,
+  resizeRawPagerCapacity,
   type RawPagerOperation,
+  type RawPagerLogicalLine,
+  type RawPagerState,
 } from "../../domain/viewer/RawPager.ts";
 import type { InputCapturePaneKeyInput } from "../terminal/InputCapture";
 import type { InputCapturePaneKeyResult } from "../terminal/InputCapture";
@@ -180,6 +185,121 @@ function ViManpager({
   );
 }
 
+function LessPagerMeasurement({
+  measurementRef,
+  lines,
+}: Readonly<{
+  measurementRef: RefObject<HTMLPreElement | null>;
+  lines: ReadonlyArray<RawPagerLogicalLine>;
+}>): ReactElement {
+  return (
+    <div className="invisible h-0 overflow-hidden" aria-hidden="true">
+      <pre
+        ref={measurementRef}
+        className="whitespace-pre-wrap wrap-break-words text-text-bright"
+      >
+        {lines.map((line) => (
+          <span
+            key={line.lineNumber}
+            className="block"
+            data-raw-pager-measure-line=""
+          >
+            {line.text}
+          </span>
+        ))}
+      </pre>
+    </div>
+  );
+}
+
+function resizeLessPagerToContent(
+  contentElement: HTMLDivElement,
+  measurementElement: HTMLPreElement,
+  state: RawPagerState,
+): RawPagerState {
+  const status = rawPagerStatus(state);
+
+  if (status.kind === "empty") {
+    return state;
+  }
+
+  const lineElements = measurementElement.children;
+
+  if (lineElements.length !== status.totalLines) {
+    return state;
+  }
+
+  const availableHeight = contentElement.clientHeight;
+
+  if (!Number.isFinite(availableHeight) || availableHeight <= 0) {
+    return state;
+  }
+
+  let usedHeight = 0;
+  let capacity = 0;
+  let nextLineIndex = status.firstLine - 1;
+
+  while (nextLineIndex < lineElements.length) {
+    const lineElement = lineElements.item(nextLineIndex);
+
+    if (!(lineElement instanceof HTMLElement)) {
+      return state;
+    }
+
+    const lineHeight = lineElement.getBoundingClientRect().height;
+
+    if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+      return state;
+    }
+
+    if (
+      capacity > 0 &&
+      usedHeight + lineHeight > availableHeight
+    ) {
+      break;
+    }
+
+    usedHeight += lineHeight;
+    capacity += 1;
+    nextLineIndex += 1;
+
+    if (usedHeight >= availableHeight) {
+      break;
+    }
+  }
+
+  const reachedDocumentEnd = nextLineIndex === lineElements.length;
+
+  if (reachedDocumentEnd && usedHeight < availableHeight) {
+    for (let index = status.firstLine - 2; index >= 0; index -= 1) {
+      const lineElement = lineElements.item(index);
+
+      if (!(lineElement instanceof HTMLElement)) {
+        return state;
+      }
+
+      const lineHeight = lineElement.getBoundingClientRect().height;
+
+      if (!Number.isFinite(lineHeight) || lineHeight <= 0) {
+        return state;
+      }
+
+      if (usedHeight + lineHeight > availableHeight) {
+        break;
+      }
+
+      usedHeight += lineHeight;
+      capacity += 1;
+
+      if (usedHeight >= availableHeight) {
+        break;
+      }
+    }
+  }
+
+  return capacity === 0 ? state : resizeRawPagerCapacity(state, capacity);
+}
+
 export function ViewerPane(props: ViewerPaneProps): ReactElement {
   if (props.viewer.kind !== "collection") {
     return <StandardViewerPane {...props} viewer={props.viewer} />;
@@ -226,6 +346,7 @@ function StandardViewerPane({
 }: ViewerPaneProps & Readonly<{ viewer: Exclude<ViewerContent, { kind: "collection" }> }>): ReactElement {
   const viewerRef = useRef<HTMLElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const rawPagerMeasurementRef = useRef<HTMLPreElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const activeViewer = viewer;
   const title = viewerTitle(activeViewer);
@@ -241,12 +362,18 @@ function StandardViewerPane({
     activeViewer.presentation === "raw-pager"
       ? activeViewer.document.text
       : "";
+  const rawLogicalLines = rawPagerLogicalLines(rawText);
   const markdownBlocks = markdownDocument === undefined
     ? 0
     : markdownBlockCount(markdownDocument);
   const [rawPagerState, setRawPagerState] = useState(() =>
     createRawPagerState(rawText),
   );
+  const rawPagerStateRef = useRef(rawPagerState);
+  const rawPagerStateStatus = rawPagerStatus(rawPagerState);
+  const rawPagerLineOffset = rawPagerStateStatus.kind === "range"
+    ? rawPagerStateStatus.firstLine - 1
+    : 0;
   const [markdownPosition, setMarkdownPosition] = useState(() =>
     createMarkdownViewerPosition(markdownBlocks),
   );
@@ -269,10 +396,75 @@ function StandardViewerPane({
   }, [focusVersion, isActive]);
 
   useEffect(() => {
-    setRawPagerState(createRawPagerState(rawText));
+    const initialRawPagerState = createRawPagerState(rawText);
+    rawPagerStateRef.current = initialRawPagerState;
+    setRawPagerState(initialRawPagerState);
     setMarkdownPosition(createMarkdownViewerPosition(markdownBlocks));
     setMarkdownSearch(createMarkdownViewerSearch());
   }, [markdownBlocks, markdownDocument?.text, rawText]);
+
+  useEffect(() => {
+    if (!isRawPager) {
+      return;
+    }
+
+    const contentElement = contentRef.current;
+    const measurementElement = rawPagerMeasurementRef.current;
+
+    if (contentElement === null || measurementElement === null) {
+      return;
+    }
+
+    const measureCapacity = (): void => {
+      const current = rawPagerStateRef.current;
+      const resized = resizeLessPagerToContent(
+        contentElement,
+        measurementElement,
+        current,
+      );
+
+      if (resized === current) {
+        return;
+      }
+
+      rawPagerStateRef.current = resized;
+      setRawPagerState(resized);
+    };
+
+    measureCapacity();
+
+    const observer = new ResizeObserver(measureCapacity);
+    observer.observe(contentElement);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [isRawPager, rawText]);
+
+  useEffect(() => {
+    if (!isRawPager) {
+      return;
+    }
+
+    const contentElement = contentRef.current;
+    const measurementElement = rawPagerMeasurementRef.current;
+
+    if (contentElement === null || measurementElement === null) {
+      return;
+    }
+
+    const current = rawPagerStateRef.current;
+    const resized = resizeLessPagerToContent(
+      contentElement,
+      measurementElement,
+      current,
+    );
+
+    if (resized !== current) {
+      rawPagerStateRef.current = resized;
+      setRawPagerState(resized);
+    }
+  }, [isRawPager, rawPagerLineOffset]);
 
   useEffect(() => {
     if (markdownSearch.kind === "editing") {
@@ -301,7 +493,9 @@ function StandardViewerPane({
 
     setRawPagerState((current) => {
       const transition = applyRawPagerOperation(current, operation);
-      return transition.kind === "updated" ? transition.state : current;
+      const next = transition.kind === "updated" ? transition.state : current;
+      rawPagerStateRef.current = next;
+      return next;
     });
   };
 
@@ -519,12 +713,10 @@ function StandardViewerPane({
     activeViewer.presentation === "raw-pager"
   ) {
     const status = rawPagerStatus(rawPagerState);
-    const pageText = rawPagerPageLines(
+    const pageLines = rawPagerPageLines(
       activeViewer.document.text,
       rawPagerState,
-    )
-      .map((line) => line.text)
-      .join("");
+    );
 
     return (
       <section
@@ -537,11 +729,24 @@ function StandardViewerPane({
         onClick={handleClick}
       >
         <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
+          <LessPagerMeasurement
+            measurementRef={rawPagerMeasurementRef}
+            lines={rawLogicalLines}
+          />
           <pre
             className="min-h-full whitespace-pre-wrap wrap-break-words text-text-bright"
             aria-label="Current less page"
           >
-            {pageText}
+            {pageLines.map((line) => (
+              <span
+                key={line.lineNumber}
+                className="block"
+                data-raw-pager-line-number={line.lineNumber}
+                data-raw-pager-visible-line=""
+              >
+                {line.text}
+              </span>
+            ))}
           </pre>
         </div>
         <div

@@ -29,6 +29,11 @@ export type RawPagerPageLine = Readonly<{
   isCurrent: boolean;
 }>;
 
+export type RawPagerLogicalLine = Readonly<{
+  lineNumber: number;
+  text: string;
+}>;
+
 export type RawPagerOperation =
   | Readonly<{ kind: "line-up" }>
   | Readonly<{ kind: "line-down" }>
@@ -75,6 +80,15 @@ function rawPagerLineChunks(text: string): ReadonlyArray<string> {
   return lines;
 }
 
+export function rawPagerLogicalLines(
+  text: string,
+): ReadonlyArray<RawPagerLogicalLine> {
+  return rawPagerLineChunks(text).map((line, index) => ({
+    lineNumber: index + 1,
+    text: line,
+  }));
+}
+
 export function createRawPagerState(
   text: string,
   maximumPageSize = RAW_PAGER_DEFAULT_PAGE_SIZE,
@@ -92,6 +106,41 @@ export function createRawPagerState(
       currentLineIndex: 0,
       pageSize,
       lineCount,
+    },
+  };
+}
+
+export function resizeRawPagerCapacity(
+  state: RawPagerState,
+  requestedCapacity: number,
+): RawPagerState {
+  if (!Number.isInteger(requestedCapacity) || requestedCapacity <= 0) {
+    throw new RangeError("Raw pager capacity must be a positive integer.");
+  }
+
+  const data = state[rawPagerStateData];
+  const pageSize = Math.min(requestedCapacity, data.lineCount);
+  const maximumOffset = Math.max(0, data.lineCount - pageSize);
+  const clampedOffset = Math.min(data.lineOffset, maximumOffset);
+  const lineOffset = data.currentLineIndex < clampedOffset
+    ? data.currentLineIndex
+    : Math.min(
+        maximumOffset,
+        Math.max(
+          clampedOffset,
+          data.currentLineIndex - pageSize + 1,
+        ),
+      );
+
+  if (pageSize === data.pageSize && lineOffset === data.lineOffset) {
+    return state;
+  }
+
+  return {
+    [rawPagerStateData]: {
+      ...data,
+      lineOffset,
+      pageSize,
     },
   };
 }

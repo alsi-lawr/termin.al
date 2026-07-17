@@ -12,10 +12,10 @@ DESCRIPTION
      dered and the command does not run an external less process.
 
 VIEWER
-     At most 20 source lines are shown per page. Use j/k or arrows for one line,
-     PageUp/b  for one page back, PageDown/Space or Ctrl+f for one page forward,
-     g/G for start/end, and q or Escape to close. The inverse prompt  shows  the
-     document title and position.
+     Each  page  fits  the available viewer height; logical source lines wrap to
+     the pane width. Use j/k or arrows for one line, PageUp/b for one page back,
+     PageDown/Space or Ctrl+f for one page forward, g/G for start/end, and q  or
+     Escape to close. The inverse prompt shows the document title and position.
 
      Pane-prefix  handling has precedence: Ctrl+b enters the pane command prefix
      instead of moving the pager back. On mobile, Esc and  up/down  operate  the

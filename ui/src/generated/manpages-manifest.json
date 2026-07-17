@@ -161,9 +161,9 @@
       "summary": "Open raw virtual document text in a pager.",
       "sourcePath": "man/less.1",
       "artifactPath": "ui/src/generated/manpages/less.txt",
-      "byteCount": 1569,
+      "byteCount": 1615,
       "lineCount": 42,
-      "sha256": "a2a1cb332ac097e1029ff2b6cf360a0e6c45e86c8bc8095ec8b4d20a46c714d4"
+      "sha256": "7e8462c0eeae006b77037be88d0490feac129e8ccc836843caeb708601d4e413"
     },
     {
       "name": "login",
