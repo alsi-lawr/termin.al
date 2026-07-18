@@ -26,6 +26,7 @@ import {
 } from "./PaneShellRuntimes.ts";
 import {
   clearCommandHistory,
+  commandHistoryWithSubmission,
   commandHistoryStorageKey,
   publishCommandHistory,
   readCommandHistory,
@@ -257,10 +258,10 @@ export function usePaneWorkspace(
         historyResult = publishCommandHistory(
           historyStorage,
           corpus.filesystem,
-          {
-            ...commandHistoryStateRef.current,
-            entries: reducedCommandHistory,
-          },
+          commandHistoryWithSubmission(
+            commandHistoryStateRef.current,
+            reducedCommandHistory,
+          ),
         );
       }
       if (historyResult !== undefined) {
@@ -301,7 +302,6 @@ export function usePaneWorkspace(
       onConsumeMobileCtrl,
     ],
   );
-
   const onCloseInlineViewer = useCallback((paneId: PaneId): void => {
     const currentShellRuntimes = shellRuntimesRef.current;
     const nextShellRuntimes = closePaneShellViewer(

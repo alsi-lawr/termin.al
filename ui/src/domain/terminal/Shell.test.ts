@@ -21,8 +21,6 @@ import {
   getShellStatus,
   reduceShellState,
   type CommandLineOutcome,
-  type CommandHistoryEntry,
-  type CommandSubmission,
   type ShellOutput,
   type ShellState,
 } from "./Shell.ts";
@@ -41,32 +39,6 @@ function createState(
   });
 }
 
-function persistentSubmission(state: ShellState): CommandSubmission {
-  return {
-    kind: "command",
-    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
-    tieBreaker: createCommandHistoryTieBreaker(
-      state.nextCommandHistorySequence,
-    ),
-    persistence: { kind: "persistent" },
-  };
-}
-
-function historyEntry(
-  source: string,
-  timestamp: number,
-  tieBreaker: number,
-  persistence: CommandHistoryEntry["persistence"] = { kind: "persistent" },
-): CommandHistoryEntry {
-  return {
-    source,
-    currentDirectory: virtualHomeDirectory(),
-    timestamp: createCommandHistoryTimestamp(timestamp),
-    tieBreaker: createCommandHistoryTieBreaker(tieBreaker),
-    persistence,
-  };
-}
-
 function submit(state: ShellState, source: string): ShellState {
   const withInput = reduceShellState(state, {
     kind: "input.insert",
@@ -75,7 +47,16 @@ function submit(state: ShellState, source: string): ShellState {
 
   return reduceShellState(withInput, {
     kind: "prompt.submit",
-    submission: persistentSubmission(withInput),
+    submission: {
+      kind: "command",
+      timestamp: createCommandHistoryTimestamp(
+        withInput.nextCommandHistorySequence,
+      ),
+      tieBreaker: createCommandHistoryTieBreaker(
+        withInput.nextCommandHistorySequence,
+      ),
+      persistence: { kind: "persistent" },
+    },
   });
 }
 
@@ -201,7 +182,13 @@ test("hydrates navigation and autosuggestion and collapses consecutive duplicate
     currentDirectory: virtualHomeDirectory(),
     scrollbackLimit: 3,
     commandHistoryLimit: 100,
-    commandHistory: [historyEntry("echo first", 1, 1)],
+    commandHistory: [{
+      source: "echo first",
+      currentDirectory: virtualHomeDirectory(),
+      timestamp: createCommandHistoryTimestamp(1),
+      tieBreaker: createCommandHistoryTieBreaker(1),
+      persistence: { kind: "persistent" },
+    }],
   });
   const older = reduceShellState(hydrated, { kind: "history.older" });
   const suggested = reduceShellState(hydrated, {
@@ -526,7 +513,16 @@ test("uses one-line native replacements and preserves astral command input", () 
   const deleted = reduceShellState(moved, { kind: "input.delete" });
   const submitted = reduceShellState(replaced, {
     kind: "prompt.submit",
-    submission: persistentSubmission(replaced),
+    submission: {
+      kind: "command",
+      timestamp: createCommandHistoryTimestamp(
+        replaced.nextCommandHistorySequence,
+      ),
+      tieBreaker: createCommandHistoryTieBreaker(
+        replaced.nextCommandHistorySequence,
+      ),
+      persistence: { kind: "persistent" },
+    },
   });
 
   assert.equal(replaced.input.text, expected);

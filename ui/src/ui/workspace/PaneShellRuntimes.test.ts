@@ -14,7 +14,6 @@ import {
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type {
   CommandHistoryEntry,
-  CommandSubmission,
   CommandLineOutcome,
   ShellState,
 } from "../../domain/terminal/Shell.ts";
@@ -47,10 +46,12 @@ import {
   clearCommandHistory,
   commandHistoryFromStoredValue,
   commandHistoryStorageKey,
+  commandHistoryWithSubmission,
   emptyCommandHistoryState,
   mergeCommandHistory,
   publishCommandHistory,
   readCommandHistory,
+  receiveCommandHistory,
   reconcileCommandHistory,
   writeCommandHistory,
 } from "./CommandHistoryStorage.ts";
@@ -74,12 +75,18 @@ test("keeps collection commands in one shell history row and removes transient s
     commandHistory: [],
   });
   const withInput = insert(initial, paneId, "projects");
+  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
   const submitted = reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
     action: {
       kind: "prompt.submit",
-      submission: persistentSubmission(withInput, paneId),
+      submission: {
+        kind: "command",
+        timestamp: createCommandHistoryTimestamp(sequence),
+        tieBreaker: createCommandHistoryTieBreaker(sequence),
+        persistence: { kind: "persistent" },
+      },
     },
   });
   const running = stateFor(submitted, paneId);
@@ -140,22 +147,6 @@ function synchronise(
 
 function stateFor(runtimes: PaneShellRuntimes, paneId: PaneId): ShellState {
   return paneShellRuntime(runtimes, paneId).state;
-}
-
-function persistentSubmission(
-  runtimes: PaneShellRuntimes,
-  paneId: PaneId,
-): CommandSubmission {
-  const state = stateFor(runtimes, paneId);
-
-  return {
-    kind: "command",
-    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
-    tieBreaker: createCommandHistoryTieBreaker(
-      state.nextCommandHistorySequence,
-    ),
-    persistence: { kind: "persistent" },
-  };
 }
 
 test("hydrates new panes and projects one shared history into existing panes", () => {
@@ -274,7 +265,7 @@ test("validates, deterministically merges, and bounds browser history records", 
   );
 });
 
-test("clear tombstones prevent stale publication while retaining later commands", () => {
+test("queued tombstones repair stale overwrites and retain same-millisecond submissions", () => {
   const values = new Map<string, string>();
   let writes = 0;
   const storage = {
@@ -313,46 +304,64 @@ test("clear tombstones prevent stale publication while retaining later commands"
     { ...initial, entries: [oldEntry] },
     createCommandHistoryTimestamp(3),
   );
-  const stalePublication = publishCommandHistory(
+  const tombstoneEvent = values.get(commandHistoryStorageKey) ?? "";
+  const staleOverwrite = writeCommandHistory(storage, reducedBeforeClear);
+  const repaired = receiveCommandHistory(
     storage,
     demoContentCorpus.filesystem,
     reducedBeforeClear,
+    tombstoneEvent,
   );
-  const afterStalePublication = readCommandHistory(
+  const afterRepair = readCommandHistory(
     storage,
     demoContentCorpus.filesystem,
   );
 
   assert.equal(cleared.kind, "available");
-  assert.equal(stalePublication.kind, "available");
-  assert.deepEqual(afterStalePublication.state.entries, []);
-  assert.equal(writes, 1);
+  assert.equal(staleOverwrite.kind, "available");
+  assert.equal(repaired.kind, "available");
+  assert.deepEqual(afterRepair.state.entries, []);
+  assert.equal(writes, 3);
   assert.equal(
     values.get(commandHistoryStorageKey),
     JSON.stringify({ version: 2, clearedAt: 3, entries: [] }),
   );
 
-  const laterEntry: CommandHistoryEntry = {
+  const sameMillisecondEntry: CommandHistoryEntry = {
     ...oldEntry,
-    source: "echo genuinely-later",
-    timestamp: createCommandHistoryTimestamp(4),
+    source: "echo genuinely-later-same-millisecond",
+    timestamp: createCommandHistoryTimestamp(3),
     tieBreaker: createCommandHistoryTieBreaker(4),
   };
+  const withSubmission = commandHistoryWithSubmission(repaired.state, [
+    oldEntry,
+    sameMillisecondEntry,
+  ]);
   const laterPublication = publishCommandHistory(
     storage,
     demoContentCorpus.filesystem,
-    { ...reducedBeforeClear, entries: [...reducedBeforeClear.entries, laterEntry] },
+    withSubmission,
   );
 
   assert.equal(laterPublication.kind, "available");
+  assert.equal(laterPublication.state.entries[0]?.timestamp, 4);
   assert.deepEqual(
     laterPublication.state.entries.map((entry) => entry.source),
-    ["echo genuinely-later"],
+    ["echo genuinely-later-same-millisecond"],
   );
-  assert.equal(writes, 2);
+  assert.equal(writes, 4);
 });
 
-test("incoming reconciliation publishes only absent canonical history", () => {
+test("incoming history handles no-op, write-back, null, and unavailable writes", () => {
+  let writes = 0;
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      writes += 1;
+      values.set(key, value);
+    },
+  };
   const initial = emptyCommandHistoryState();
   const first: CommandHistoryEntry = {
     source: "echo first",
@@ -369,22 +378,83 @@ test("incoming reconciliation publishes only absent canonical history", () => {
   };
   const local = { ...initial, entries: [first] };
   const receivedSuperset = { ...initial, entries: [first, second] };
-  const receivedSubset = { ...initial, entries: [second] };
-  const accepted = reconcileCommandHistory(local, receivedSuperset);
-  const publication = reconcileCommandHistory(local, receivedSubset);
-  const nullRecord = commandHistoryFromStoredValue(
-    null,
+  const supersetValue = JSON.stringify({
+    version: 2,
+    clearedAt: 0,
+    entries: receivedSuperset.entries.map((entry) => ({
+      source: entry.source,
+      currentDirectory: entry.currentDirectory,
+      timestamp: entry.timestamp,
+      tieBreaker: entry.tieBreaker,
+    })),
+  });
+  const subsetValue = JSON.stringify({
+    version: 2,
+    clearedAt: 0,
+    entries: [{
+      source: second.source,
+      currentDirectory: second.currentDirectory,
+      timestamp: second.timestamp,
+      tieBreaker: second.tieBreaker,
+    }],
+  });
+  values.set(commandHistoryStorageKey, supersetValue);
+  const noOp = receiveCommandHistory(
+    storage,
     demoContentCorpus.filesystem,
+    local,
+    supersetValue,
+  );
+  assert.equal(writes, 0);
+  const pureNoOp = reconcileCommandHistory(local, receivedSuperset);
+  values.set(commandHistoryStorageKey, subsetValue);
+  const writeBack = receiveCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    local,
+    subsetValue,
+  );
+  assert.equal(writes, 1);
+  writes = 0;
+  values.delete(commandHistoryStorageKey);
+  const nullEvent = receiveCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    local,
+    null,
+  );
+  const blocked = receiveCommandHistory(
+    undefined,
+    demoContentCorpus.filesystem,
+    local,
+    subsetValue,
+  );
+  const quotaSecret = "incoming-quota-private-payload";
+  const quotaFailed = receiveCommandHistory(
+    {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error(quotaSecret);
+      },
+    },
+    demoContentCorpus.filesystem,
+    local,
+    subsetValue,
   );
 
-  assert.equal(accepted.kind, "accepted");
-  assert.deepEqual(accepted.state.entries, [first, second]);
-  assert.equal(publication.kind, "publish");
-  assert.equal(nullRecord.kind, "available");
-  assert.equal(
-    reconcileCommandHistory(local, nullRecord.state).kind,
-    "publish",
-  );
+  assert.equal(noOp.kind, "available");
+  assert.equal(pureNoOp.kind, "accepted");
+  assert.deepEqual(noOp.state.entries, [first, second]);
+  assert.equal(writeBack.kind, "available");
+  assert.deepEqual(writeBack.state.entries, [first, second]);
+  assert.equal(nullEvent.kind, "available");
+  assert.deepEqual(nullEvent.state.entries, [first]);
+  assert.equal(writes, 1);
+  assert.equal(blocked.kind, "unavailable");
+  assert.equal(quotaFailed.kind, "unavailable");
+  if (quotaFailed.kind === "unavailable") {
+    assert.equal(quotaFailed.diagnostic.includes(quotaSecret), false);
+  }
 });
 
 test("storage excludes memory-only payloads and returns payload-free failures", () => {
@@ -476,12 +546,18 @@ function settleCurrentDirectory(
     paneId,
     action: { kind: "input.insert", text: "cd projects" },
   });
+  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
   const submitted = reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
     action: {
       kind: "prompt.submit",
-      submission: persistentSubmission(withInput, paneId),
+      submission: {
+        kind: "command",
+        timestamp: createCommandHistoryTimestamp(sequence),
+        tieBreaker: createCommandHistoryTieBreaker(sequence),
+        persistence: { kind: "persistent" },
+      },
     },
   });
   const state = stateFor(submitted, paneId);
@@ -533,13 +609,19 @@ function submitRunningCommand(
     paneId,
     action: { kind: "input.insert", text: "find ." },
   });
+  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
 
   return reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
     action: {
       kind: "prompt.submit",
-      submission: persistentSubmission(withInput, paneId),
+      submission: {
+        kind: "command",
+        timestamp: createCommandHistoryTimestamp(sequence),
+        tieBreaker: createCommandHistoryTieBreaker(sequence),
+        persistence: { kind: "persistent" },
+      },
     },
   });
 }

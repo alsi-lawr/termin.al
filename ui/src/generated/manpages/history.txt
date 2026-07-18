@@ -43,6 +43,10 @@ NOTES
      browsing therefore uses the browser's ephemeral storage  lifetime.  History
      is not stored in the virtual filesystem and is not sent to a server or API.
 
+     Active  tabs converge through browser storage events. Simultaneously inter‐
+     leaved tab writes are not atomic and may be observed  transiently  until  a
+     queued event repairs the shared record.
+
 EXAMPLES
      $ echo one
      $ history

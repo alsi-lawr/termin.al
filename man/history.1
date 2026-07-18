@@ -25,6 +25,8 @@ The latest 100 submissions are retained. Consecutive duplicate sources collapse 
 Browser storage contains a record schema version and clear tombstone timestamp. Each retained entry contains only command source, virtual working directory, merge timestamp and deterministic tie ordering data. It does not contain scrollback, command outcomes, errors, diagnostics, secret prompt values or pane identifiers. Commands explicitly defined as accepting credential arguments remain in memory but are not written to storage.
 .SH NOTES
 Stored history is local to this browser origin and survives pane changes, tabs and reloads according to the browser's storage lifetime. Private browsing therefore uses the browser's ephemeral storage lifetime. History is not stored in the virtual filesystem and is not sent to a server or API.
+.PP
+Active tabs converge through browser storage events. Simultaneously interleaved tab writes are not atomic and may be observed transiently until a queued event repairs the shared record.
 .SH EXAMPLES
 .nf
 $ echo one

@@ -24,7 +24,6 @@ import {
   type CommandLineOutcome,
   type ShellOutput,
   type ShellCommandRequest,
-  type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import {
   createThemeState,
@@ -139,7 +138,16 @@ function commandRequest(source: string): ShellCommandRequest {
   const typed = reduceShellState(initial, { kind: "input.insert", text: source });
   const submitted = reduceShellState(typed, {
     kind: "prompt.submit",
-    submission: persistentSubmission(typed),
+    submission: {
+      kind: "command",
+      timestamp: createCommandHistoryTimestamp(
+        typed.nextCommandHistorySequence,
+      ),
+      tieBreaker: createCommandHistoryTieBreaker(
+        typed.nextCommandHistorySequence,
+      ),
+      persistence: { kind: "persistent" },
+    },
   });
 
   if (submitted.lifecycle.kind !== "running") {
@@ -147,17 +155,6 @@ function commandRequest(source: string): ShellCommandRequest {
   }
 
   return submitted.lifecycle.command;
-}
-
-function persistentSubmission(state: ShellState) {
-  return {
-    kind: "command" as const,
-    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
-    tieBreaker: createCommandHistoryTieBreaker(
-      state.nextCommandHistorySequence,
-    ),
-    persistence: { kind: "persistent" as const },
-  };
 }
 
 async function execute(
