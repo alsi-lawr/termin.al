@@ -64,7 +64,7 @@ function containsUnsafeControl(text: string): boolean {
   return false;
 }
 
-test("generates an exact deterministic safe 32-manual corpus and manifest", () => {
+test("generates an exact deterministic safe 33-manual corpus and manifest", () => {
   withFixture((root) => {
     const first = runManpageGeneration({ repositoryRoot: root, mode: "generate" });
     const manifestPath = join(root, "ui", "src", "generated", "manpages-manifest.json");
@@ -74,7 +74,7 @@ test("generates an exact deterministic safe 32-manual corpus and manifest", () =
     );
     const second = runManpageGeneration({ repositoryRoot: root, mode: "generate" });
 
-    assert.equal(first.entries.length, 32);
+    assert.equal(first.entries.length, 33);
     assert.deepEqual(first, second);
     assert.deepEqual(readFileSync(manifestPath), firstManifest);
     assert.deepEqual(
