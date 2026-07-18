@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } fr
 import {
   createThemeSelectorState,
   moveThemeSelector,
-  selectorStorageDiagnostic,
   themePreferenceEquals,
   themeSelectorChoices,
   themeSelectorKeyResult,
+  themeStorageUnavailableMessage,
   type ThemeController,
   type ThemePreference,
   type ThemeSelectorMotion,
@@ -53,7 +53,9 @@ export function ThemeSelectorPane({
     const changed = state.selectedPreference.kind === "system"
       ? controller.followSystem()
       : controller.set(state.selectedPreference.theme);
-    onClose(selectorStorageDiagnostic(changed.storageFailed, storageFailureReported));
+    onClose(changed.storageFailed && !storageFailureReported
+      ? themeStorageUnavailableMessage
+      : undefined);
   };
   const cancel = (): void => {
     if (state.previewRevision !== undefined) {
