@@ -43,6 +43,17 @@ import {
   synchronizePaneCommandHistory,
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
+import {
+  clearCommandHistory,
+  commandHistoryFromStoredValue,
+  commandHistoryStorageKey,
+  emptyCommandHistoryState,
+  mergeCommandHistory,
+  publishCommandHistory,
+  readCommandHistory,
+  reconcileCommandHistory,
+  writeCommandHistory,
+} from "./CommandHistoryStorage.ts";
 
 function applied(result: PaneOperationResult): PaneWorkspace {
   if (result.kind !== "applied") {
@@ -197,6 +208,248 @@ test("hydrates new panes and projects one shared history into existing panes", (
 
   for (const pane of paneLeaves(workspace.tree)) {
     assert.equal(stateFor(synchronized, pane.id).commandHistory, nextHistory);
+  }
+});
+
+test("validates, deterministically merges, and bounds browser history records", () => {
+  const alpha: CommandHistoryEntry = {
+    source: "alpha 😀",
+    currentDirectory: virtualHomeDirectory(),
+    timestamp: createCommandHistoryTimestamp(1),
+    tieBreaker: createCommandHistoryTieBreaker(1),
+    persistence: { kind: "persistent" },
+  };
+  const zeta = { ...alpha, source: "zeta" };
+  const bounded = mergeCommandHistory(
+    Array.from({ length: 101 }, (_, index): CommandHistoryEntry => ({
+      ...alpha,
+      source: `echo ${index}`,
+      timestamp: createCommandHistoryTimestamp(index),
+      tieBreaker: createCommandHistoryTieBreaker(index),
+    })),
+  );
+  const hydrated = commandHistoryFromStoredValue(
+    JSON.stringify({
+      version: 2,
+      clearedAt: 0,
+      entries: [{
+        source: "echo 😀",
+        currentDirectory: "~",
+        timestamp: 2,
+        tieBreaker: 3,
+      }],
+    }),
+    demoContentCorpus.filesystem,
+  );
+
+  assert.deepEqual(
+    mergeCommandHistory([zeta], [alpha]).map((entry) => entry.source),
+    ["alpha 😀", "zeta"],
+  );
+  assert.equal(bounded.length, 100);
+  assert.equal(bounded[0]?.source, "echo 1");
+  assert.equal(hydrated.kind, "available");
+  assert.equal(hydrated.state.entries[0]?.source, "echo 😀");
+  assert.equal(
+    commandHistoryFromStoredValue("{", demoContentCorpus.filesystem).kind,
+    "unavailable",
+  );
+  assert.equal(
+    commandHistoryFromStoredValue(
+      JSON.stringify({
+        version: 1,
+        clearedAt: 0,
+        entries: [],
+      }),
+      demoContentCorpus.filesystem,
+    ).kind,
+    "unavailable",
+  );
+  assert.equal(
+    commandHistoryFromStoredValue(
+      "x".repeat(128 * 1024 + 1),
+      demoContentCorpus.filesystem,
+    ).kind,
+    "unavailable",
+  );
+});
+
+test("clear tombstones prevent stale publication while retaining later commands", () => {
+  const values = new Map<string, string>();
+  let writes = 0;
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      writes += 1;
+      values.set(key, value);
+    },
+  };
+  const initial = emptyCommandHistoryState();
+  const oldEntry: CommandHistoryEntry = {
+    source: "echo old",
+    currentDirectory: virtualHomeDirectory(),
+    timestamp: createCommandHistoryTimestamp(1),
+    tieBreaker: createCommandHistoryTieBreaker(1),
+    persistence: { kind: "persistent" },
+  };
+  const reducedBeforeClear = {
+    ...initial,
+    entries: [
+      oldEntry,
+      {
+        ...oldEntry,
+        source: "echo concurrent-before-clear",
+        timestamp: createCommandHistoryTimestamp(2),
+        tieBreaker: createCommandHistoryTieBreaker(2),
+      },
+    ],
+  };
+  writeCommandHistory(storage, { ...initial, entries: [oldEntry] });
+  writes = 0;
+
+  const cleared = clearCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    { ...initial, entries: [oldEntry] },
+    createCommandHistoryTimestamp(3),
+  );
+  const stalePublication = publishCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    reducedBeforeClear,
+  );
+  const afterStalePublication = readCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+  );
+
+  assert.equal(cleared.kind, "available");
+  assert.equal(stalePublication.kind, "available");
+  assert.deepEqual(afterStalePublication.state.entries, []);
+  assert.equal(writes, 1);
+  assert.equal(
+    values.get(commandHistoryStorageKey),
+    JSON.stringify({ version: 2, clearedAt: 3, entries: [] }),
+  );
+
+  const laterEntry: CommandHistoryEntry = {
+    ...oldEntry,
+    source: "echo genuinely-later",
+    timestamp: createCommandHistoryTimestamp(4),
+    tieBreaker: createCommandHistoryTieBreaker(4),
+  };
+  const laterPublication = publishCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    { ...reducedBeforeClear, entries: [...reducedBeforeClear.entries, laterEntry] },
+  );
+
+  assert.equal(laterPublication.kind, "available");
+  assert.deepEqual(
+    laterPublication.state.entries.map((entry) => entry.source),
+    ["echo genuinely-later"],
+  );
+  assert.equal(writes, 2);
+});
+
+test("incoming reconciliation publishes only absent canonical history", () => {
+  const initial = emptyCommandHistoryState();
+  const first: CommandHistoryEntry = {
+    source: "echo first",
+    currentDirectory: virtualHomeDirectory(),
+    timestamp: createCommandHistoryTimestamp(1),
+    tieBreaker: createCommandHistoryTieBreaker(1),
+    persistence: { kind: "persistent" },
+  };
+  const second = {
+    ...first,
+    source: "echo second",
+    timestamp: createCommandHistoryTimestamp(2),
+    tieBreaker: createCommandHistoryTieBreaker(2),
+  };
+  const local = { ...initial, entries: [first] };
+  const receivedSuperset = { ...initial, entries: [first, second] };
+  const receivedSubset = { ...initial, entries: [second] };
+  const accepted = reconcileCommandHistory(local, receivedSuperset);
+  const publication = reconcileCommandHistory(local, receivedSubset);
+  const nullRecord = commandHistoryFromStoredValue(
+    null,
+    demoContentCorpus.filesystem,
+  );
+
+  assert.equal(accepted.kind, "accepted");
+  assert.deepEqual(accepted.state.entries, [first, second]);
+  assert.equal(publication.kind, "publish");
+  assert.equal(nullRecord.kind, "available");
+  assert.equal(
+    reconcileCommandHistory(local, nullRecord.state).kind,
+    "publish",
+  );
+});
+
+test("storage excludes memory-only payloads and returns payload-free failures", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      values.set(key, value);
+    },
+  };
+  const secretSource = "credential-command private-token";
+  const state = {
+    ...emptyCommandHistoryState(),
+    entries: [
+      {
+        source: "echo public",
+        currentDirectory: virtualHomeDirectory(),
+        timestamp: createCommandHistoryTimestamp(1),
+        tieBreaker: createCommandHistoryTieBreaker(1),
+        persistence: { kind: "persistent" as const },
+      },
+      {
+        source: secretSource,
+        currentDirectory: virtualHomeDirectory(),
+        timestamp: createCommandHistoryTimestamp(2),
+        tieBreaker: createCommandHistoryTieBreaker(2),
+        persistence: {
+          kind: "memory-only" as const,
+          reason: "credential-arguments" as const,
+        },
+      },
+    ],
+  };
+  const persisted = writeCommandHistory(storage, state);
+  const stored = values.get(commandHistoryStorageKey) ?? "";
+  const blocked = readCommandHistory(
+    {
+      getItem: () => {
+        throw new Error(secretSource);
+      },
+      setItem: () => undefined,
+    },
+    demoContentCorpus.filesystem,
+  );
+  const quotaSecret = "quota-private-payload";
+  const quotaFailed = writeCommandHistory(
+    {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error(quotaSecret);
+      },
+    },
+    state,
+  );
+
+  assert.equal(persisted.kind, "available");
+  assert.equal(stored.includes("echo public"), true);
+  assert.equal(stored.includes(secretSource), false);
+  assert.equal(stored.includes("persistence"), false);
+  assert.equal(stored.includes("id"), false);
+  assert.equal(blocked.kind, "unavailable");
+  assert.equal(quotaFailed.kind, "unavailable");
+  if (blocked.kind === "unavailable" && quotaFailed.kind === "unavailable") {
+    assert.equal(blocked.diagnostic.includes(secretSource), false);
+    assert.equal(quotaFailed.diagnostic.includes(quotaSecret), false);
   }
 });
 

@@ -150,9 +150,9 @@
       "summary": "Show or clear shared browser-local command history.",
       "sourcePath": "man/history.1",
       "artifactPath": "ui/src/generated/manpages/history.txt",
-      "byteCount": 2109,
-      "lineCount": 53,
-      "sha256": "1091221b9f04b3cd31107235d9400faf98349bd62d2bf8380693a6ff6ece2b4e"
+      "byteCount": 2204,
+      "lineCount": 54,
+      "sha256": "3016de8ebf29fd424e133dbdc51b33bac4a47b7b26e41f12e9394da9fb26a80f"
     },
     {
       "name": "less",

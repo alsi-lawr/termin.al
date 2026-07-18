@@ -6,56 +6,44 @@ import {
   createCommandHistoryTieBreaker,
   createCommandHistoryTimestamp,
   type CommandHistoryEntry,
+  type CommandHistoryTimestamp,
 } from "../../domain/terminal/Shell.ts";
 
 export const commandHistoryStorageKey = "termin.al.command-history";
-
-const commandHistoryVersion = 1;
+const commandHistoryVersion = 2;
 const commandHistoryLimit = 100;
 const maximumStoredCharacterCount = 128 * 1024;
 const unavailableDiagnostic =
   "Browser command history storage is unavailable; history remains in memory.";
 
+export type CommandHistoryState = Readonly<{
+  clearedAt: CommandHistoryTimestamp;
+  entries: ReadonlyArray<CommandHistoryEntry>;
+}>;
 export type CommandHistoryStorageBackend = Readonly<{
   getItem: (key: string) => string | null;
   setItem: (key: string, value: string) => void;
-  removeItem: (key: string) => void;
 }>;
-
 export type CommandHistoryStorageResult =
-  | Readonly<{
-      kind: "available";
-      entries: ReadonlyArray<CommandHistoryEntry>;
-    }>
+  | Readonly<{ kind: "available"; state: CommandHistoryState }>
   | Readonly<{
       kind: "unavailable";
+      state: CommandHistoryState;
       diagnostic: string;
     }>;
+export type CommandHistoryReconciliation =
+  | Readonly<{ kind: "accepted"; state: CommandHistoryState }>
+  | Readonly<{ kind: "publish"; state: CommandHistoryState }>;
 
-type StoredCommandHistoryEntry = Readonly<{
-  source: string;
-  currentDirectory: string;
-  timestamp: number;
-  tieBreaker: number;
-}>;
-
-function hasExactKeys(
-  value: object,
-  expectedKeys: ReadonlyArray<string>,
-): boolean {
-  const keys = Object.keys(value);
-  return keys.length === expectedKeys.length &&
-    expectedKeys.every((key) => keys.includes(key));
+export function emptyCommandHistoryState(): CommandHistoryState {
+  return { clearedAt: createCommandHistoryTimestamp(0), entries: [] };
 }
-
+function unavailable(state: CommandHistoryState): CommandHistoryStorageResult {
+  return { kind: "unavailable", state, diagnostic: unavailableDiagnostic };
+}
 function compareText(first: string, second: string): number {
-  if (first === second) {
-    return 0;
-  }
-
-  return first < second ? -1 : 1;
+  return Number(first > second) - Number(first < second);
 }
-
 function compareEntries(
   first: CommandHistoryEntry,
   second: CommandHistoryEntry,
@@ -63,34 +51,15 @@ function compareEntries(
   if (first.timestamp !== second.timestamp) {
     return first.timestamp - second.timestamp;
   }
-
   if (first.tieBreaker !== second.tieBreaker) {
     return first.tieBreaker - second.tieBreaker;
   }
-
   const sourceOrder = compareText(first.source, second.source);
-
-  if (sourceOrder !== 0) {
-    return sourceOrder;
-  }
-
-  const directoryOrder = compareText(
-    first.currentDirectory,
-    second.currentDirectory,
-  );
-
-  if (directoryOrder !== 0) {
-    return directoryOrder;
-  }
-
-  if (first.persistence.kind === second.persistence.kind) {
-    return 0;
-  }
-
-  return first.persistence.kind === "memory-only" ? 1 : -1;
+  return sourceOrder !== 0
+    ? sourceOrder
+    : compareText(first.currentDirectory, second.currentDirectory);
 }
-
-function sameStoredIdentity(
+function sameEntry(
   first: CommandHistoryEntry,
   second: CommandHistoryEntry,
 ): boolean {
@@ -99,73 +68,90 @@ function sameStoredIdentity(
     first.source === second.source &&
     first.currentDirectory === second.currentDirectory;
 }
-
 export function mergeCommandHistory(
   ...histories: ReadonlyArray<ReadonlyArray<CommandHistoryEntry>>
 ): ReadonlyArray<CommandHistoryEntry> {
-  const ordered = histories.flat().toSorted(compareEntries);
   const merged: CommandHistoryEntry[] = [];
-
-  for (const entry of ordered) {
+  for (const entry of histories.flat().toSorted(compareEntries)) {
     const previous = merged.at(-1);
-
-    if (previous !== undefined && sameStoredIdentity(previous, entry)) {
+    if (previous !== undefined && sameEntry(previous, entry)) {
       if (entry.persistence.kind === "memory-only") {
         merged[merged.length - 1] = entry;
       }
       continue;
     }
-
     if (previous?.source === entry.source) {
       merged[merged.length - 1] = entry;
       continue;
     }
-
     merged.push(entry);
   }
-
   return merged.slice(-commandHistoryLimit);
 }
 
-function storedEntryFrom(
+function entriesAfter(
+  entries: ReadonlyArray<CommandHistoryEntry>,
+  clearedAt: CommandHistoryTimestamp,
+): ReadonlyArray<CommandHistoryEntry> {
+  return clearedAt === 0
+    ? entries
+    : entries.filter((entry) => entry.timestamp > clearedAt);
+}
+function persistentEntries(
+  entries: ReadonlyArray<CommandHistoryEntry>,
+): ReadonlyArray<CommandHistoryEntry> {
+  return entries.filter((entry) => entry.persistence.kind === "persistent");
+}
+function sameEntries(
+  first: ReadonlyArray<CommandHistoryEntry>,
+  second: ReadonlyArray<CommandHistoryEntry>,
+): boolean {
+  return first.length === second.length && first.every(
+    (entry, index) => second[index] !== undefined && sameEntry(entry, second[index]),
+  );
+}
+export function reconcileCommandHistory(
+  local: CommandHistoryState,
+  received: CommandHistoryState,
+): CommandHistoryReconciliation {
+  const clearedAt = local.clearedAt > received.clearedAt
+    ? local.clearedAt
+    : received.clearedAt;
+  const entries = mergeCommandHistory(
+    entriesAfter(local.entries, clearedAt),
+    entriesAfter(received.entries, clearedAt),
+  );
+  const state = { clearedAt, entries };
+  const receivedIsCanonical = received.clearedAt === clearedAt &&
+    sameEntries(received.entries, persistentEntries(entries));
+  return receivedIsCanonical
+    ? { kind: "accepted", state }
+    : { kind: "publish", state };
+}
+
+function parsedEntry(
   value: unknown,
   filesystem: VirtualFilesystem,
 ): CommandHistoryEntry | undefined {
   if (
-    value === null ||
-    typeof value !== "object" ||
-    !("source" in value) ||
-    !("currentDirectory" in value) ||
-    !("timestamp" in value) ||
-    !("tieBreaker" in value) ||
-    !hasExactKeys(value, [
-      "source",
-      "currentDirectory",
-      "timestamp",
-      "tieBreaker",
-    ]) ||
-    typeof value.source !== "string" ||
+    value === null || typeof value !== "object" ||
+    !("source" in value) || typeof value.source !== "string" ||
     value.source.trim().length === 0 ||
+    !("currentDirectory" in value) ||
     typeof value.currentDirectory !== "string" ||
-    typeof value.timestamp !== "number" ||
-    typeof value.tieBreaker !== "number"
+    !("timestamp" in value) || typeof value.timestamp !== "number" ||
+    !("tieBreaker" in value) || typeof value.tieBreaker !== "number"
   ) {
     return undefined;
   }
-
   const directory = resolveVirtualDirectory(
     filesystem,
     filesystem.root.path,
     value.currentDirectory,
   );
-
-  if (
-    directory.kind !== "found" ||
-    directory.directory.path !== value.currentDirectory
-  ) {
+  if (directory.kind !== "found" || directory.directory.path !== value.currentDirectory) {
     return undefined;
   }
-
   try {
     return {
       source: value.source,
@@ -178,129 +164,135 @@ function storedEntryFrom(
     return undefined;
   }
 }
-
 export function commandHistoryFromStoredValue(
   value: string | null,
   filesystem: VirtualFilesystem,
 ): CommandHistoryStorageResult {
+  const fallback = emptyCommandHistoryState();
   if (value === null) {
-    return { kind: "available", entries: [] };
+    return { kind: "available", state: fallback };
   }
-
   if (value.length > maximumStoredCharacterCount) {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
+    return unavailable(fallback);
   }
-
   let parsed: unknown;
-
   try {
     parsed = JSON.parse(value);
   } catch {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
+    return unavailable(fallback);
   }
-
   if (
-    parsed === null ||
-    typeof parsed !== "object" ||
-    !("version" in parsed) ||
-    parsed.version !== commandHistoryVersion ||
-    !("entries" in parsed) ||
-    !hasExactKeys(parsed, ["version", "entries"]) ||
-    !Array.isArray(parsed.entries) ||
+    parsed === null || typeof parsed !== "object" ||
+    !("version" in parsed) || parsed.version !== commandHistoryVersion ||
+    !("clearedAt" in parsed) || typeof parsed.clearedAt !== "number" ||
+    !("entries" in parsed) || !Array.isArray(parsed.entries) ||
     parsed.entries.length > commandHistoryLimit
   ) {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
+    return unavailable(fallback);
   }
-
-  const entries: CommandHistoryEntry[] = [];
-
-  for (const valueEntry of parsed.entries) {
-    const entry = storedEntryFrom(valueEntry, filesystem);
-
-    if (entry === undefined) {
-      return { kind: "unavailable", diagnostic: unavailableDiagnostic };
-    }
-
-    entries.push(entry);
+  const entries = parsed.entries.map((entry) => parsedEntry(entry, filesystem));
+  if (entries.some((entry) => entry === undefined)) {
+    return unavailable(fallback);
   }
-
-  return { kind: "available", entries: mergeCommandHistory(entries) };
+  try {
+    const state = {
+      clearedAt: createCommandHistoryTimestamp(parsed.clearedAt),
+      entries: mergeCommandHistory(
+        entries.flatMap((entry) => entry === undefined ? [] : [entry]),
+      ),
+    };
+    return entriesAfter(state.entries, state.clearedAt).length === state.entries.length
+      ? { kind: "available", state }
+      : unavailable(fallback);
+  } catch {
+    return unavailable(fallback);
+  }
 }
-
 export function readCommandHistory(
   storage: CommandHistoryStorageBackend | undefined,
   filesystem: VirtualFilesystem,
 ): CommandHistoryStorageResult {
   if (storage === undefined) {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
+    return unavailable(emptyCommandHistoryState());
   }
-
   try {
     return commandHistoryFromStoredValue(
       storage.getItem(commandHistoryStorageKey),
       filesystem,
     );
   } catch {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
+    return unavailable(emptyCommandHistoryState());
   }
 }
 
-function storedEntry(entry: CommandHistoryEntry): StoredCommandHistoryEntry {
-  return {
-    source: entry.source,
-    currentDirectory: entry.currentDirectory,
-    timestamp: entry.timestamp,
-    tieBreaker: entry.tieBreaker,
-  };
+export function writeCommandHistory(
+  storage: CommandHistoryStorageBackend | undefined,
+  state: CommandHistoryState,
+): CommandHistoryStorageResult {
+  const value = JSON.stringify({
+    version: commandHistoryVersion,
+    clearedAt: state.clearedAt,
+    entries: persistentEntries(entriesAfter(state.entries, state.clearedAt)).map(
+      (entry) => ({
+        source: entry.source,
+        currentDirectory: entry.currentDirectory,
+        timestamp: entry.timestamp,
+        tieBreaker: entry.tieBreaker,
+      }),
+    ),
+  });
+  if (storage === undefined || value.length > maximumStoredCharacterCount) {
+    return unavailable(state);
+  }
+  try {
+    storage.setItem(commandHistoryStorageKey, value);
+    return { kind: "available", state };
+  } catch {
+    return unavailable(state);
+  }
 }
-
-export function persistCommandHistory(
+function applyReconciliation(
+  storage: CommandHistoryStorageBackend | undefined,
+  reconciliation: CommandHistoryReconciliation,
+): CommandHistoryStorageResult {
+  return reconciliation.kind === "publish"
+    ? writeCommandHistory(storage, reconciliation.state)
+    : { kind: "available", state: reconciliation.state };
+}
+export function publishCommandHistory(
   storage: CommandHistoryStorageBackend | undefined,
   filesystem: VirtualFilesystem,
-  entries: ReadonlyArray<CommandHistoryEntry>,
+  local: CommandHistoryState,
 ): CommandHistoryStorageResult {
-  const current = readCommandHistory(storage, filesystem);
-
-  if (current.kind === "unavailable" || storage === undefined) {
-    return current;
-  }
-
-  const persistentEntries = entries.filter(
-    (entry) => entry.persistence.kind === "persistent",
-  );
-  const merged = mergeCommandHistory(current.entries, persistentEntries);
-  const record = JSON.stringify({
-    version: commandHistoryVersion,
-    entries: merged.map(storedEntry),
-  });
-
-  if (record.length > maximumStoredCharacterCount) {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
-  }
-
-  try {
-    storage.setItem(commandHistoryStorageKey, record);
-    return { kind: "available", entries: merged };
-  } catch {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
-  }
+  const received = readCommandHistory(storage, filesystem);
+  return received.kind === "available"
+    ? applyReconciliation(storage, reconcileCommandHistory(local, received.state))
+    : unavailable(local);
 }
-
-export function clearPersistedCommandHistory(
+export function receiveCommandHistory(
   storage: CommandHistoryStorageBackend | undefined,
+  filesystem: VirtualFilesystem,
+  local: CommandHistoryState,
+  value: string | null,
 ): CommandHistoryStorageResult {
-  if (storage === undefined) {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
-  }
-
-  try {
-    storage.removeItem(commandHistoryStorageKey);
-    storage.setItem(
-      commandHistoryStorageKey,
-      JSON.stringify({ version: commandHistoryVersion, entries: [] }),
-    );
-    return { kind: "available", entries: [] };
-  } catch {
-    return { kind: "unavailable", diagnostic: unavailableDiagnostic };
-  }
+  const received = commandHistoryFromStoredValue(value, filesystem);
+  return received.kind === "available"
+    ? applyReconciliation(storage, reconcileCommandHistory(local, received.state))
+    : unavailable(local);
+}
+export function clearCommandHistory(
+  storage: CommandHistoryStorageBackend | undefined,
+  filesystem: VirtualFilesystem,
+  local: CommandHistoryState,
+  clearedAt: CommandHistoryTimestamp,
+): CommandHistoryStorageResult {
+  const received = readCommandHistory(storage, filesystem);
+  const latestMarker = received.kind === "available" &&
+      received.state.clearedAt > local.clearedAt
+    ? received.state.clearedAt
+    : local.clearedAt;
+  return writeCommandHistory(storage, {
+    clearedAt: latestMarker > clearedAt ? latestMarker : clearedAt,
+    entries: [],
+  });
 }

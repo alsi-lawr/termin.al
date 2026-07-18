@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
-import type {
-  CommandHistoryEntry,
-  ShellAction,
+import {
+  createCommandHistoryTimestamp,
+  type ShellAction,
 } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
@@ -25,12 +25,12 @@ import {
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 import {
-  clearPersistedCommandHistory,
-  commandHistoryFromStoredValue,
+  clearCommandHistory,
   commandHistoryStorageKey,
-  mergeCommandHistory,
-  persistCommandHistory,
+  publishCommandHistory,
   readCommandHistory,
+  receiveCommandHistory,
+  type CommandHistoryState,
   type CommandHistoryStorageBackend,
   type CommandHistoryStorageResult,
 } from "./CommandHistoryStorage.ts";
@@ -50,14 +50,12 @@ import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
 } from "../terminal/InputCapture";
-
 export type PaneCloseConfirmation =
   | Readonly<{ kind: "none" }>
   | Readonly<{
       kind: "requested";
       pane: Pane;
     }>;
-
 export type PaneWorkspaceController = Readonly<{
   workspace: PaneWorkspace;
   shellRuntimes: PaneShellRuntimes;
@@ -79,7 +77,6 @@ export type PaneWorkspaceController = Readonly<{
   confirmClose: () => void;
   dismissClose: () => void;
 }>;
-
 function browserCommandHistoryStorage(): CommandHistoryStorageBackend | undefined {
   try {
     return window.localStorage;
@@ -87,28 +84,17 @@ function browserCommandHistoryStorage(): CommandHistoryStorageBackend | undefine
     return undefined;
   }
 }
-
-function sharedCommandHistory(
-  runtimes: PaneShellRuntimes,
-): ReadonlyArray<CommandHistoryEntry> {
-  return runtimes.values().next().value?.state.commandHistory ?? [];
+function reportStorageFailure(result: CommandHistoryStorageResult): void {
+  if (result.kind === "unavailable") {
+    console.warn(result.diagnostic);
+  }
 }
-
-function paneCommandHistory(
-  runtimes: PaneShellRuntimes,
-  paneId: PaneId,
-): ReadonlyArray<CommandHistoryEntry> {
-  return runtimes.get(paneId)?.state.commandHistory ??
-    sharedCommandHistory(runtimes);
-}
-
 function clearsCommandHistory(action: ShellAction): boolean {
   return action.kind === "command.settled" && action.outcome.events.some(
     (event) =>
       event.kind === "effect" && event.effect.kind === "clear-command-history",
   );
 }
-
 export function usePaneWorkspace(
   corpus: ContentCorpus,
   onAcceptedContentOpen: (contentId: ContentId) => void,
@@ -120,9 +106,6 @@ export function usePaneWorkspace(
   const [hydratedHistory] = useState<CommandHistoryStorageResult>(() =>
     readCommandHistory(historyStorage, corpus.filesystem)
   );
-  const initialCommandHistory = hydratedHistory.kind === "available"
-    ? hydratedHistory.entries
-    : [];
   const [workspace, setWorkspace] = useState<PaneWorkspace>(() =>
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
   );
@@ -130,7 +113,7 @@ export function usePaneWorkspace(
     createPaneShellRuntimes({
       workspace,
       currentDirectory,
-      commandHistory: initialCommandHistory,
+      commandHistory: hydratedHistory.state.entries,
     }),
   );
   const [focusVersion, setFocusVersion] = useState(0);
@@ -144,77 +127,39 @@ export function usePaneWorkspace(
   const mobileCtrlModifierRef = useRef<MobileCtrlModifier>(
     initialMobileCtrlModifier,
   );
-  const storageFailureReported = useRef(false);
-
-  const reportStorageFailure = useCallback(
-    (result: CommandHistoryStorageResult): void => {
-      if (result.kind === "available" || storageFailureReported.current) {
-        return;
-      }
-
-      storageFailureReported.current = true;
-      console.warn(result.diagnostic);
-    },
-    [],
+  const commandHistoryStateRef = useRef<CommandHistoryState>(
+    hydratedHistory.state,
   );
-
   useEffect(() => {
     reportStorageFailure(hydratedHistory);
-  }, [hydratedHistory, reportStorageFailure]);
-
+  }, [hydratedHistory]);
   useEffect(() => {
     const receiveStoredHistory = (event: StorageEvent): void => {
       if (event.key !== commandHistoryStorageKey) {
         return;
       }
-
-      const received = commandHistoryFromStoredValue(
-        event.newValue,
+      const received = receiveCommandHistory(
+        historyStorage,
         corpus.filesystem,
+        commandHistoryStateRef.current,
+        event.newValue,
       );
-
-      if (received.kind === "unavailable") {
-        reportStorageFailure(received);
-        return;
-      }
-
       const currentRuntimes = shellRuntimesRef.current;
-      let commandHistory = event.newValue === null || received.entries.length === 0
-        ? []
-        : mergeCommandHistory(
-            sharedCommandHistory(currentRuntimes),
-            received.entries,
-          );
-
-      if (commandHistory.length > 0) {
-        const persisted = persistCommandHistory(
-          historyStorage,
-          corpus.filesystem,
-          commandHistory,
-        );
-        reportStorageFailure(persisted);
-        if (persisted.kind === "available") {
-          commandHistory = mergeCommandHistory(
-            commandHistory,
-            persisted.entries,
-          );
-        }
-      }
+      reportStorageFailure(received);
+      commandHistoryStateRef.current = received.state;
       const nextRuntimes = synchronizePaneCommandHistory(
         currentRuntimes,
-        commandHistory,
+        received.state.entries,
       );
-
-      if (nextRuntimes !== currentRuntimes) {
-        shellRuntimesRef.current = nextRuntimes;
-        setShellRuntimes(nextRuntimes);
+      if (nextRuntimes === currentRuntimes) {
+        return;
       }
+      shellRuntimesRef.current = nextRuntimes;
+      setShellRuntimes(nextRuntimes);
     };
-
     window.addEventListener("storage", receiveStoredHistory);
     return () => window.removeEventListener("storage", receiveStoredHistory);
-  }, [corpus.filesystem, historyStorage, reportStorageFailure]);
-
+  }, [corpus.filesystem, historyStorage]);
   const setMobileCtrl = useCallback((modifier: MobileCtrlModifier): void => {
     mobileCtrlModifierRef.current = modifier;
     setMobileCtrlModifier(modifier);
@@ -261,7 +206,7 @@ export function usePaneWorkspace(
           runtimes: currentShellRuntimes,
           workspace: result.workspace,
           currentDirectory,
-          commandHistory: sharedCommandHistory(currentShellRuntimes),
+          commandHistory: commandHistoryStateRef.current.entries,
         });
         workspaceRef.current = result.workspace;
         shellRuntimesRef.current = nextShellRuntimes;
@@ -275,19 +220,16 @@ export function usePaneWorkspace(
         setFocusVersion((current) => current + 1);
         return result;
       }
-
       if (result.kind === "confirmation-required") {
         setCloseConfirmation({
           kind: "requested",
           pane: result.pane,
         });
       }
-
       return result;
     },
     [currentDirectory, onConsumeMobileCtrl],
   );
-
   const onShellAction = useCallback(
     (paneId: PaneId, action: ShellAction): void => {
       const currentWorkspace = workspaceRef.current;
@@ -298,58 +240,47 @@ export function usePaneWorkspace(
         paneId,
         action,
       });
-
       let nextRuntimes = applied.runtimes;
-      const previousCommandHistory = paneCommandHistory(
-        currentShellRuntimes,
-        paneId,
-      );
-      const reducedCommandHistory = paneCommandHistory(nextRuntimes, paneId);
-
+      let historyResult: CommandHistoryStorageResult | undefined;
+      const previousCommandHistory = currentShellRuntimes.get(paneId)?.state
+        .commandHistory ?? commandHistoryStateRef.current.entries;
+      const reducedCommandHistory = nextRuntimes.get(paneId)?.state.commandHistory ??
+        previousCommandHistory;
       if (clearsCommandHistory(action)) {
-        reportStorageFailure(clearPersistedCommandHistory(historyStorage));
-        nextRuntimes = synchronizePaneCommandHistory(nextRuntimes, []);
+        historyResult = clearCommandHistory(
+          historyStorage,
+          corpus.filesystem,
+          commandHistoryStateRef.current,
+          createCommandHistoryTimestamp(Date.now()),
+        );
       } else if (reducedCommandHistory !== previousCommandHistory) {
-        let commandHistory = reducedCommandHistory;
-
-        if (
-          action.kind === "prompt.submit" &&
-          action.submission.kind === "command" &&
-          action.submission.persistence.kind === "persistent"
-        ) {
-          const persisted = persistCommandHistory(
-            historyStorage,
-            corpus.filesystem,
-            reducedCommandHistory,
-          );
-          reportStorageFailure(persisted);
-          if (persisted.kind === "available") {
-            commandHistory = mergeCommandHistory(
-              reducedCommandHistory,
-              persisted.entries,
-            );
-          }
-        }
-
-        nextRuntimes = synchronizePaneCommandHistory(
-          nextRuntimes,
-          commandHistory,
+        historyResult = publishCommandHistory(
+          historyStorage,
+          corpus.filesystem,
+          {
+            ...commandHistoryStateRef.current,
+            entries: reducedCommandHistory,
+          },
         );
       }
-
+      if (historyResult !== undefined) {
+        reportStorageFailure(historyResult);
+        commandHistoryStateRef.current = historyResult.state;
+        nextRuntimes = synchronizePaneCommandHistory(
+          nextRuntimes,
+          historyResult.state.entries,
+        );
+      }
       const next = { ...applied, runtimes: nextRuntimes };
-
       for (const contentId of next.acceptedContentIds) {
         onAcceptedContentOpen(contentId);
       }
-
       if (
         next.workspace === currentWorkspace &&
         next.runtimes === currentShellRuntimes
       ) {
         return;
       }
-
       workspaceRef.current = next.workspace;
       shellRuntimesRef.current = next.runtimes;
       if (next.workspace !== currentWorkspace) {
@@ -368,7 +299,6 @@ export function usePaneWorkspace(
       historyStorage,
       onAcceptedContentOpen,
       onConsumeMobileCtrl,
-      reportStorageFailure,
     ],
   );
 
