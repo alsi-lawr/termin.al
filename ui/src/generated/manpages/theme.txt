@@ -4,17 +4,24 @@ NAME
      theme - List, select, or follow the system terminal theme.
 
 SYNOPSIS
-     theme [list|set <name>|system]
+     theme [list|select|set <name>|system]
 
 DESCRIPTION
      Shows or changes the terminal colour theme for the whole browser workspace.
      With no subcommand, theme prints the active name and whether it is explicit
-     or derived from the operating-system preference.
+     or  derived  from  the  operating-system  preference. The select subcommand
+     opens an in-terminal selector.
 
 SUBCOMMANDS
-     list   Print  all six supported names and mark the active one: gruber-dark-
-            muted, gruber-dark, gruber-darker, gruber-light-muted,  gruber-light
+     list   Print all six supported names and mark the active one:  gruber-dark-
+            muted,  gruber-dark, gruber-darker, gruber-light-muted, gruber-light
             and gruber-lighter.
+
+     select
+            Open a keyboard-first selector for system mode  and  the  six  named
+            themes.  Movement  previews  the choice workspace-wide; Enter stores
+            it, while Escape, q or Ctrl-C  cancels  without  replacing  a  newer
+            theme change from another pane.
 
      set name
             Select one exact supported name and store it as the explicit browser
@@ -26,11 +33,14 @@ SUBCOMMANDS
             gruber-light-muted.
 
 OUTPUT
-     Each valid form prints the resulting current theme or available-theme list.
+     The status, list, set and system forms print the resulting current theme or
+     available-theme  list.  The  select form retains the submitted command once
+     and opens a transient selector.
 
 FAILURES
-     Unknown  names,  unknown  subcommands and extra or missing subcommand argu‐
-     ments are rejected with no preference change.
+     Unknown names, unknown subcommands and extra or  missing  subcommand  argu‐
+     ments  are  rejected  with  no  preference change. Browser-storage failures
+     leave the active theme usable and report a bounded diagnostic.
 
 NOTES
      An explicit selection is stored under this site's browser local storage and
@@ -39,6 +49,7 @@ NOTES
 
 EXAMPLES
      $ theme
+     $ theme select
      $ theme list
      $ theme set gruber-darker
      $ theme system

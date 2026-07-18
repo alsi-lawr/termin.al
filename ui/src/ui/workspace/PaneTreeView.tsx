@@ -38,7 +38,10 @@ type PaneTreeViewProps = Readonly<{
   focusVersion: number;
   onOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
-  onCloseInlineViewer: (paneId: PaneId) => void;
+  onCloseShellPresentation: (
+    paneId: PaneId,
+    transientDiagnostic?: string,
+  ) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -113,7 +116,7 @@ function PaneLeaf({
   focusVersion,
   onOperation,
   onShellAction,
-  onCloseInlineViewer,
+  onCloseShellPresentation,
   hasShellRuntime,
   onPaneKeyInput,
   mobileCtrlPressed,
@@ -150,7 +153,7 @@ function PaneLeaf({
             presentation={runtime.presentation}
             runtimeControl={runtime.control}
             onShellAction={onShellAction}
-            onCloseInlineViewer={onCloseInlineViewer}
+            onCloseShellPresentation={onCloseShellPresentation}
             hasShellRuntime={hasShellRuntime}
             isActive={isActive}
             focusVersion={focusVersion}
@@ -226,7 +229,7 @@ export function PaneTreeView({
   focusVersion,
   onOperation,
   onShellAction,
-  onCloseInlineViewer,
+  onCloseShellPresentation,
   hasShellRuntime,
   onPaneKeyInput,
   mobileCtrlPressed,
@@ -249,7 +252,7 @@ export function PaneTreeView({
         focusVersion={focusVersion}
         onOperation={onOperation}
         onShellAction={onShellAction}
-        onCloseInlineViewer={onCloseInlineViewer}
+        onCloseShellPresentation={onCloseShellPresentation}
         hasShellRuntime={hasShellRuntime}
         onPaneKeyInput={onPaneKeyInput}
         mobileCtrlPressed={mobileCtrlPressed}
@@ -300,7 +303,7 @@ export function PaneTreeView({
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
-          onCloseInlineViewer={onCloseInlineViewer}
+          onCloseShellPresentation={onCloseShellPresentation}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
           mobileCtrlPressed={mobileCtrlPressed}
@@ -331,7 +334,7 @@ export function PaneTreeView({
           focusVersion={focusVersion}
           onOperation={onOperation}
           onShellAction={onShellAction}
-          onCloseInlineViewer={onCloseInlineViewer}
+          onCloseShellPresentation={onCloseShellPresentation}
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
           mobileCtrlPressed={mobileCtrlPressed}

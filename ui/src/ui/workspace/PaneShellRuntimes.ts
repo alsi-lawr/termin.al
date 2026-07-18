@@ -45,7 +45,11 @@ export type PaneShellRuntime = Readonly<{
 export type PaneShellRuntimes = ReadonlyMap<PaneId, PaneShellRuntime>;
 
 export type PaneShellPresentation =
-  | Readonly<{ kind: "shell" }>
+  | Readonly<{
+      kind: "shell";
+      transientDiagnostic: string | undefined;
+    }>
+  | Readonly<{ kind: "theme-selector" }>
   | Readonly<{
       kind: "inline-viewer";
       viewer: ViewerContent;
@@ -189,7 +193,7 @@ function createPaneShellRuntime(
 ): PaneShellRuntime {
   return {
     state: createPaneShellState(paneId, currentDirectory, commandHistory),
-    presentation: { kind: "shell" },
+    presentation: { kind: "shell", transientDiagnostic: undefined },
     control: createPaneShellRuntimeControl(),
   };
 }
@@ -357,9 +361,28 @@ export function showPaneShellViewer(
   return nextRuntimes;
 }
 
-export function closePaneShellViewer(
+function showPaneThemeSelector(
   runtimes: PaneShellRuntimes,
   paneId: PaneId,
+): PaneShellRuntimes {
+  const runtime = runtimes.get(paneId);
+
+  if (runtime === undefined || runtime.presentation.kind === "theme-selector") {
+    return runtimes;
+  }
+
+  const nextRuntimes = new Map(runtimes);
+  nextRuntimes.set(paneId, {
+    ...runtime,
+    presentation: { kind: "theme-selector" },
+  });
+  return nextRuntimes;
+}
+
+export function closePaneShellPresentation(
+  runtimes: PaneShellRuntimes,
+  paneId: PaneId,
+  transientDiagnostic: string | undefined = undefined,
 ): PaneShellRuntimes {
   const runtime = runtimes.get(paneId);
 
@@ -370,7 +393,7 @@ export function closePaneShellViewer(
   const nextRuntimes = new Map(runtimes);
   nextRuntimes.set(paneId, {
     ...runtime,
-    presentation: { kind: "shell" },
+    presentation: { kind: "shell", transientDiagnostic },
   });
   return nextRuntimes;
 }
@@ -399,11 +422,20 @@ export function applyPaneShellAction({
   const acceptedContentIds: ContentId[] = [];
 
   for (const event of action.outcome.events) {
-    if (event.kind !== "effect" || event.effect.kind !== "open-viewer") {
+    if (event.kind !== "effect") {
       continue;
     }
 
     const effect = event.effect;
+
+    if (effect.kind === "open-theme-selector") {
+      nextRuntimes = showPaneThemeSelector(nextRuntimes, paneId);
+      continue;
+    }
+
+    if (effect.kind !== "open-viewer") {
+      continue;
+    }
 
     if (effect.disposition.kind === "inline") {
       nextRuntimes = showPaneShellViewer(

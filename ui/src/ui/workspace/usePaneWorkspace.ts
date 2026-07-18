@@ -17,7 +17,7 @@ import {
 } from "../../domain/workspace/PaneTree.ts";
 import {
   applyPaneShellAction,
-  closePaneShellViewer,
+  closePaneShellPresentation,
   createPaneShellRuntimes,
   hasPaneShellRuntime,
   reconcilePaneShellRuntimes,
@@ -62,7 +62,10 @@ export type PaneWorkspaceController = Readonly<{
   mobileCtrlPressed: boolean;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
-  onCloseInlineViewer: (paneId: PaneId) => void;
+  onCloseShellPresentation: (
+    paneId: PaneId,
+    transientDiagnostic?: string,
+  ) => void;
   hasShellRuntime: (paneId: PaneId) => boolean;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -287,11 +290,15 @@ export function usePaneWorkspace(
       onConsumeMobileCtrl,
     ],
   );
-  const onCloseInlineViewer = useCallback((paneId: PaneId): void => {
+  const onCloseShellPresentation = useCallback((
+    paneId: PaneId,
+    transientDiagnostic?: string,
+  ): void => {
     const currentShellRuntimes = shellRuntimesRef.current;
-    const nextShellRuntimes = closePaneShellViewer(
+    const nextShellRuntimes = closePaneShellPresentation(
       currentShellRuntimes,
       paneId,
+      transientDiagnostic,
     );
 
     if (nextShellRuntimes === currentShellRuntimes) {
@@ -361,7 +368,7 @@ export function usePaneWorkspace(
     mobileCtrlPressed: mobileCtrlModifier.kind === "armed",
     applyOperation,
     onShellAction,
-    onCloseInlineViewer,
+    onCloseShellPresentation,
     hasShellRuntime,
     onPaneKeyInput,
     onToggleMobileCtrl,

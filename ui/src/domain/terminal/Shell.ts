@@ -98,6 +98,7 @@ export type ShellDiagnostic =
         | "runtime.execution-failed"
         | "runtime.cancelled"
         | "runtime.content-unavailable"
+        | "runtime.theme-storage-unavailable"
         | "runtime.truncated";
       message: string;
     }>;
@@ -139,6 +140,7 @@ export type SecretPromptEffect =
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
   | Readonly<{ kind: "clear-command-history" }>
+  | Readonly<{ kind: "open-theme-selector" }>
   | Readonly<{
       kind: "set-current-directory";
       directory: VirtualDirectoryPath;

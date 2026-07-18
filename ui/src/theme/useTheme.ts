@@ -1,22 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import {
   createThemeState,
+  restoreThemePreview,
   systemThemePreference,
   themeNameFrom,
   themeNames,
   themeStatus,
   withSystemThemeAppearance,
   withThemePreference,
+  withThemePreview,
   type SystemThemeAppearance,
+  type ThemeChange,
   type ThemeController,
-  type ThemeName,
+  type ThemePreference,
   type ThemeState,
   type ThemeStatus,
 } from "./Theme.ts";
 
 const themeStorageKey = "termin.al.theme";
-
 type ThemeStatePublisher = (state: ThemeState) => void;
+type StoredThemePreference = Readonly<{
+  preference: ThemePreference;
+  storageFailed: boolean;
+}>;
 
 function systemThemeAppearance(): SystemThemeAppearance {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -24,61 +30,113 @@ function systemThemeAppearance(): SystemThemeAppearance {
     : "light";
 }
 
-function savedThemeName(): ThemeName | undefined {
-  const saved = window.localStorage.getItem(themeStorageKey);
-  return saved === null ? undefined : themeNameFrom(saved);
-}
+export function readStoredThemePreference(
+  storage: Pick<Storage, "getItem">,
+): StoredThemePreference {
+  try {
+    const saved = storage.getItem(themeStorageKey);
+    if (saved === null) {
+      return { preference: systemThemePreference, storageFailed: false };
+    }
 
-function initialThemeState(): ThemeState {
-  const saved = savedThemeName();
-  const preference =
-    saved === undefined
-      ? systemThemePreference
-      : { kind: "explicit" as const, theme: saved };
-
-  return createThemeState(preference, systemThemeAppearance());
-}
-
-function persistThemePreference(state: ThemeState): void {
-  switch (state.preference.kind) {
-    case "system":
-      window.localStorage.removeItem(themeStorageKey);
-      return;
-    case "explicit":
-      window.localStorage.setItem(themeStorageKey, state.preference.theme);
+    const theme = themeNameFrom(saved);
+    return theme === undefined
+      ? { preference: systemThemePreference, storageFailed: true }
+      : { preference: { kind: "explicit", theme }, storageFailed: false };
+  } catch {
+    return { preference: systemThemePreference, storageFailed: true };
   }
 }
 
-function requiredThemeState(
-  state: ThemeState | undefined,
-): ThemeState {
+export function persistStoredThemePreference(
+  storage: Pick<Storage, "removeItem" | "setItem">,
+  preference: ThemePreference,
+): boolean {
+  try {
+    if (preference.kind === "system") {
+      storage.removeItem(themeStorageKey);
+    } else {
+      storage.setItem(themeStorageKey, preference.theme);
+    }
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+function browserThemeStorage(): Storage | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+type InitialTheme = Readonly<{
+  state: ThemeState;
+  storageFailed: boolean;
+}>;
+
+function initialTheme(): InitialTheme {
+  const storage = browserThemeStorage();
+  const stored = storage === undefined
+    ? { preference: systemThemePreference, storageFailed: true }
+    : readStoredThemePreference(storage);
+  return {
+    state: createThemeState(stored.preference, systemThemeAppearance()),
+    storageFailed: stored.storageFailed,
+  };
+}
+
+function requiredThemeState(state: ThemeState | undefined): ThemeState {
   if (state === undefined) {
     throw new Error("Theme state must be initialized before commands run.");
   }
-
   return state;
 }
 
 function createThemeController(
   stateRef: Readonly<{ current: ThemeState | undefined }>,
   publishRef: Readonly<{ current: ThemeStatePublisher }>,
+  initialStorageFailure: boolean,
 ): ThemeController {
-  const publish = (state: ThemeState): ThemeStatus => {
-    persistThemePreference(state);
+  let pendingStorageFailure = initialStorageFailure;
+  const publish = (state: ThemeState): ThemeState => {
     publishRef.current(state);
-    return themeStatus(state);
+    return state;
+  };
+  const commit = (preference: ThemePreference): ThemeChange => {
+    const current = requiredThemeState(stateRef.current);
+    const storage = browserThemeStorage();
+    const storageFailed = storage === undefined ||
+      persistStoredThemePreference(storage, preference);
+    const state = publish(storageFailed
+      ? withThemePreview(current, preference)
+      : withThemePreference(current, preference));
+    return { status: themeStatus(state), storageFailed };
   };
 
   return {
     list: () => themeNames,
     current: () => themeStatus(requiredThemeState(stateRef.current)),
-    set: (theme) => {
-      const state = requiredThemeState(stateRef.current);
-      return publish(withThemePreference(state, { kind: "explicit", theme }));
+    state: () => requiredThemeState(stateRef.current),
+    set: (theme) => commit({ kind: "explicit", theme }),
+    followSystem: () => commit(systemThemePreference),
+    preview: (preference) => publish(withThemePreview(
+      requiredThemeState(stateRef.current),
+      preference,
+    )),
+    restore: (preference, previewRevision) => {
+      const current = requiredThemeState(stateRef.current);
+      const restored = restoreThemePreview(current, preference, previewRevision);
+      if (restored !== current) {
+        publish(restored);
+      }
     },
-    followSystem: () => {
-      const state = requiredThemeState(stateRef.current);
-      return publish(withThemePreference(state, systemThemePreference));
+    takeStorageFailure: () => {
+      const failed = pendingStorageFailure;
+      pendingStorageFailure = false;
+      return failed;
     },
   };
 }
@@ -89,36 +147,31 @@ export type UseThemeResult = Readonly<{
 }>;
 
 export function useTheme(): UseThemeResult {
-  const stateRef = useRef<ThemeState | undefined>(undefined);
+  const [initial] = useState<InitialTheme>(initialTheme);
+  const [state, setState] = useState(initial.state);
+  const stateRef = useRef<ThemeState | undefined>(initial.state);
   const publishRef = useRef<ThemeStatePublisher>(() => undefined);
-  const [state, setState] = useState<ThemeState>(() => {
-    const initial = initialThemeState();
-    stateRef.current = initial;
-    return initial;
-  });
-  const [controller] = useState<ThemeController>(() =>
-    createThemeController(stateRef, publishRef),
-  );
+  const [controller] = useState<ThemeController>(() => createThemeController(
+    stateRef,
+    publishRef,
+    initial.storageFailed,
+  ));
 
-  publishRef.current = (nextState: ThemeState): void => {
+  publishRef.current = (nextState): void => {
     stateRef.current = nextState;
     setState(nextState);
   };
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
-    const updateSystemAppearance = (event: MediaQueryListEvent): void => {
-      const current = requiredThemeState(stateRef.current);
-      publishRef.current(
-        withSystemThemeAppearance(current, event.matches ? "dark" : "light"),
-      );
+    const update = (event: MediaQueryListEvent): void => {
+      publishRef.current(withSystemThemeAppearance(
+        requiredThemeState(stateRef.current),
+        event.matches ? "dark" : "light",
+      ));
     };
-
-    query.addEventListener("change", updateSystemAppearance);
-
-    return () => {
-      query.removeEventListener("change", updateSystemAppearance);
-    };
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
   }, []);
 
   return { status: themeStatus(state), controller };

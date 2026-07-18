@@ -45,7 +45,7 @@ export function Workspace({
             focusVersion={controller.focusVersion}
             onOperation={controller.applyOperation}
             onShellAction={controller.onShellAction}
-            onCloseInlineViewer={controller.onCloseInlineViewer}
+            onCloseShellPresentation={controller.onCloseShellPresentation}
             hasShellRuntime={controller.hasShellRuntime}
             onPaneKeyInput={controller.onPaneKeyInput}
             mobileCtrlPressed={controller.mobileCtrlPressed}

@@ -25,9 +25,11 @@ import {
 } from "../../domain/terminal/Shell.ts";
 import {
   createThemeState,
+  restoreThemePreview,
   systemThemePreference,
   themeNames,
   themeStatus,
+  withThemePreview,
   withThemePreference,
   type ThemeController,
   type ThemeName,
@@ -82,14 +84,23 @@ function createThemeController(): ThemeController {
   return {
     list: () => themeNames,
     current: status,
+    state: () => state,
     set: (theme: ThemeName) => {
       state = withThemePreference(state, { kind: "explicit", theme });
-      return status();
+      return { status: status(), storageFailed: false };
     },
     followSystem: () => {
       state = withThemePreference(state, systemThemePreference);
-      return status();
+      return { status: status(), storageFailed: false };
     },
+    preview: (preference) => {
+      state = withThemePreview(state, preference);
+      return state;
+    },
+    restore: (preference, previewRevision) => {
+      state = restoreThemePreview(state, preference, previewRevision);
+    },
+    takeStorageFailure: () => false,
   };
 }
 
@@ -558,6 +569,7 @@ test("lists, selects, and clears terminal theme selections", async () => {
   const registry = createRegistry(demoContentCorpus.documents, themes);
   const current = succeeded(await execute("theme", registry));
   const list = succeeded(await execute("theme list", registry));
+  const select = succeeded(await execute("theme select", registry));
   const set = succeeded(await execute("theme set gruber-lighter", registry));
   const explicit = succeeded(await execute("theme", registry));
   const system = succeeded(await execute("theme system", registry));
@@ -587,6 +599,8 @@ test("lists, selects, and clears terminal theme selections", async () => {
   assert.equal(currentOutput.text, "Current theme: gruber-dark-muted (system)");
   assert.match(listOutput.text, /gruber-lighter/u);
   assert.match(listOutput.text, /gruber-dark-muted \(current\)/u);
+  assert.equal(select.outputs.length, 0);
+  assert.deepEqual(select.effects, [{ kind: "open-theme-selector" }]);
   assert.equal(setOutput.text, "Theme set: Current theme: gruber-lighter (explicit)");
   assert.equal(explicitOutput.text, "Current theme: gruber-lighter (explicit)");
   assert.equal(
@@ -594,6 +608,46 @@ test("lists, selects, and clears terminal theme selections", async () => {
     "Theme follows system: Current theme: gruber-dark-muted (system)",
   );
   assert.equal(invalid.kind, "failed");
+});
+
+test("keeps theme changes usable when browser persistence fails", async () => {
+  const themes = createThemeController();
+  const failingThemes: ThemeController = {
+    ...themes,
+    set: (theme) => {
+      const changed = themes.set(theme);
+      return { ...changed, storageFailed: true };
+    },
+  };
+  const outcome = succeeded(await execute(
+    "theme set gruber-light",
+    createRegistry(demoContentCorpus.documents, failingThemes),
+  ));
+  const diagnostics = outcome.outputs.filter((output) =>
+    output.kind === "diagnostic"
+  );
+
+  assert.equal(themes.current().theme, "gruber-light");
+  assert.equal(diagnostics.length, 1);
+  assert.equal(
+    diagnostics[0]?.kind === "diagnostic"
+      ? diagnostics[0].diagnostic.code
+      : undefined,
+    "runtime.theme-storage-unavailable",
+  );
+  assert.equal(JSON.stringify(diagnostics).includes("gruber-light"), false);
+
+  const loadFailure = succeeded(await execute(
+    "theme",
+    createRegistry(demoContentCorpus.documents, {
+      ...themes,
+      takeStorageFailure: () => true,
+    }),
+  ));
+  assert.equal(
+    loadFailure.outputs.filter((output) => output.kind === "diagnostic").length,
+    1,
+  );
 });
 
 test("provides discoverable navigation commands and remaining unavailable-feature diagnostics", async () => {

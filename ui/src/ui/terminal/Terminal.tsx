@@ -55,6 +55,7 @@ import {
 import type { MobileCtrlInputResolution } from "../workspace/MobileCtrlModifier.ts";
 import { ViewerPane } from "../workspace/ViewerPane";
 import { HierarchicalCollectionPane } from "../workspace/HierarchicalCollectionPane.tsx";
+import { ThemeSelectorPane } from "../workspace/ThemeSelectorPane.tsx";
 import { generatedManpageCorpus } from "../../content/ManpageCorpusVite.ts";
 
 type TerminalProps = Readonly<{
@@ -77,7 +78,10 @@ type TerminalProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
   paneCommandHandler: PaneCommandHandler;
-  onCloseInlineViewer: (paneId: PaneId) => void;
+  onCloseShellPresentation: (
+    paneId: PaneId,
+    transientDiagnostic?: string,
+  ) => void;
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
@@ -103,7 +107,7 @@ export function Terminal({
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
   paneCommandHandler,
-  onCloseInlineViewer,
+  onCloseShellPresentation,
   themeController,
   filesystem,
   documents,
@@ -246,7 +250,7 @@ export function Terminal({
         resolveMobileCtrlInput={resolveMobileCtrlInput}
         onAcceptedContentOpen={onAcceptedContentOpen}
         onClose={() => {
-          onCloseInlineViewer(paneId);
+          onCloseShellPresentation(paneId);
         }}
       />
     );
@@ -269,7 +273,7 @@ export function Terminal({
         focusVersion={focusVersion}
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
-        onCancel={() => onCloseInlineViewer(paneId)}
+        onCancel={() => onCloseShellPresentation(paneId)}
         onAcceptedContentOpen={onAcceptedContentOpen}
         renderDocument={(leaf, onReturn) => (
           <ViewerPane
@@ -296,6 +300,26 @@ export function Terminal({
     );
   }
 
+  if (presentation.kind === "theme-selector") {
+    return (
+      <ThemeSelectorPane
+        transcript={(
+          <TerminalTranscript
+            rows={shell.state.history}
+            transientDiagnostic={shell.transientDiagnostic?.message}
+          />
+        )}
+        controller={themeController}
+        isActive={isActive}
+        focusVersion={focusVersion}
+        onActivate={onActivate}
+        onPaneKeyInput={onPaneKeyInput}
+        onClose={(transientDiagnostic) =>
+          onCloseShellPresentation(paneId, transientDiagnostic)}
+      />
+    );
+  }
+
   return (
     <div
       className="flex h-full min-h-0 min-w-0 w-full flex-col bg-surface-deepest text-text-primary"
@@ -312,7 +336,9 @@ export function Terminal({
           status={getShellStatus(shell.state)}
           completion={shell.state.completion}
           autosuggestion={getShellAutosuggestion(shell.state)}
-          transientDiagnostic={shell.transientDiagnostic?.message}
+          transientDiagnostic={
+            presentation.transientDiagnostic ?? shell.transientDiagnostic?.message
+          }
         />
       </div>
 

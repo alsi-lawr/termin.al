@@ -322,13 +322,13 @@
     {
       "name": "theme",
       "section": 1,
-      "usage": "theme [list|set <name>|system]",
+      "usage": "theme [list|select|set <name>|system]",
       "summary": "List, select, or follow the system terminal theme.",
       "sourcePath": "man/theme.1",
       "artifactPath": "ui/src/generated/manpages/theme.txt",
-      "byteCount": 1644,
-      "lineCount": 49,
-      "sha256": "a55798b51b57f1ee900459433dbc8551a44531ebf04a6d088efda974a78aba75"
+      "byteCount": 2250,
+      "lineCount": 60,
+      "sha256": "d0dfc72f918d4ce8130d9701925ff7d1d61ab52e268d629d853d007cae42a3d1"
     },
     {
       "name": "tools",

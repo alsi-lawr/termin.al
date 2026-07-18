@@ -29,6 +29,7 @@ import {
 } from "../../domain/terminal/Shell.ts";
 import {
   themeNameFrom,
+  themeStorageUnavailableMessage,
   type ThemeController,
   type ThemeStatus,
 } from "../../theme/Theme.ts";
@@ -742,14 +743,39 @@ function themeListMessage(themes: ThemeController): string {
   return `Available themes:\n${entries.join("\n")}`;
 }
 
-function themeOutput(id: string, text: string): CommandOutcome {
-  return succeededOutcome([
-    {
-      kind: "text",
-      id: createShellOutputId(id),
-      text,
+function themeStorageDiagnosticOutput(): ShellOutput {
+  return {
+    kind: "diagnostic",
+    id: createShellOutputId("theme-storage-unavailable-output"),
+    diagnostic: {
+      kind: "runtime",
+      id: createShellDiagnosticId("theme-storage-unavailable"),
+      code: "runtime.theme-storage-unavailable",
+      message: themeStorageUnavailableMessage,
     },
-  ]);
+  };
+}
+
+function themeStorageOutputs(
+  themes: ThemeController,
+  writeFailed = false,
+): ReadonlyArray<ShellOutput> {
+  const loadFailed = themes.takeStorageFailure();
+  return loadFailed || writeFailed
+    ? [themeStorageDiagnosticOutput()]
+    : [];
+}
+
+function themeOutput(
+  id: string,
+  text: string,
+  diagnostics: ReadonlyArray<ShellOutput> = [],
+): CommandOutcome {
+  return succeededOutcome([{
+    kind: "text",
+    id: createShellOutputId(id),
+    text,
+  }, ...diagnostics]);
 }
 
 function createThemeCommand(themes: ThemeController): CommandDefinition {
@@ -759,25 +785,42 @@ function createThemeCommand(themes: ThemeController): CommandDefinition {
       name: "theme",
       aliases: [],
       summary: "List, select, or follow the system terminal theme.",
-      usage: "theme [list|set <name>|system]",
-      examples: ["theme list", "theme set gruber-darker", "theme system"],
+      usage: "theme [list|select|set <name>|system]",
+      examples: ["theme select", "theme list", "theme set gruber-darker", "theme system"],
     },
     pipeline: "effects",
     execute: async (invocation) => {
       const [operation, value, ...remaining] = invocation.arguments;
 
       if (operation === undefined) {
-        return themeOutput("theme-current", currentThemeMessage(themes.current()));
+        return themeOutput(
+          "theme-current",
+          currentThemeMessage(themes.current()),
+          themeStorageOutputs(themes),
+        );
       }
 
       if (operation === "list" && value === undefined) {
-        return themeOutput("theme-list", themeListMessage(themes));
+        return themeOutput(
+          "theme-list",
+          themeListMessage(themes),
+          themeStorageOutputs(themes),
+        );
+      }
+
+      if (operation === "select" && value === undefined) {
+        return succeededOutcome(
+          themeStorageOutputs(themes),
+          [{ kind: "open-theme-selector" }],
+        );
       }
 
       if (operation === "system" && value === undefined) {
+        const mutation = themes.followSystem();
         return themeOutput(
           "theme-system",
-          `Theme follows system: ${currentThemeMessage(themes.followSystem())}`,
+          `Theme follows system: ${currentThemeMessage(mutation.status)}`,
+          themeStorageOutputs(themes, mutation.storageFailed),
         );
       }
 
@@ -788,13 +831,18 @@ function createThemeCommand(themes: ThemeController): CommandDefinition {
           return rejectedOutcome("theme", `Unknown theme: ${value}`);
         }
 
+        const mutation = themes.set(theme);
         return themeOutput(
           "theme-set",
-          `Theme set: ${currentThemeMessage(themes.set(theme))}`,
+          `Theme set: ${currentThemeMessage(mutation.status)}`,
+          themeStorageOutputs(themes, mutation.storageFailed),
         );
       }
 
-      return rejectedOutcome("theme", "Usage: theme [list|set <name>|system]");
+      return rejectedOutcome(
+        "theme",
+        "Usage: theme [list|select|set <name>|system]",
+      );
     },
   };
 }

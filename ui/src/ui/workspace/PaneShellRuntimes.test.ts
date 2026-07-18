@@ -29,7 +29,7 @@ import {
 } from "../../domain/workspace/PaneTree.ts";
 import {
   applyPaneShellAction,
-  closePaneShellViewer,
+  closePaneShellPresentation,
   createPaneShellRuntimes,
   hasPaneShellRuntime,
   paneShellRuntime,
@@ -104,11 +104,117 @@ test("keeps collection commands in one shell history row and removes transient s
   assert.equal(presented.state.commandHistory.length, 1);
   assert.equal(presented.state.input.text, "");
 
-  const returned = closePaneShellViewer(settled.runtimes, paneId);
+  const returned = closePaneShellPresentation(settled.runtimes, paneId);
   const shell = paneShellRuntime(returned, paneId);
   assert.equal(shell.presentation.kind, "shell");
   assert.equal(shell.state.history.length, 1);
   assert.equal(shell.state.input.text, "");
+});
+
+test("keeps theme select in one history row and scopes its presentation to the invoking pane", () => {
+  let workspace = createPaneWorkspace({ initialContent: createShellPaneContent() });
+  const paneId = workspace.activePaneId;
+  workspace = apply(workspace, {
+    kind: "split",
+    paneId,
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  let runtimes = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
+  });
+  runtimes = insert(runtimes, paneId, "theme select");
+  runtimes = reducePaneShellRuntime({
+    runtimes,
+    paneId,
+    action: {
+      kind: "prompt.submit",
+      submission: { kind: "command", persistence: { kind: "persistent" } },
+    },
+  });
+  const running = stateFor(runtimes, paneId);
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected theme select to be running.");
+  }
+
+  const settled = applyPaneShellAction({
+    workspace,
+    runtimes,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.lifecycle.command.id,
+      outcome: {
+        kind: "succeeded",
+        events: [{ kind: "effect", effect: { kind: "open-theme-selector" } }],
+      },
+    },
+  });
+  const presented = paneShellRuntime(settled.runtimes, paneId);
+  const otherPaneId = paneLeaves(workspace.tree).find((pane) => pane.id !== paneId)?.id;
+
+  if (otherPaneId === undefined) {
+    assert.fail("Expected the split shell pane.");
+  }
+
+  assert.equal(presented.presentation.kind, "theme-selector");
+  assert.equal(presented.state.history.length, 1);
+  assert.equal(presented.state.history[0]?.command.source, "theme select");
+  assert.equal(paneShellRuntime(settled.runtimes, otherPaneId).presentation.kind, "shell");
+
+  let concurrent = insert(settled.runtimes, otherPaneId, "theme select");
+  concurrent = reducePaneShellRuntime({
+    runtimes: concurrent,
+    paneId: otherPaneId,
+    action: {
+      kind: "prompt.submit",
+      submission: { kind: "command", persistence: { kind: "persistent" } },
+    },
+  });
+  const otherRunning = stateFor(concurrent, otherPaneId);
+
+  if (otherRunning.lifecycle.kind !== "running") {
+    assert.fail("Expected the concurrent theme selector to be running.");
+  }
+
+  const bothPresented = applyPaneShellAction({
+    workspace,
+    runtimes: concurrent,
+    paneId: otherPaneId,
+    action: {
+      kind: "command.settled",
+      commandId: otherRunning.lifecycle.command.id,
+      outcome: {
+        kind: "succeeded",
+        events: [{ kind: "effect", effect: { kind: "open-theme-selector" } }],
+      },
+    },
+  });
+  assert.equal(paneShellRuntime(bothPresented.runtimes, paneId).presentation.kind, "theme-selector");
+  assert.equal(paneShellRuntime(bothPresented.runtimes, otherPaneId).presentation.kind, "theme-selector");
+  assert.equal(paneShellRuntime(bothPresented.runtimes, otherPaneId).state.history.length, 1);
+
+  const closed = closePaneShellPresentation(
+    bothPresented.runtimes,
+    paneId,
+    "Theme storage is unavailable; the active theme remains usable.",
+  );
+  const shell = paneShellRuntime(closed, paneId);
+  assert.equal(shell.presentation.kind, "shell");
+  assert.equal(
+    shell.presentation.kind === "shell"
+      ? shell.presentation.transientDiagnostic
+      : undefined,
+    "Theme storage is unavailable; the active theme remains usable.",
+  );
+  assert.equal(shell.state.history.length, 1);
+  assert.equal(
+    paneShellRuntime(closed, otherPaneId).presentation.kind,
+    "theme-selector",
+  );
 });
 
 function apply(
@@ -757,7 +863,7 @@ test("returns an asynchronous raw pager to its moved shell runtime", async () =>
     "shell",
   );
 
-  const returned = closePaneShellViewer(presentedRuntimes, originPaneId);
+  const returned = closePaneShellPresentation(presentedRuntimes, originPaneId);
 
   assert.equal(paneShellRuntime(returned, originPaneId).presentation.kind, "shell");
   assert.equal(

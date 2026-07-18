@@ -1,5 +1,5 @@
 .\" termin.al-name: theme
-.\" termin.al-usage: theme [list|set <name>|system]
+.\" termin.al-usage: theme [list|select|set <name>|system]
 .\" termin.al-summary: List, select, or follow the system terminal theme.
 .TH THEME 1 "" "termin.al" "termin.al Manual"
 .ftr B R
@@ -9,14 +9,17 @@
 theme \- List, select, or follow the system terminal theme.
 .SH SYNOPSIS
 .nf
-theme [list|set <name>|system]
+theme [list|select|set <name>|system]
 .fi
 .SH DESCRIPTION
-Shows or changes the terminal colour theme for the whole browser workspace. With no subcommand, theme prints the active name and whether it is explicit or derived from the operating-system preference.
+Shows or changes the terminal colour theme for the whole browser workspace. With no subcommand, theme prints the active name and whether it is explicit or derived from the operating-system preference. The select subcommand opens an in-terminal selector.
 .SH SUBCOMMANDS
 .TP
 .B list
 Print all six supported names and mark the active one: gruber-dark-muted, gruber-dark, gruber-darker, gruber-light-muted, gruber-light and gruber-lighter.
+.TP
+.B select
+Open a keyboard-first selector for system mode and the six named themes. Movement previews the choice workspace-wide; Enter stores it, while Escape, q or Ctrl-C cancels without replacing a newer theme change from another pane.
 .TP
 .B set name
 Select one exact supported name and store it as the explicit browser preference.
@@ -24,14 +27,15 @@ Select one exact supported name and store it as the explicit browser preference.
 .B system
 Remove the stored explicit preference and follow the operating-system colour scheme. Dark maps to gruber-dark-muted and light maps to gruber-light-muted.
 .SH OUTPUT
-Each valid form prints the resulting current theme or available-theme list.
+The status, list, set and system forms print the resulting current theme or available-theme list. The select form retains the submitted command once and opens a transient selector.
 .SH FAILURES
-Unknown names, unknown subcommands and extra or missing subcommand arguments are rejected with no preference change.
+Unknown names, unknown subcommands and extra or missing subcommand arguments are rejected with no preference change. Browser-storage failures leave the active theme usable and report a bounded diagnostic.
 .SH NOTES
 An explicit selection is stored under this site's browser local storage and survives reloads in the same browser profile and origin. System mode removes that value. Theme choice is workspace-wide, not pane-local.
 .SH EXAMPLES
 .nf
 $ theme
+$ theme select
 $ theme list
 $ theme set gruber-darker
 $ theme system
