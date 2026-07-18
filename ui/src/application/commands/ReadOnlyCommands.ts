@@ -1271,6 +1271,7 @@ function createLsCommand(
       usage: "ls [-a] [-l] [--tree] [path]",
       examples: ["ls", "ls -l projects", "ls --tree projects", "ls -a --tree"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseLsOptions(invocation);
@@ -1350,6 +1351,7 @@ function createCdCommand(filesystem: VirtualFilesystem): CommandDefinition {
       usage: "cd [path]",
       examples: ["cd projects", "cd .."],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "cd [path]", 0, 1);
@@ -1388,6 +1390,7 @@ function createCatCommand(
       usage: "cat <path> [path ...]",
       examples: ["cat about.md"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "cat <path> [path ...]", 1, 32);
@@ -1427,6 +1430,7 @@ function createPwdCommand(): CommandDefinition {
       usage: "pwd",
       examples: ["pwd"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "pwd", 0, 0);
@@ -1451,6 +1455,7 @@ function createTreeCommand(
       usage: "tree [-a] [-L depth] [path]",
       examples: ["tree", "tree -L 1 projects"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseTreeOptions(invocation);
@@ -1482,6 +1487,7 @@ function createFindCommand(
       usage: "find [path] [-name pattern] [-path pattern] [-type f|d] [-maxdepth depth] [-mindepth depth]",
       examples: ["find -name '*.md'", "find projects -type f -maxdepth 2"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseFindOptions(invocation);
@@ -1644,6 +1650,7 @@ function createGrepCommand(
         "grep -F -- '-literal' about.md",
       ],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseGrepOptions(invocation);
@@ -1960,6 +1967,7 @@ function createSedCommand(
         "sed -e 's/demo/live/gi' -e '2d' about.md",
       ],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseSedOptions(invocation);
@@ -2048,6 +2056,7 @@ function createLineReaderCommand(
       usage: `${commandName} [-n count] [path]`,
       examples: [`cat about.md | ${commandName} -n 3`, `${commandName} -n 3 about.md`],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseLineReaderOptions(invocation, commandName);
@@ -2107,6 +2116,7 @@ function createLessCommand(
       usage: "less <path>",
       examples: ["less notes/sample-note.md"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "less <path>", 1, 1);
@@ -2167,6 +2177,7 @@ function createClearCommand(): CommandDefinition {
       usage: "clear",
       examples: ["clear"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "effects",
     execute: async (invocation) => {
       const parsed = parseNoOptionPaths(invocation, "clear", 0, 0);
@@ -2288,21 +2299,27 @@ function createHistoryCommand(): CommandDefinition {
       group: "gnu-like",
       name: "history",
       aliases: [],
-      summary: "Show this shell pane's bounded command history.",
-      usage: "history",
-      examples: ["history"],
+      summary: "Show or clear shared browser-local command history.",
+      usage: "history [clear]",
+      examples: ["history", "history clear"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation, context) => {
-      const parsed = parseNoOptionPaths(invocation, "history", 0, 0);
-
-      if (parsed.kind === "invalid") {
-        return rejectedOutcome("history", parsed.message);
+      if (invocation.arguments.length === 0) {
+        return succeededOutcome([
+          textOutput("history-output", formatHistoryEntries(context.commandHistory)),
+        ]);
       }
 
-      return succeededOutcome([
-        textOutput("history-output", formatHistoryEntries(context.commandHistory)),
-      ]);
+      if (
+        invocation.arguments.length === 1 &&
+        invocation.arguments[0] === "clear"
+      ) {
+        return succeededOutcome([], [{ kind: "clear-command-history" }]);
+      }
+
+      return rejectedOutcome("history", "Usage: history [clear]");
     },
   };
 }
@@ -2317,6 +2334,7 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
       usage: "man [-P less|vi] [--pager=less|vi] <command>",
       examples: ["man grep", "man -P vi grep"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseManInvocation(invocation);
@@ -2370,6 +2388,7 @@ function createEchoCommand(): CommandDefinition {
       usage: "echo [text ...]",
       examples: ["echo 'hello terminal'"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation) =>
       succeededOutcome([textOutput("echo-output", invocation.arguments.join(" "))]),
@@ -2386,6 +2405,7 @@ function createWhoamiCommand(): CommandDefinition {
       usage: "whoami",
       examples: ["whoami"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "text",
     execute: async (invocation) => {
       const parsed = parseNoOptionPaths(invocation, "whoami", 0, 0);

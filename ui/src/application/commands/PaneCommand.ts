@@ -363,6 +363,7 @@ export function createPaneCommandDefinition(
       usage: "pane split|focus|select|resize|close|zoom|swap|rotate|layout",
       examples: ["pane split horizontal viewer", "pane focus next"],
     },
+    historyPersistence: { kind: "persistent" },
     pipeline: "effects",
     execute: (invocation) =>
       Promise.resolve(executePaneCommand(invocation, paneId, handler)),

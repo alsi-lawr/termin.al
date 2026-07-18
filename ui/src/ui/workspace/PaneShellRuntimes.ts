@@ -10,6 +10,7 @@ import {
   createShellState,
   reduceShellState,
   type CommandId,
+  type CommandHistoryEntry,
   type CommandLineOutcome,
   type ShellAction,
   type ShellState,
@@ -57,12 +58,14 @@ export type PaneShellPresentation =
 export type CreatePaneShellRuntimesOptions = Readonly<{
   workspace: PaneWorkspace;
   currentDirectory: VirtualDirectoryPath;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
 }>;
 
 export type ReconcilePaneShellRuntimesOptions = Readonly<{
   runtimes: PaneShellRuntimes;
   workspace: PaneWorkspace;
   currentDirectory: VirtualDirectoryPath;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
 }>;
 
 export type ReducePaneShellRuntimeOptions = Readonly<{
@@ -167,6 +170,7 @@ function createPaneShellRuntimeControl(): PaneShellRuntimeControl {
 function createPaneShellState(
   paneId: PaneId,
   currentDirectory: VirtualDirectoryPath,
+  commandHistory: ReadonlyArray<CommandHistoryEntry>,
 ): ShellState {
   return createShellState({
     id: createShellId("shell-" + paneId),
@@ -174,15 +178,17 @@ function createPaneShellState(
     currentDirectory,
     scrollbackLimit: 200,
     commandHistoryLimit: 100,
+    commandHistory,
   });
 }
 
 function createPaneShellRuntime(
   paneId: PaneId,
   currentDirectory: VirtualDirectoryPath,
+  commandHistory: ReadonlyArray<CommandHistoryEntry>,
 ): PaneShellRuntime {
   return {
-    state: createPaneShellState(paneId, currentDirectory),
+    state: createPaneShellState(paneId, currentDirectory, commandHistory),
     presentation: { kind: "shell" },
     control: createPaneShellRuntimeControl(),
   };
@@ -208,11 +214,13 @@ function hasSameEntries(
 export function createPaneShellRuntimes({
   workspace,
   currentDirectory,
+  commandHistory,
 }: CreatePaneShellRuntimesOptions): PaneShellRuntimes {
   return reconcilePaneShellRuntimes({
     runtimes: new Map<PaneId, PaneShellRuntime>(),
     workspace,
     currentDirectory,
+    commandHistory,
   });
 }
 
@@ -220,6 +228,7 @@ export function reconcilePaneShellRuntimes({
   runtimes,
   workspace,
   currentDirectory,
+  commandHistory,
 }: ReconcilePaneShellRuntimesOptions): PaneShellRuntimes {
   const nextRuntimes = new Map<PaneId, PaneShellRuntime>();
 
@@ -231,7 +240,11 @@ export function reconcilePaneShellRuntimes({
     const existingRuntime = runtimes.get(pane.id);
     nextRuntimes.set(
       pane.id,
-      existingRuntime ?? createPaneShellRuntime(pane.id, currentDirectory),
+      existingRuntime ?? createPaneShellRuntime(
+        pane.id,
+        currentDirectory,
+        commandHistory,
+      ),
     );
   }
 
@@ -246,6 +259,33 @@ export function reconcilePaneShellRuntimes({
   }
 
   return nextRuntimes;
+}
+
+export function synchronizePaneCommandHistory(
+  runtimes: PaneShellRuntimes,
+  commandHistory: ReadonlyArray<CommandHistoryEntry>,
+): PaneShellRuntimes {
+  let changed = false;
+  const nextRuntimes = new Map<PaneId, PaneShellRuntime>();
+
+  for (const [paneId, runtime] of runtimes) {
+    if (runtime.state.commandHistory === commandHistory) {
+      nextRuntimes.set(paneId, runtime);
+      continue;
+    }
+
+    changed = true;
+    nextRuntimes.set(paneId, {
+      ...runtime,
+      state: {
+        ...runtime.state,
+        commandHistory,
+        historyNavigation: { kind: "not-browsing" },
+      },
+    });
+  }
+
+  return changed ? nextRuntimes : runtimes;
 }
 
 export function hasPaneShellRuntime(

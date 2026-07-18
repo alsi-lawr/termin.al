@@ -13,6 +13,8 @@ import {
   type VirtualFilesystem,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
   createShellId,
   createShellSessionId,
   createShellState,
@@ -21,8 +23,12 @@ import {
   type CommandLineOutcome,
   type ShellOutput,
   type ShellCommandRequest,
+  type ShellState,
 } from "../../domain/terminal/Shell.ts";
-import { executeCommandLine } from "./CommandExecution.ts";
+import {
+  commandHistoryPersistenceForSource,
+  executeCommandLine,
+} from "./CommandExecution.ts";
 import {
   createCommandRegistry,
   resolveCommand,
@@ -171,12 +177,16 @@ function commandRequest(
     sessionId: createShellSessionId("session"),
     currentDirectory,
     scrollbackLimit: 10,
+    commandHistory: [],
     commandHistoryLimit: 10,
   });
 
   for (const command of previousCommands) {
     state = reduceShellState(state, { kind: "input.insert", text: command });
-    state = reduceShellState(state, { kind: "prompt.submit" });
+    state = reduceShellState(state, {
+      kind: "prompt.submit",
+      submission: persistentSubmission(state),
+    });
 
     if (state.lifecycle.kind !== "running") {
       assert.fail("Expected a prior command request.");
@@ -190,13 +200,27 @@ function commandRequest(
   }
 
   const typed = reduceShellState(state, { kind: "input.insert", text: source });
-  const submitted = reduceShellState(typed, { kind: "prompt.submit" });
+  const submitted = reduceShellState(typed, {
+    kind: "prompt.submit",
+    submission: persistentSubmission(typed),
+  });
 
   if (submitted.lifecycle.kind !== "running") {
     assert.fail("Expected a command request.");
   }
 
   return submitted.lifecycle.command;
+}
+
+function persistentSubmission(state: ShellState) {
+  return {
+    kind: "command" as const,
+    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
+    tieBreaker: createCommandHistoryTieBreaker(
+      state.nextCommandHistorySequence,
+    ),
+    persistence: { kind: "persistent" as const },
+  };
 }
 
 async function execute(
@@ -341,6 +365,37 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
   assert.equal(resolveCommand(registry, "list").kind, "missing");
 });
 
+test("derives explicit credential-argument persistence policy from parsed commands", () => {
+  const commands = createReadOnlyCommandDefinitions({
+    filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
+    manpages: generatedManpages,
+    recursiveEntryLimit: 100,
+  }).map((command) =>
+    command.metadata.name === "echo"
+      ? {
+          ...command,
+          historyPersistence: {
+            kind: "memory-only" as const,
+            reason: "credential-arguments" as const,
+          },
+        }
+      : command
+  );
+  const registry = createCommandRegistry({
+    filesystem: demoContentCorpus.filesystem,
+    commands,
+  });
+
+  assert.deepEqual(
+    commandHistoryPersistenceForSource(registry, "pwd ; echo token"),
+    { kind: "memory-only", reason: "credential-arguments" },
+  );
+  assert.deepEqual(commandHistoryPersistenceForSource(registry, "missing token"), {
+    kind: "persistent",
+  });
+});
+
 test("adds exact ls tree parsing, metadata, and tree output parity", async () => {
   const registry = createRegistry();
   const tree = outputText(await execute("tree projects", registry));
@@ -475,6 +530,8 @@ test("implements line readers, terminal history, manual pages, and pager effects
       "echo 😀 second",
     ]),
   );
+  const historyClear = succeeded(await execute("history clear", registry));
+  const invalidHistory = await execute("history nope", registry);
   const manual = documentViewer(await execute("man grep", registry)).document.text;
   const pager = succeeded(await execute("less notes/field-notes/filesystems/sample-note.md", registry));
   const clear = succeeded(await execute("clear", registry));
@@ -488,6 +545,8 @@ test("implements line readers, terminal history, manual pages, and pager effects
   assert.equal(whoami, "anonymous");
 
   assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
+  assert.deepEqual(historyClear.effects, [{ kind: "clear-command-history" }]);
+  assert.equal(failureMessage(invalidHistory), "Usage: history [clear]");
   assert.match(manual, /^GREP\(1\).*GREP\(1\)$/mu);
   assert.match(manual, /\nNAME\n     grep - Search virtual files with ECMAScript regular expressions\./u);
   assert.match(

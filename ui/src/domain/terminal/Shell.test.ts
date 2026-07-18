@@ -8,6 +8,8 @@ import {
 } from "../filesystem/VirtualFilesystem.ts";
 import {
   createSecretPromptId,
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
   createSecretPromptRequest,
   createShellDiagnosticId,
   createShellId,
@@ -19,9 +21,19 @@ import {
   getShellStatus,
   reduceShellState,
   type CommandLineOutcome,
+  type CommandHistoryEntry,
+  type CommandSubmission,
   type ShellOutput,
   type ShellState,
 } from "./Shell.ts";
+import {
+  clearPersistedCommandHistory,
+  commandHistoryFromStoredValue,
+  commandHistoryStorageKey,
+  mergeCommandHistory,
+  persistCommandHistory,
+  readCommandHistory,
+} from "../../ui/workspace/CommandHistoryStorage.ts";
 
 function createState(
   scrollbackLimit = 3,
@@ -32,8 +44,35 @@ function createState(
     sessionId: createShellSessionId("session"),
     currentDirectory: virtualHomeDirectory(),
     scrollbackLimit,
+    commandHistory: [],
     commandHistoryLimit,
   });
+}
+
+function persistentSubmission(state: ShellState): CommandSubmission {
+  return {
+    kind: "command",
+    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
+    tieBreaker: createCommandHistoryTieBreaker(
+      state.nextCommandHistorySequence,
+    ),
+    persistence: { kind: "persistent" },
+  };
+}
+
+function historyEntry(
+  source: string,
+  timestamp: number,
+  tieBreaker: number,
+  persistence: CommandHistoryEntry["persistence"] = { kind: "persistent" },
+): CommandHistoryEntry {
+  return {
+    source,
+    currentDirectory: virtualHomeDirectory(),
+    timestamp: createCommandHistoryTimestamp(timestamp),
+    tieBreaker: createCommandHistoryTieBreaker(tieBreaker),
+    persistence,
+  };
 }
 
 function submit(state: ShellState, source: string): ShellState {
@@ -42,7 +81,10 @@ function submit(state: ShellState, source: string): ShellState {
     text: source,
   });
 
-  return reduceShellState(withInput, { kind: "prompt.submit" });
+  return reduceShellState(withInput, {
+    kind: "prompt.submit",
+    submission: persistentSubmission(withInput),
+  });
 }
 
 function runningCommandId(state: ShellState) {
@@ -130,9 +172,11 @@ test("reduces command execution and captures stable command cwd history", () => 
       currentDirectory: "~",
       commandHistory: [
         {
-          id: "session-command-history-1",
           source: "first",
           currentDirectory: "~",
+          timestamp: 1,
+          tieBreaker: 1,
+          persistence: { kind: "persistent" },
         },
       ],
     },
@@ -156,6 +200,181 @@ test("reduces command execution and captures stable command cwd history", () => 
   );
   assert.deepEqual(thirdSettled.lifecycle, { kind: "idle" });
   assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
+});
+
+test("hydrates navigation and autosuggestion and collapses consecutive duplicate submissions", () => {
+  const hydrated = createShellState({
+    id: createShellId("hydrated-terminal"),
+    sessionId: createShellSessionId("hydrated-session"),
+    currentDirectory: virtualHomeDirectory(),
+    scrollbackLimit: 3,
+    commandHistoryLimit: 100,
+    commandHistory: [historyEntry("echo first", 1, 1)],
+  });
+  const older = reduceShellState(hydrated, { kind: "history.older" });
+  const suggested = reduceShellState(hydrated, {
+    kind: "input.insert",
+    text: "echo f",
+  });
+  const firstDuplicate = settleSucceeded(
+    submit(hydrated, "echo first"),
+    "first",
+  );
+  const secondDuplicate = submit(firstDuplicate, "echo first");
+
+  assert.equal(older.input.text, "echo first");
+  assert.deepEqual(getShellAutosuggestion(suggested), {
+    kind: "suggestion",
+    value: "echo first",
+    suffix: "irst",
+  });
+  assert.equal(secondDuplicate.commandHistory.length, 1);
+  assert.equal(secondDuplicate.commandHistory[0]?.timestamp, 2);
+});
+
+test("clears command history without applying scrollback clear semantics", () => {
+  const submitted = submit(
+    settleSucceeded(submit(createState(), "echo retained"), "retained"),
+    "history clear",
+  );
+  const cleared = reduceShellState(submitted, {
+    kind: "command.settled",
+    commandId: runningCommandId(submitted),
+    outcome: {
+      kind: "succeeded",
+      events: [{ kind: "effect", effect: { kind: "clear-command-history" } }],
+    },
+  });
+
+  assert.deepEqual(cleared.commandHistory, []);
+  assert.equal(cleared.history.length, 2);
+});
+
+test("merges stored history deterministically, bounds it, and validates guarded records", () => {
+  const equalTimestamp = mergeCommandHistory(
+    [historyEntry("zeta", 1, 1)],
+    [historyEntry("alpha 😀", 1, 1)],
+  );
+  const bounded = mergeCommandHistory(
+    Array.from({ length: 101 }, (_, index) =>
+      historyEntry(`echo ${index}`, index, index)
+    ),
+  );
+  const validRecord = JSON.stringify({
+    version: 1,
+    entries: [{
+      source: "echo 😀",
+      currentDirectory: "~",
+      timestamp: 2,
+      tieBreaker: 3,
+    }],
+  });
+  const hydrated = commandHistoryFromStoredValue(
+    validRecord,
+    demoContentCorpus.filesystem,
+  );
+
+  assert.deepEqual(equalTimestamp.map((entry) => entry.source), [
+    "alpha 😀",
+    "zeta",
+  ]);
+  assert.equal(bounded.length, 100);
+  assert.equal(bounded[0]?.source, "echo 1");
+  assert.equal(hydrated.kind, "available");
+  if (hydrated.kind === "available") {
+    assert.equal(hydrated.entries[0]?.source, "echo 😀");
+  }
+  assert.equal(
+    commandHistoryFromStoredValue("{", demoContentCorpus.filesystem).kind,
+    "unavailable",
+  );
+  assert.equal(
+    commandHistoryFromStoredValue(
+      JSON.stringify({ version: 2, entries: [] }),
+      demoContentCorpus.filesystem,
+    ).kind,
+    "unavailable",
+  );
+  assert.equal(
+    commandHistoryFromStoredValue(
+      "x".repeat(128 * 1024 + 1),
+      demoContentCorpus.filesystem,
+    ).kind,
+    "unavailable",
+  );
+});
+
+test("persists only eligible command fields and falls back without payload diagnostics", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      values.set(key, value);
+    },
+    removeItem: (key: string): void => {
+      values.delete(key);
+    },
+  };
+  const secretSource = "credential-command private-token";
+  const persisted = persistCommandHistory(
+    storage,
+    demoContentCorpus.filesystem,
+    [
+      historyEntry("echo public", 1, 1),
+      historyEntry(secretSource, 2, 2, {
+        kind: "memory-only",
+        reason: "credential-arguments",
+      }),
+    ],
+  );
+  const stored = values.get(commandHistoryStorageKey) ?? "";
+  const cleared = clearPersistedCommandHistory(storage);
+  const storedAfterClear = values.get(commandHistoryStorageKey) ?? "";
+  const blocked = readCommandHistory(
+    {
+      getItem: () => {
+        throw new Error(secretSource);
+      },
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    },
+    demoContentCorpus.filesystem,
+  );
+  const quotaSecret = "quota-private-payload";
+  const quotaFailed = persistCommandHistory(
+    {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error(quotaSecret);
+      },
+      removeItem: () => undefined,
+    },
+    demoContentCorpus.filesystem,
+    [historyEntry("echo quota", 3, 3)],
+  );
+
+  assert.equal(persisted.kind, "available");
+  assert.equal(stored.includes("echo public"), true);
+  assert.equal(stored.includes(secretSource), false);
+  assert.equal(stored.includes("persistence"), false);
+  assert.equal(stored.includes("id"), false);
+  assert.equal(cleared.kind, "available");
+  const hydratedAfterClear = commandHistoryFromStoredValue(
+    storedAfterClear,
+    demoContentCorpus.filesystem,
+  );
+  assert.equal(hydratedAfterClear.kind, "available");
+  if (hydratedAfterClear.kind === "available") {
+    assert.deepEqual(hydratedAfterClear.entries, []);
+  }
+  assert.equal(blocked.kind, "unavailable");
+  if (blocked.kind === "unavailable") {
+    assert.equal(blocked.diagnostic.includes(secretSource), false);
+  }
+  assert.equal(quotaFailed.kind, "unavailable");
+  if (quotaFailed.kind === "unavailable") {
+    assert.equal(quotaFailed.diagnostic.includes(quotaSecret), false);
+  }
 });
 
 test("clear removes earlier output while preserving later output and command history", () => {
@@ -407,7 +626,10 @@ test("keeps secret values out of history, autosuggestion, and retained state", (
     kind: "completion.request",
     request: requestWhileSecret,
   });
-  const submitted = reduceShellState(noCompletion, { kind: "prompt.submit" });
+  const submitted = reduceShellState(noCompletion, {
+    kind: "prompt.submit",
+    submission: { kind: "secret" },
+  });
 
   assert.deepEqual(submitted.secretPrompt, { kind: "none" });
   assert.deepEqual(submitted.history, []);
@@ -437,7 +659,10 @@ test("uses one-line native replacements and preserves astral command input", () 
   });
   const moved = reduceShellState(replaced, { kind: "input.move-left" });
   const deleted = reduceShellState(moved, { kind: "input.delete" });
-  const submitted = reduceShellState(replaced, { kind: "prompt.submit" });
+  const submitted = reduceShellState(replaced, {
+    kind: "prompt.submit",
+    submission: persistentSubmission(replaced),
+  });
 
   assert.equal(replaced.input.text, expected);
   assert.equal(replaced.input.cursor, expected.length);

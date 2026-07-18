@@ -50,12 +50,16 @@ function createSecretSubmission(value: string): SecretSubmission {
       sessionId: createShellSessionId("session"),
       currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
+      commandHistory: [],
       commandHistoryLimit: 3,
     }),
     { kind: "secret.begin", request },
   );
   const typed = reduceShellState(active, { kind: "input.insert", text: value });
-  const submitted = reduceShellState(typed, { kind: "prompt.submit" });
+  const submitted = reduceShellState(typed, {
+    kind: "prompt.submit",
+    submission: { kind: "secret" },
+  });
 
   if (submitted.pendingEffect.kind !== "secret-submitted") {
     assert.fail("Expected a secret submission effect.");
@@ -75,6 +79,7 @@ function createSecretCancellation(value: string): SecretCancellation {
       sessionId: createShellSessionId("session"),
       currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
+      commandHistory: [],
       commandHistoryLimit: 3,
     }),
     { kind: "secret.begin", request },
@@ -202,6 +207,7 @@ test("consumes secret cancellation without invoking a handler", async () => {
       sessionId: createShellSessionId("session"),
       currentDirectory: virtualHomeDirectory(),
       scrollbackLimit: 3,
+      commandHistory: [],
       commandHistoryLimit: 3,
     }),
     { kind: "secret.begin", request },

@@ -13,8 +13,14 @@ import {
   virtualHomeDirectory,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type {
+  CommandHistoryEntry,
+  CommandSubmission,
   CommandLineOutcome,
   ShellState,
+} from "../../domain/terminal/Shell.ts";
+import {
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
 } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
@@ -34,6 +40,7 @@ import {
   paneShellRuntime,
   reconcilePaneShellRuntimes,
   reducePaneShellRuntime,
+  synchronizePaneCommandHistory,
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 
@@ -53,11 +60,16 @@ test("keeps collection commands in one shell history row and removes transient s
   const initial = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
+  const withInput = insert(initial, paneId, "projects");
   const submitted = reducePaneShellRuntime({
-    runtimes: insert(initial, paneId, "projects"),
+    runtimes: withInput,
     paneId,
-    action: { kind: "prompt.submit" },
+    action: {
+      kind: "prompt.submit",
+      submission: persistentSubmission(withInput, paneId),
+    },
   });
   const running = stateFor(submitted, paneId);
 
@@ -110,12 +122,83 @@ function synchronise(
     runtimes,
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory:
+      runtimes.values().next().value?.state.commandHistory ?? [],
   });
 }
 
 function stateFor(runtimes: PaneShellRuntimes, paneId: PaneId): ShellState {
   return paneShellRuntime(runtimes, paneId).state;
 }
+
+function persistentSubmission(
+  runtimes: PaneShellRuntimes,
+  paneId: PaneId,
+): CommandSubmission {
+  const state = stateFor(runtimes, paneId);
+
+  return {
+    kind: "command",
+    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
+    tieBreaker: createCommandHistoryTieBreaker(
+      state.nextCommandHistorySequence,
+    ),
+    persistence: { kind: "persistent" },
+  };
+}
+
+test("hydrates new panes and projects one shared history into existing panes", () => {
+  const hydratedEntry: CommandHistoryEntry = {
+    source: "echo hydrated 😀",
+    currentDirectory: virtualHomeDirectory(),
+    timestamp: createCommandHistoryTimestamp(1),
+    tieBreaker: createCommandHistoryTieBreaker(1),
+    persistence: { kind: "persistent" },
+  };
+  let workspace = createPaneWorkspace({
+    initialContent: createShellPaneContent(),
+  });
+  let runtimes = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+    commandHistory: [hydratedEntry],
+  });
+
+  workspace = apply(workspace, {
+    kind: "split",
+    paneId: workspace.activePaneId,
+    orientation: "horizontal",
+    content: createShellPaneContent(),
+  });
+  runtimes = reconcilePaneShellRuntimes({
+    runtimes,
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+    commandHistory: [hydratedEntry],
+  });
+
+  for (const pane of paneLeaves(workspace.tree)) {
+    assert.equal(
+      stateFor(runtimes, pane.id).commandHistory[0]?.source,
+      "echo hydrated 😀",
+    );
+  }
+
+  const nextHistory = [
+    hydratedEntry,
+    {
+      ...hydratedEntry,
+      source: "pwd",
+      timestamp: createCommandHistoryTimestamp(2),
+      tieBreaker: createCommandHistoryTieBreaker(2),
+    },
+  ];
+  const synchronized = synchronizePaneCommandHistory(runtimes, nextHistory);
+
+  for (const pane of paneLeaves(workspace.tree)) {
+    assert.equal(stateFor(synchronized, pane.id).commandHistory, nextHistory);
+  }
+});
 
 function projectsDirectoryPath() {
   const resolution = resolveVirtualDirectory(
@@ -135,14 +218,18 @@ function settleCurrentDirectory(
   runtimes: PaneShellRuntimes,
   paneId: PaneId,
 ): PaneShellRuntimes {
-  const submitted = reducePaneShellRuntime({
-    runtimes: reducePaneShellRuntime({
-      runtimes,
-      paneId,
-      action: { kind: "input.insert", text: "cd projects" },
-    }),
+  const withInput = reducePaneShellRuntime({
+    runtimes,
     paneId,
-    action: { kind: "prompt.submit" },
+    action: { kind: "input.insert", text: "cd projects" },
+  });
+  const submitted = reducePaneShellRuntime({
+    runtimes: withInput,
+    paneId,
+    action: {
+      kind: "prompt.submit",
+      submission: persistentSubmission(withInput, paneId),
+    },
   });
   const state = stateFor(submitted, paneId);
 
@@ -197,7 +284,10 @@ function submitRunningCommand(
   return reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
-    action: { kind: "prompt.submit" },
+    action: {
+      kind: "prompt.submit",
+      submission: persistentSubmission(withInput, paneId),
+    },
   });
 }
 
@@ -258,6 +348,7 @@ test("keeps shell state and current directory with stable pane IDs through pane 
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   const firstPaneId = workspace.activePaneId;
 
@@ -333,6 +424,7 @@ test("keeps two pane-owned shell runtimes after swap and layout reconstruction",
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   runtimes = insert(runtimes, firstPane.id, "first pane input");
   runtimes = insert(runtimes, secondPane.id, "second pane input");
@@ -356,6 +448,7 @@ test("preserves runtime controls across transforms and disposes them when a pane
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
 
   workspace = apply(workspace, {
@@ -424,6 +517,7 @@ test("cancels the original command after its pane moves and rejects a late resul
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   const firstPaneId = workspace.activePaneId;
 
@@ -479,6 +573,7 @@ test("returns an asynchronous raw pager to its moved shell runtime", async () =>
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   const originPaneId = workspace.activePaneId;
 
@@ -570,6 +665,7 @@ test("routes an asynchronous split viewer resolution to its originating pane", a
   let runtimes = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   const originPaneId = workspace.activePaneId;
 
@@ -641,6 +737,7 @@ test("reports countable IDs only when inline and split document opens settle suc
       createPaneShellRuntimes({
         workspace,
         currentDirectory: virtualHomeDirectory(),
+        commandHistory: [],
       }),
       paneId,
     );
@@ -694,6 +791,7 @@ test("does not report collection roots, uncounted viewers, failed commands, or c
   const initial = createPaneShellRuntimes({
     workspace,
     currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
   });
   const submitted = submitRunningCommand(initial, paneId);
   const running = stateFor(submitted, paneId);

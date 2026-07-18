@@ -54,7 +54,7 @@ Apply one named automatic layout or cycle through those layouts. Manual split an
 .SH FAILURES
 Each subcommand requires exactly its documented arguments. Operations can be rejected for an unavailable pane number or direction, a missing adjacent pane, minimum pane size, an unavailable target, or an attempt to close the final pane.
 .SH NOTES
-Each shell pane owns independent scrollback, command history and working directory, preserved through focus, swap, rotation and layout changes. Closing a shell pane destroys that state and cancels its active work. Pane layout and contents are not persisted across page reloads.
+Each shell pane owns independent scrollback and working directory state, preserved through focus, swap, rotation and layout changes. Command history is shared across shell panes through history(1). Closing a shell pane destroys its pane-local state and cancels its active work without clearing shared command history. Pane layout and contents are not persisted across page reloads.
 .PP
 Ctrl+b starts keyboard pane commands before viewer or pager key handling. Mobile layouts expose pane-selector tabs and a Prefix control.
 .SH EXAMPLES

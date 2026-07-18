@@ -1,35 +1,51 @@
 HISTORY(1)                      termin.al Manual                      HISTORY(1)
 
 NAME
-     history - Show this shell pane's bounded command history.
+     history - Show or clear shared browser-local command history.
 
 SYNOPSIS
-     history
+     history [clear]
 
 DESCRIPTION
-     Prints the bounded command history owned by the current shell pane. Entries
-     are  numbered  from  1 in retained order and preserve the submitted command
-     source, including quoting.
+     With  no argument, prints the bounded command history shared by shell panes
+     and tabs for this browser origin. Entries are numbered from 1  in  retained
+     order  and  preserve submitted command source, including quoting and pasted
+     text.
+
+     The clear argument clears shared command history in memory and  browser-lo‐
+     cal storage. It does not clear terminal scrollback; use clear(1) for that.
 
 OUTPUT
-     The history invocation is already present  in  the  execution  context  and
-     therefore appears as the final entry. Number columns widen as required.
+     The  history  invocation  is  already  present in the execution context and
+     therefore appears as the final entry. Number  columns  widen  as  required.
+     history clear produces no output.
 
 FAILURES
-     Any argument is rejected.
+     Arguments other than the single word clear are rejected. If browser storage
+     is  corrupt,  oversized,  unavailable  or  rejects a write, history remains
+     functional in memory and reports a payload-free storage diagnostic.
 
 LIMITS
-     Each  shell  pane  retains its latest 100 submitted commands. Older entries
-     are discarded when the bound is exceeded.
+     The latest 100 submissions are retained. Consecutive duplicate sources col‐
+     lapse to the latest submission.
+
+PRIVACY
+     Browser storage contains only command source,  virtual  working  directory,
+     merge  timestamp  and  deterministic tie ordering data. It does not contain
+     scrollback, command outcomes, errors, diagnostics, secret prompt values  or
+     pane identifiers. Commands explicitly defined as accepting credential argu‐
+     ments remain in memory but are not written to storage.
 
 NOTES
-     History is pane-local and survives clear(1), directory  changes  and  pane-
-     tree transforms while that shell pane exists. It is discarded when the pane
-     closes or the browser page reloads, and it does not include output text.
+     Stored  history  is local to this browser origin and survives pane changes,
+     tabs and reloads according  to  the  browser's  storage  lifetime.  Private
+     browsing  therefore  uses the browser's ephemeral storage lifetime. History
+     is not stored in the virtual filesystem and is not sent to a server or API.
 
 EXAMPLES
      $ echo one
      $ history
+     $ history clear
 
 SEE ALSO
      clear(1), pane(1), pwd(1)

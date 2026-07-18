@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
   createShellDiagnosticId,
   createShellId,
   createShellOutputId,
@@ -44,13 +46,22 @@ test("does not render secret-bearing execution errors from shell history", async
     sessionId: createShellSessionId("session"),
     currentDirectory: virtualHomeDirectory(),
     scrollbackLimit: 3,
+    commandHistory: [],
     commandHistoryLimit: 3,
   });
   const withInput = reduceShellState(initialState, {
     kind: "input.insert",
     text: "cat about.md",
   });
-  const submitted = reduceShellState(withInput, { kind: "prompt.submit" });
+  const submitted = reduceShellState(withInput, {
+    kind: "prompt.submit",
+    submission: {
+      kind: "command",
+      timestamp: createCommandHistoryTimestamp(1),
+      tieBreaker: createCommandHistoryTieBreaker(1),
+      persistence: { kind: "persistent" },
+    },
+  });
 
   if (submitted.lifecycle.kind !== "running") {
     assert.fail("Expected the shell to be running a command.");

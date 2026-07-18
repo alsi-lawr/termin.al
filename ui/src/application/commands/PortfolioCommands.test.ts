@@ -14,6 +14,8 @@ import {
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
   createShellId,
   createShellSessionId,
   createShellState,
@@ -22,6 +24,7 @@ import {
   type CommandLineOutcome,
   type ShellOutput,
   type ShellCommandRequest,
+  type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import {
   createThemeState,
@@ -130,16 +133,31 @@ function commandRequest(source: string): ShellCommandRequest {
     sessionId: createShellSessionId("session"),
     currentDirectory: virtualHomeDirectory(),
     scrollbackLimit: 10,
+    commandHistory: [],
     commandHistoryLimit: 10,
   });
   const typed = reduceShellState(initial, { kind: "input.insert", text: source });
-  const submitted = reduceShellState(typed, { kind: "prompt.submit" });
+  const submitted = reduceShellState(typed, {
+    kind: "prompt.submit",
+    submission: persistentSubmission(typed),
+  });
 
   if (submitted.lifecycle.kind !== "running") {
     assert.fail("Expected a command request.");
   }
 
   return submitted.lifecycle.command;
+}
+
+function persistentSubmission(state: ShellState) {
+  return {
+    kind: "command" as const,
+    timestamp: createCommandHistoryTimestamp(state.nextCommandHistorySequence),
+    tieBreaker: createCommandHistoryTieBreaker(
+      state.nextCommandHistorySequence,
+    ),
+    persistence: { kind: "persistent" as const },
+  };
 }
 
 async function execute(

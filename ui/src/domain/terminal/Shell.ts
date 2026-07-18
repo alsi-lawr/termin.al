@@ -34,7 +34,8 @@ declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
 declare const commandIdBrand: unique symbol;
 declare const shellHistoryEntryIdBrand: unique symbol;
-declare const commandHistoryEntryIdBrand: unique symbol;
+declare const commandHistoryTimestampBrand: unique symbol;
+declare const commandHistoryTieBreakerBrand: unique symbol;
 declare const secretPromptIdBrand: unique symbol;
 declare const secretPromptValueBrand: unique symbol;
 declare const shellDiagnosticIdBrand: unique symbol;
@@ -56,8 +57,12 @@ export type ShellHistoryEntryId = string & {
   readonly [shellHistoryEntryIdBrand]: "ShellHistoryEntryId";
 };
 
-export type CommandHistoryEntryId = string & {
-  readonly [commandHistoryEntryIdBrand]: "CommandHistoryEntryId";
+export type CommandHistoryTimestamp = number & {
+  readonly [commandHistoryTimestampBrand]: "CommandHistoryTimestamp";
+};
+
+export type CommandHistoryTieBreaker = number & {
+  readonly [commandHistoryTieBreakerBrand]: "CommandHistoryTieBreaker";
 };
 
 export type SecretPromptId = string & {
@@ -143,6 +148,7 @@ export type SecretPromptEffect =
 
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
+  | Readonly<{ kind: "clear-command-history" }>
   | Readonly<{
       kind: "set-current-directory";
       directory: VirtualDirectoryPath;
@@ -263,10 +269,19 @@ export type ShellHistoryEntry = Readonly<{
 }>;
 
 export type CommandHistoryEntry = Readonly<{
-  id: CommandHistoryEntryId;
   source: string;
   currentDirectory: VirtualDirectoryPath;
+  timestamp: CommandHistoryTimestamp;
+  tieBreaker: CommandHistoryTieBreaker;
+  persistence: CommandHistoryPersistence;
 }>;
+
+export type CommandHistoryPersistence =
+  | Readonly<{ kind: "persistent" }>
+  | Readonly<{
+      kind: "memory-only";
+      reason: "credential-arguments";
+    }>;
 
 export type SecretPromptState = Readonly<{
   request: SecretPromptRequest;
@@ -382,7 +397,17 @@ export type CreateShellStateOptions = Readonly<{
   currentDirectory: VirtualDirectoryPath;
   scrollbackLimit: number;
   commandHistoryLimit: number;
+  commandHistory: ReadonlyArray<CommandHistoryEntry>;
 }>;
+
+export type CommandSubmission =
+  | Readonly<{ kind: "secret" }>
+  | Readonly<{
+      kind: "command";
+      timestamp: CommandHistoryTimestamp;
+      tieBreaker: CommandHistoryTieBreaker;
+      persistence: CommandHistoryPersistence;
+    }>;
 
 export type ShellAction =
   | Readonly<{
@@ -414,7 +439,10 @@ export type ShellAction =
       kind: "completion.cycle";
       direction: CompletionCycleDirection;
     }>
-  | Readonly<{ kind: "prompt.submit" }>
+  | Readonly<{
+      kind: "prompt.submit";
+      submission: CommandSubmission;
+    }>
   | Readonly<{ kind: "prompt.cancel" }>
   | Readonly<{
       kind: "secret.begin";
@@ -476,13 +504,6 @@ function createHistoryEntryId(
   return `${sessionId}-history-${sequence}` as ShellHistoryEntryId;
 }
 
-function createCommandHistoryEntryId(
-  sessionId: ShellSessionId,
-  sequence: number,
-): CommandHistoryEntryId {
-  return `${sessionId}-command-history-${sequence}` as CommandHistoryEntryId;
-}
-
 function appendBounded<Value>(
   values: ReadonlyArray<Value>,
   limit: number,
@@ -495,6 +516,19 @@ function appendBounded<Value>(
   }
 
   return nextValues.slice(nextValues.length - limit);
+}
+
+function appendCommandHistory(
+  entries: ReadonlyArray<CommandHistoryEntry>,
+  limit: number,
+  entry: CommandHistoryEntry,
+): ReadonlyArray<CommandHistoryEntry> {
+  const previous = entries.at(-1);
+  const withoutConsecutiveDuplicate = previous?.source === entry.source
+    ? entries.slice(0, -1)
+    : entries;
+
+  return appendBounded(withoutConsecutiveDuplicate, limit, entry);
 }
 
 function canEditPrompt(state: ShellState): boolean {
@@ -699,6 +733,13 @@ function changedCurrentDirectory(
   return undefined;
 }
 
+function clearsCommandHistory(events: ReadonlyArray<CommandLineEvent>): boolean {
+  return events.some(
+    (event) =>
+      event.kind === "effect" && event.effect.kind === "clear-command-history",
+  );
+}
+
 function selectedCompletionCandidate(
   completion: ShellCompletion,
 ): CompletionCandidate | undefined {
@@ -821,6 +862,26 @@ export function createShellOutputId(value: string): ShellOutputId {
   return value as ShellOutputId;
 }
 
+export function createCommandHistoryTimestamp(
+  value: number,
+): CommandHistoryTimestamp {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Command history timestamps must be non-negative safe integers.");
+  }
+
+  return value as CommandHistoryTimestamp;
+}
+
+export function createCommandHistoryTieBreaker(
+  value: number,
+): CommandHistoryTieBreaker {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Command history tie breakers must be non-negative safe integers.");
+  }
+
+  return value as CommandHistoryTieBreaker;
+}
+
 export function createSecretPromptRequest(
   id: SecretPromptId,
   label: string,
@@ -838,6 +899,7 @@ export function createShellState({
   currentDirectory,
   scrollbackLimit,
   commandHistoryLimit,
+  commandHistory,
 }: CreateShellStateOptions): ShellState {
   assertPositiveLimit(scrollbackLimit, "Shell scrollback limits");
   assertPositiveLimit(commandHistoryLimit, "Shell command history limits");
@@ -851,7 +913,7 @@ export function createShellState({
     lifecycle: { kind: "idle" },
     history: [],
     scrollbackLimit,
-    commandHistory: [],
+    commandHistory: commandHistory.slice(-commandHistoryLimit),
     commandHistoryLimit,
     historyNavigation: { kind: "not-browsing" },
     completion: { kind: "idle" },
@@ -1073,6 +1135,10 @@ export function reduceShellState(
       }
 
       if (state.secretPrompt.kind === "active") {
+        if (action.submission.kind !== "secret") {
+          return state;
+        }
+
         const { request, line } = state.secretPrompt.prompt;
 
         return {
@@ -1091,15 +1157,18 @@ export function reduceShellState(
         return state;
       }
 
+      if (action.submission.kind !== "command") {
+        return state;
+      }
+
       const commandHistoryEntry: CommandHistoryEntry = {
-        id: createCommandHistoryEntryId(
-          state.sessionId,
-          state.nextCommandHistorySequence,
-        ),
         source: state.input.text,
         currentDirectory: state.currentDirectory,
+        timestamp: action.submission.timestamp,
+        tieBreaker: action.submission.tieBreaker,
+        persistence: action.submission.persistence,
       };
-      const commandHistory = appendBounded(
+      const commandHistory = appendCommandHistory(
         state.commandHistory,
         state.commandHistoryLimit,
         commandHistoryEntry,
@@ -1254,6 +1323,9 @@ export function reduceShellState(
         : action.outcome.events.slice(clearIndex + 1);
       const secretPrompt = requestedSecretPrompt(action.outcome.events);
       const currentDirectory = changedCurrentDirectory(action.outcome.events);
+      const commandHistory = clearsCommandHistory(action.outcome.events)
+        ? []
+        : state.commandHistory;
       const storedOutcome = historyOutcome(action.outcome, visibleEvents);
       const priorHistory = clearIndex === -1 ? state.history : [];
       const keepsCommandLine = clearIndex === -1 || visibleEvents.some(
@@ -1275,6 +1347,10 @@ export function reduceShellState(
         currentDirectory: currentDirectory ?? state.currentDirectory,
         lifecycle: { kind: "idle" },
         history,
+        commandHistory,
+        historyNavigation: commandHistory.length === 0
+          ? { kind: "not-browsing" }
+          : state.historyNavigation,
         secretPrompt:
           secretPrompt === undefined
             ? state.secretPrompt

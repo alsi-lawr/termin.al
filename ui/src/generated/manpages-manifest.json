@@ -146,13 +146,13 @@
     {
       "name": "history",
       "section": 1,
-      "usage": "history",
-      "summary": "Show this shell pane's bounded command history.",
+      "usage": "history [clear]",
+      "summary": "Show or clear shared browser-local command history.",
       "sourcePath": "man/history.1",
       "artifactPath": "ui/src/generated/manpages/history.txt",
-      "byteCount": 1134,
-      "lineCount": 37,
-      "sha256": "f4bfe69f21be8fe515b7374ab1372690450c77c85e3204cecb880db67440197b"
+      "byteCount": 2109,
+      "lineCount": 53,
+      "sha256": "1091221b9f04b3cd31107235d9400faf98349bd62d2bf8380693a6ff6ece2b4e"
     },
     {
       "name": "less",
@@ -249,9 +249,9 @@
       "summary": "Manage terminal panes.",
       "sourcePath": "man/pane.1",
       "artifactPath": "ui/src/generated/manpages/pane.txt",
-      "byteCount": 3290,
-      "lineCount": 85,
-      "sha256": "4ed048f14d8935a530e1eef69a32fe1663c8cd6c62c39b2dfd77dd5f5f2d6276"
+      "byteCount": 3409,
+      "lineCount": 87,
+      "sha256": "2e890b3fc2fa48dfecc372ff34033bbaa0199df97e20ccc24a5da7f404fb3c7f"
     },
     {
       "name": "projects",

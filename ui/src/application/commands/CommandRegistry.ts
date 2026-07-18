@@ -1,6 +1,7 @@
 import type { OptionTerminator } from "../../domain/terminal/ArgumentLexer.ts";
 import type {
   CommandHistoryEntry,
+  CommandHistoryPersistence,
   CommandOutcome,
   ShellId,
   ShellSessionId,
@@ -44,6 +45,7 @@ export type CommandExecutionContext = Readonly<{
 
 export type CommandDefinition = Readonly<{
   metadata: CommandMetadata;
+  historyPersistence: CommandHistoryPersistence;
   pipeline: CommandPipelinePolicy;
   execute: (
     invocation: CommandInvocation,

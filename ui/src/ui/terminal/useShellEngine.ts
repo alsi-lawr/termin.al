@@ -5,6 +5,8 @@ import {
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
+  createCommandHistoryTieBreaker,
+  createCommandHistoryTimestamp,
   createShellOutputId,
   type CommandLineOutcome,
   type CompletionCycleDirection,
@@ -12,6 +14,7 @@ import {
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
 import {
+  commandHistoryPersistenceForSource,
   executeCommandLine,
 } from "../../application/commands/CommandExecution.ts";
 import type { CommandRegistry } from "../../application/commands/CommandRegistry.ts";
@@ -259,6 +262,30 @@ export function useShellEngine({
     void resolveCompletion();
   };
 
+  const submit = (): void => {
+    const prompt = getActiveShellPrompt(state);
+
+    if (prompt.kind === "secret") {
+      onAction({ kind: "prompt.submit", submission: { kind: "secret" } });
+      return;
+    }
+
+    onAction({
+      kind: "prompt.submit",
+      submission: {
+        kind: "command",
+        timestamp: createCommandHistoryTimestamp(Date.now()),
+        tieBreaker: createCommandHistoryTieBreaker(
+          state.nextCommandHistorySequence,
+        ),
+        persistence: commandHistoryPersistenceForSource(
+          registry,
+          prompt.line.text,
+        ),
+      },
+    });
+  };
+
   return {
     state,
     transientDiagnostic,
@@ -279,7 +306,7 @@ export function useShellEngine({
     browseOlderHistory: () => onAction({ kind: "history.older" }),
     browseNewerHistory: () => onAction({ kind: "history.newer" }),
     dismissCompletion: () => onAction({ kind: "completion.dismiss" }),
-    submit: () => onAction({ kind: "prompt.submit" }),
+    submit,
     cancel: () => onAction({ kind: "prompt.cancel" }),
     complete,
   };

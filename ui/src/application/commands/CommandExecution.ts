@@ -16,6 +16,7 @@ import {
   type CommandLineEvent,
   type CommandLineOutcome,
   type CommandOutcome,
+  type CommandHistoryPersistence,
   type ShellDiagnostic,
   type ShellCommandRequest,
   type ShellOutput,
@@ -32,6 +33,8 @@ export type ExecuteCommandLineOptions = Readonly<{
   request: ShellCommandRequest;
   signal: AbortSignal;
 }>;
+
+const persistentCommandHistory = { kind: "persistent" } as const;
 
 type ListConnector = "always" | "and" | "or";
 
@@ -316,6 +319,38 @@ function parseCommandLine(
   return hasEmptyCommand
     ? { kind: "empty" }
     : { kind: "success", pipelines };
+}
+
+export function commandHistoryPersistenceForSource(
+  registry: CommandRegistry,
+  source: string,
+): CommandHistoryPersistence {
+  const lexicalResult = lexArguments(source);
+
+  if (lexicalResult.kind === "error") {
+    return persistentCommandHistory;
+  }
+
+  const parseResult = parseCommandLine(lexicalResult.tokens);
+
+  if (parseResult.kind !== "success") {
+    return persistentCommandHistory;
+  }
+
+  for (const pipeline of parseResult.pipelines) {
+    for (const command of pipeline.commands) {
+      const resolution = resolveCommand(registry, command.command.value);
+
+      if (
+        resolution.kind === "found" &&
+        resolution.command.historyPersistence.kind === "memory-only"
+      ) {
+        return resolution.command.historyPersistence;
+      }
+    }
+  }
+
+  return persistentCommandHistory;
 }
 
 function shouldExecute(
