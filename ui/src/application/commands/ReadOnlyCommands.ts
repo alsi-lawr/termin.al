@@ -332,13 +332,7 @@ function parseLsOptions(
   let tree = false;
   const operands: string[] = [];
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
-
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of invocation.arguments.entries()) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -410,13 +404,9 @@ function parseTreeOptions(
   let maximumDepth = maximumRecursiveDepth;
   const operands: string[] = [];
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
+  const argumentsIterator = invocation.arguments.entries();
 
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of argumentsIterator) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -431,7 +421,8 @@ function parseTreeOptions(
       return { kind: "invalid", message: `Unsupported option: ${value}.` };
     }
 
-    const depthValue = invocation.arguments[index + 1];
+    const depthEntry = argumentsIterator.next();
+    const depthValue = depthEntry.done ? undefined : depthEntry.value[1];
     const parsedDepth =
       depthValue === undefined ? undefined : parseMaximumDepth(depthValue);
 
@@ -443,7 +434,6 @@ function parseTreeOptions(
     }
 
     maximumDepth = parsedDepth;
-    index += 1;
   }
 
   if (operands.length > 1) {
@@ -502,13 +492,9 @@ function parseFindOptions(
   const operands: string[] = [];
   const predicates: FindPredicate[] = [];
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
+  const argumentsIterator = invocation.arguments.entries();
 
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of argumentsIterator) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -519,7 +505,8 @@ function parseFindOptions(
       return { kind: "invalid", message: `Unsupported option: ${value}.` };
     }
 
-    const next = invocation.arguments[index + 1];
+    const nextEntry = argumentsIterator.next();
+    const next = nextEntry.done ? undefined : nextEntry.value[1];
 
     if (next === undefined) {
       return { kind: "invalid", message: `${value} requires a value.` };
@@ -532,7 +519,6 @@ function parseFindOptions(
     }
 
     predicates.push(predicate.value);
-    index += 1;
   }
 
   if (operands.length > 1) {
@@ -559,13 +545,7 @@ function parseGrepOptions(
   let recursive = false;
   const operands: string[] = [];
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
-
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of invocation.arguments.entries()) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -652,13 +632,9 @@ function parseLineReaderOptions(
   let lineCount = 10;
   const operands: string[] = [];
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
+  const argumentsIterator = invocation.arguments.entries();
 
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of argumentsIterator) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -668,7 +644,8 @@ function parseLineReaderOptions(
       return { kind: "invalid", message: `Unsupported option: ${value}.` };
     }
 
-    const countValue = invocation.arguments[index + 1];
+    const countEntry = argumentsIterator.next();
+    const countValue = countEntry.done ? undefined : countEntry.value[1];
 
     if (countValue === undefined || !/^[0-9]+$/u.test(countValue)) {
       return { kind: "invalid", message: "-n requires a non-negative line count." };
@@ -687,7 +664,6 @@ function parseLineReaderOptions(
     }
 
     lineCount = parsedCount;
-    index += 1;
   }
 
   if (operands.length > 1 || (operands.length === 0 && invocation.stdin.kind === "none")) {
@@ -838,13 +814,9 @@ function parseSedOptions(
   let suppressDefaultPrint = false;
   let hasExplicitScript = false;
 
-  for (let index = 0; index < invocation.arguments.length; index += 1) {
-    const value = invocation.arguments[index];
+  const argumentsIterator = invocation.arguments.entries();
 
-    if (value === undefined) {
-      continue;
-    }
-
+  for (const [index, value] of argumentsIterator) {
     if (index >= boundary || !hasOptionPrefix(value)) {
       operands.push(value);
       continue;
@@ -856,7 +828,8 @@ function parseSedOptions(
     }
 
     if (value === "-e") {
-      const script = invocation.arguments[index + 1];
+      const scriptEntry = argumentsIterator.next();
+      const script = scriptEntry.done ? undefined : scriptEntry.value[1];
 
       if (script === undefined || index + 1 >= boundary) {
         return { kind: "invalid", message: "-e requires a sed script." };
@@ -864,7 +837,6 @@ function parseSedOptions(
 
       scriptSources.push(script);
       hasExplicitScript = true;
-      index += 1;
       continue;
     }
 
@@ -1730,15 +1702,9 @@ function createGrepCommand(
 
         const lines = grepLogicalLines(source.text);
 
-        for (let index = 0; index < lines.length; index += 1) {
+        for (const [index, line] of lines.entries()) {
           if (context.signal.aborted) {
             return cancelledOutcome();
-          }
-
-          const line = lines[index];
-
-          if (line === undefined) {
-            continue;
           }
 
           const matchesLine = matching.kind === "fixed"
@@ -1982,15 +1948,9 @@ function createSedCommand(
       const output: SedOutputAccumulator = { lines: [], bytes: 0, truncated: false };
       const encoder = new TextEncoder();
 
-      for (let index = 0; index < lines.length; index += 1) {
+      for (const [index, line] of lines.entries()) {
         if (context.signal.aborted) {
           return cancelledOutcome();
-        }
-
-        const line = lines[index];
-
-        if (line === undefined) {
-          continue;
         }
 
         const processed = executeSedScripts(
