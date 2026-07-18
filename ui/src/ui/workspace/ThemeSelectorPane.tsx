@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactElement } from "react";
 import {
   createThemeSelectorState,
   moveThemeSelector,
@@ -26,14 +26,15 @@ export function ThemeSelectorPane({
   transcript, controller, isActive, focusVersion, storageFailureReported,
   onActivate, onPaneKeyInput, onClose,
 }: ThemeSelectorPaneProps): ReactElement {
-  const selectorRef = useRef<HTMLElement | null>(null);
+  const listboxRef = useRef<HTMLUListElement | null>(null);
+  const listboxId = useId();
   const [state, setState] = useState<ThemeSelectorState>(() =>
     createThemeSelectorState(controller.current().preference)
   );
   const current = controller.state();
   useEffect(() => {
     if (isActive) {
-      selectorRef.current?.focus({ preventScroll: true });
+      listboxRef.current?.focus({ preventScroll: true });
     }
   }, [focusVersion, isActive]);
   const preview = (next: ThemeSelectorState): void => {
@@ -97,14 +98,15 @@ export function ThemeSelectorPane({
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface-deepest text-text-primary">
       <div className="min-h-0 flex-1">{transcript}</div>
       <section
-        ref={selectorRef}
-        tabIndex={0}
-        className="flex h-1/2 min-h-48 shrink-0 flex-col overflow-hidden border-t border-surface-border bg-surface-deepest font-mono text-sm text-text-primary outline-none"
-        aria-label="Theme selector"
-        onFocus={onActivate}
-        onKeyDown={handleKeyDown}
+        className="flex h-1/2 min-h-48 shrink-0 flex-col overflow-hidden border-t border-surface-border bg-surface-deepest font-mono text-sm text-text-primary"
       >
-        <ul className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2" role="listbox" aria-label="Terminal themes">
+        <ul
+          ref={listboxRef} tabIndex={0}
+          className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-2 outline-none"
+          role="listbox" aria-label="Terminal themes"
+          aria-activedescendant={`${listboxId}-${state.selectedPreference.kind === "system" ? "system" : state.selectedPreference.theme}`}
+          onFocus={onActivate} onKeyDown={handleKeyDown}
+        >
           {themeSelectorChoices.map((preference) => {
             const label = preference.kind === "system" ? "system" : preference.theme;
             const selected = themePreferenceEquals(preference, state.selectedPreference);
@@ -116,7 +118,7 @@ export function ThemeSelectorPane({
             ].filter((value) => value !== undefined).join(", ");
             return (
               <li
-                key={label}
+                key={label} id={`${listboxId}-${label}`}
                 role="option"
                 aria-selected={selected}
                 className={selected

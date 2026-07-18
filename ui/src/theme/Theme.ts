@@ -39,10 +39,10 @@ const systemThemeDefaults = {
 export const systemThemePreference: ThemePreference = { kind: "system" };
 export const themeStorageUnavailableMessage =
   "Theme storage is unavailable; the active theme remains usable.";
-export const themeSelectorChoices = [
+export const themeSelectorChoices: ReadonlyArray<ThemePreference> = [
   systemThemePreference,
   ...themeNames.map((theme): ThemePreference => ({ kind: "explicit", theme })),
-] satisfies ReadonlyArray<ThemePreference>;
+];
 
 export type ThemeSelectorState = Readonly<{
   openingPreference: ThemePreference;
