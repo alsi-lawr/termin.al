@@ -62,6 +62,7 @@ test("executes parsed pane operations through the existing command registry cont
       name: "pane",
       arguments: ["split", "horizontal", "viewer"],
       optionTerminator: { kind: "absent" },
+      stdin: { kind: "none" },
     },
     {
       shellId: createShellId("shell"),

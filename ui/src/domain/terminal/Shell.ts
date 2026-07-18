@@ -97,13 +97,6 @@ export type ShellDiagnostic =
       message: string;
     }>
   | Readonly<{
-      kind: "command";
-      id: ShellDiagnosticId;
-      code: "command.pipeline-unsupported";
-      message: string;
-      position: SourceOffset;
-    }>
-  | Readonly<{
       kind: "runtime";
       id: ShellDiagnosticId;
       code:
@@ -180,10 +173,6 @@ export type CommandFailure =
       kind: "command-rejected";
       commandName: string;
       message: string;
-    }>
-  | Readonly<{
-      kind: "unsupported-pipeline";
-      position: SourceOffset;
     }>
   | Readonly<{
       kind: "execution-error";

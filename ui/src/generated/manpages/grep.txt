@@ -4,35 +4,35 @@ NAME
      grep - Search virtual files with ECMAScript regular expressions.
 
 SYNOPSIS
-     grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...
+     grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]
 
 DESCRIPTION
-     Searches one or more explicit virtual file or directory operands in the or‐
-     der given. Standard input is not supported. A directory operand is rejected
-     unless -r is present.
+     Searches  piped  text when no path operand is supplied. Otherwise, searches
+     one or more explicit virtual file or directory operands in the order given.
+     A directory operand is rejected unless -r is present.
 
      By default, pattern is compiled by the browser as an ECMAScript regular ex‐
-     pression  with the u flag. The -i option adds the ECMAScript i flag. Native
+     pression with the u flag. The -i option adds the ECMAScript i flag.  Native
      regular-expression  syntax  and  matching  behavior  therefore  follow  the
      browser running termin.al.
 
-     Options  may be clustered. The -- terminator makes every following argument
-     an operand, including a pattern beginning with a hyphen. The -E  option  is
+     Options may be clustered. The -- terminator makes every following  argument
+     an  operand,  including a pattern beginning with a hyphen. The -E option is
      not supported.  -H and -h are mutually exclusive.
 
 OPTIONS
-     -i     Ignore  case.  Regular  expressions use the browser's iu flags. With
-            -F, the pattern and each logical line are compared after  JavaScript
+     -i     Ignore case. Regular expressions use the browser's  iu  flags.  With
+            -F,  the pattern and each logical line are compared after JavaScript
             lowercase conversion.
 
      -n     Prefix each matching logical line with its one-based line number.
 
-     -r     Traverse  directory  operands  recursively in deterministic virtual-
-            filesystem order, subject to the configured entry limit and a  maxi‐
+     -r     Traverse directory operands recursively  in  deterministic  virtual-
+            filesystem  order, subject to the configured entry limit and a maxi‐
             mum depth of 8.
 
      -F     Search for the pattern as a direct literal substring instead of com‐
-            piling  a regular expression. Regular-expression metacharacters have
+            piling a regular expression. Regular-expression metacharacters  have
             no special meaning.
 
      -H     Always prefix matches with the source filename.
@@ -41,33 +41,33 @@ OPTIONS
 
 REGULAR EXPRESSIONS
      The default mode accepts ordinary ECMAScript regular-expression syntax sup‐
-     ported by the browser, including groups, alternation, quantifiers,  charac‐
-     ter  classes,  assertions,  escapes  and Unicode-aware constructs available
+     ported  by the browser, including groups, alternation, quantifiers, charac‐
+     ter classes, assertions, escapes  and  Unicode-aware  constructs  available
      with the u flag.
 
-     If native construction fails, grep rejects the command with  the  browser's
+     If  native  construction fails, grep rejects the command with the browser's
      regular-expression diagnostic. grep does not translate the pattern or rein‐
      terpret native error positions.
 
 LINES AND OUTPUT
-     Input  is split on newline. A final newline does not create a phantom logi‐
-     cal line, an empty file has no logical lines, and carriage  return  remains
+     Input is split on newline. A final newline does not create a phantom  logi‐
+     cal  line,  an empty file has no logical lines, and carriage return remains
      part of line content. An empty pattern therefore matches every actual logi‐
      cal line.
 
-     By  default, one explicit file omits the filename prefix. Multiple operands
-     or recursive mode include it. Filename comes first, then an  optional  line
-     number,  then  the line text. A successful search with no match produces no
-     output.
+     By default, piped text and one explicit file omit the filename prefix. Mul‐
+     tiple operands or recursive mode include it. With  -H,  piped  matches  use
+     (standard input).  Filename comes first, then an optional line number, then
+     the line text. A successful search with no match produces no output.
 
-     At most 1,000 matching lines and 1 MiB of UTF-8  output  are  emitted.  The
-     command  stops  before an additional line would exceed either bound and re‐
+     At  most  1,000  matching  lines and 1 MiB of UTF-8 output are emitted. The
+     command stops before an additional line would exceed either bound  and  re‐
      ports runtime.truncated.  Recursive entry truncation is reported separately
      with the same diagnostic code.
 
 FAILURES AND CANCELLATION
-     Files are read sequentially. Missing, locked and  unavailable  operands  or
-     descendants  are  collected  in  deterministic  operand  order. If any such
+     Files  are  read  sequentially. Missing, locked and unavailable operands or
+     descendants are collected in  deterministic  operand  order.  If  any  such
      failure occurs, the command fails without returning matches from successful
      operands.
 
@@ -76,6 +76,7 @@ FAILURES AND CANCELLATION
      eration is synchronous and is not interrupted after it begins.
 
 EXAMPLES
+     $ cat about.md | grep -n '^Typed'
      $ grep -n '^Typed' about.md
      $ grep -rH 'fixture|typed' projects notes
      $ grep -F -- '-literal' about.md

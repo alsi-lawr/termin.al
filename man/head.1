@@ -1,5 +1,5 @@
 .\" termin.al-name: head
-.\" termin.al-usage: head [-n count] <path>
+.\" termin.al-usage: head [-n count] [path]
 .\" termin.al-summary: Print initial raw document lines.
 .TH HEAD 1 "" "termin.al" "termin.al Manual"
 .ftr B R
@@ -9,28 +9,29 @@
 head \- Print initial raw document lines.
 .SH SYNOPSIS
 .nf
-head [-n count] <path>
+head [-n count] [path]
 .fi
 .SH DESCRIPTION
-Reads one virtual document as raw text and prints its first newline-separated lines. Paths resolve relative to the current pane directory or from virtual home with
+Reads piped text when no path is supplied; otherwise reads one virtual document as raw text. Prints the first newline-separated lines. Paths resolve relative to the current pane directory or from virtual home with
 .BR ~ .
 The default count is 10.
 .SH OPTIONS
 .TP
 .B -n count
-Select a non-negative decimal line count from 0 through 1000. The option may precede or follow the single path operand; a later
+Select a non-negative decimal line count from 0 through 1000. The option may precede or follow a path operand; a later
 .B -n
 replaces an earlier count.
 .SH OUTPUT
 Markdown is not rendered. A count of 0 emits an empty text output; a count larger than the document returns all available text lines.
 .SH FAILURES
-Unsupported options, a missing or invalid count, more or fewer than one path, invalid or missing paths, directories, locked files and unavailable documents are rejected. Cancellation returns no output.
+Unsupported options, a missing or invalid count, more than one path, no path outside a pipeline, invalid or missing paths, directories, locked files and unavailable documents are rejected. Cancellation returns no output.
 .SH LIMITS
 The requested count is capped at 1000 lines.
 .SH NOTES
 The virtual document is read-only and no host filesystem path is accepted.
 .SH EXAMPLES
 .nf
+$ cat about.md | head -n 3
 $ head about.md
 $ head -n 3 ~/changelog.md
 $ head about.md -n 0

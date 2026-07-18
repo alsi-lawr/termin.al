@@ -489,12 +489,12 @@ test("implements line readers, terminal history, manual pages, and pager effects
   assert.match(manual, /\nNAME\n     grep - Search virtual files with ECMAScript regular expressions\./u);
   assert.match(
     manual,
-    /\nSYNOPSIS\n     grep \[-i\] \[-n\] \[-r\] \[-F\] \[-H\|-h\] \[--\] pattern file\.\.\./u,
+    /\nSYNOPSIS\n     grep \[-i\] \[-n\] \[-r\] \[-F\] \[-H\|-h\] \[--\] pattern \[file \.\.\.\]/u,
   );
   assert.match(manual, /\nOPTIONS\n     -i/u);
   assert.match(manual, /\nREGULAR EXPRESSIONS\n/u);
   assert.match(manual, /\nLINES AND OUTPUT\n/u);
-  assert.match(manual, /\nEXAMPLES\n     \$ grep -n '\^Typed' about\.md/u);
+  assert.match(manual, /\nEXAMPLES\n     \$ cat about\.md \| grep -n '\^Typed'/u);
   assert.match(manual, /\nSEE ALSO\n     help\(1\), man\(1\)/u);
 
   const pagerEffect = pager.effects.find(
@@ -513,6 +513,57 @@ test("implements line readers, terminal history, manual pages, and pager effects
     assert.equal(pagerEffect.viewer.statsIdentity.contentId.value, "note");
   }
   assert.deepEqual(clear.effects, [{ kind: "clear-scrollback" }]);
+});
+
+test("pipes text through grep, head, and tail while preserving empty stdin", async () => {
+  const registry = createRegistry();
+  const filtered = outputText(
+    await execute("cat about.md | grep -n 'deterministic' | head -n 1", registry),
+  );
+  const finalLine = outputText(
+    await execute("cat about.md | tail -n 1", registry),
+  );
+  const empty = succeeded(await execute("echo '' | head -n 1", registry));
+
+  assert.equal(filtered, "3:This is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.");
+  assert.equal(finalLine, "This is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.");
+  assert.deepEqual(
+    empty.outputs.flatMap((output) => output.kind === "text" ? [output.text] : []),
+    [""],
+  );
+});
+
+test("keeps pipeline diagnostics visible but out of downstream text", async () => {
+  const outcome = await execute("missing | head -n 1 && echo final", createRegistry());
+  const successful = succeeded(outcome);
+
+  assert.deepEqual(
+    successful.outputs.map((output) => {
+      switch (output.kind) {
+        case "text":
+          return output.text;
+        case "diagnostic":
+          return output.diagnostic.message;
+        case "prompt":
+          return output.message;
+      }
+    }),
+    ["Command not found: missing", "", "final"],
+  );
+});
+
+test("rejects effect pipelines before an earlier reader executes", async () => {
+  let reads = 0;
+  const registry = createRegistry(100, {
+    read: (handle, signal) => {
+      reads += 1;
+      return demoContentCorpus.documents.read(handle, signal);
+    },
+  });
+  const outcome = await execute("cat about.md | less about.md", registry);
+
+  assert.equal(failureMessage(outcome), "less cannot be used in a pipeline.");
+  assert.equal(reads, 0);
 });
 
 test("uses one canonical artifact for default less, explicit less, vi, and aliases", async () => {
@@ -744,8 +795,8 @@ test("uses native regex syntax, Unicode and ignore-case behavior, and fixed lite
   assert.deepEqual(succeeded(await execute("grep absent one.txt", fixture.registry)).outputs, []);
 
   const failures: ReadonlyArray<readonly [string, string]> = [
-    ["grep", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file..."],
-    ["grep pattern", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file..."],
+    ["grep", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]"],
+    ["grep pattern", "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]"],
     ["grep -z pattern one.txt", "Unsupported option: -z."],
     ["grep -E pattern one.txt", "Unsupported option: -E."],
     ["grep -Hh pattern one.txt", "Options -H and -h are mutually exclusive."],
@@ -872,11 +923,19 @@ test("caps grep output by matching lines, UTF-8 bytes, and recursive traversal",
     1,
   );
   const lineOutcome = await execute("grep x many.txt", lineLimited.registry);
+  const pipedLineOutcome = await execute(
+    "grep x many.txt | tail -n 1",
+    lineLimited.registry,
+  );
   const byteOutcome = await execute("grep x large.txt", byteLimited.registry);
   const traversalOutcome = await execute("grep -r x dir", traversalLimited.registry);
 
   assert.equal(outputText(lineOutcome).split("\n").length, 1000);
   assert.deepEqual(runtimeTruncations(lineOutcome), [
+    "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
+  ]);
+  assert.equal(outputText(pipedLineOutcome), "x");
+  assert.deepEqual(runtimeTruncations(pipedLineOutcome), [
     "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
   ]);
   assert.equal(outputText(byteOutcome), byteLine);
@@ -917,9 +976,19 @@ test("cancellation discards accumulated grep output", async () => {
       recursiveEntryLimit: 100,
     }),
   });
-  const outcome = await executeWithSignal("grep hit a.txt b.txt", registry, controller.signal);
+  const outcome = await executeWithSignal(
+    "grep hit a.txt b.txt | head -n 1 ; echo later",
+    registry,
+    controller.signal,
+  );
 
   assert.equal(outcome.kind, "cancelled");
+  assert.equal(
+    outcome.events.some(
+      (event) => event.kind === "output" && event.output.kind === "text",
+    ),
+    false,
+  );
 });
 
 test("reports empty, missing, unsupported-option, and cancelled command outcomes", async () => {

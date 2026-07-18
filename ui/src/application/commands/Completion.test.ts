@@ -33,6 +33,7 @@ test("completes registry command names and aliases", async () => {
           usage: "open <target>",
           examples: ["open about"],
         },
+        pipeline: "text",
         execute: async () => ({ kind: "succeeded", outputs: [], effects: [] }),
       },
     ],

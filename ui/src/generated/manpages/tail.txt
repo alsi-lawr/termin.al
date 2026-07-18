@@ -4,28 +4,30 @@ NAME
      tail - Print final raw document lines.
 
 SYNOPSIS
-     tail [-n count] <path>
+     tail [-n count] [path]
 
 DESCRIPTION
-     Reads  one  virtual document as raw text and prints its final newline-sepa‐
-     rated lines. Paths resolve relative to the current pane directory  or  from
-     virtual home with ~.  The default count is 10.
+     Reads piped text when no path is supplied; otherwise reads one virtual doc‐
+     ument  as raw text. Prints the final newline-separated lines. Paths resolve
+     relative to the current pane directory or from virtual home  with  ~.   The
+     default count is 10.
 
 OPTIONS
      -n count
             Select  a  non-negative  decimal line count from 0 through 1000. The
-            option may precede or follow the single path operand; a later -n re‐
-            places an earlier count.
+            option may precede or follow a path operand; a later -n replaces  an
+            earlier count.
 
 OUTPUT
-     Markdown is not rendered. A count of 0 emits an empty text output; a  count
-     larger  than the document returns all available text lines. A trailing new‐
+     Markdown  is not rendered. A count of 0 emits an empty text output; a count
+     larger than the document returns all available text lines. A trailing  new‐
      line is preserved by the raw split-and-join behavior.
 
 FAILURES
-     Unsupported options, a missing or invalid count, more  or  fewer  than  one
-     path,  invalid  or missing paths, directories, locked files and unavailable
-     documents are rejected. Cancellation returns no output.
+     Unsupported  options,  a  missing  or invalid count, more than one path, no
+     path outside a pipeline, invalid  or  missing  paths,  directories,  locked
+     files  and unavailable documents are rejected. Cancellation returns no out‐
+     put.
 
 LIMITS
      The requested count is capped at 1000 lines.
@@ -34,6 +36,7 @@ NOTES
      The virtual document is read-only and no host filesystem path is accepted.
 
 EXAMPLES
+     $ cat about.md | tail -n 3
      $ tail about.md
      $ tail -n 3 ~/changelog.md
      $ tail about.md -n 0

@@ -89,7 +89,9 @@ type GrepOptions = Readonly<{
 
 type LineReaderOptions = Readonly<{
   lineCount: number;
-  path: string;
+  input:
+    | Readonly<{ kind: "path"; path: string }>
+    | Readonly<{ kind: "stdin"; text: string }>;
 }>;
 
 type ReadFileResult =
@@ -105,10 +107,23 @@ type ReadFileResult =
     }>
   | Readonly<{ kind: "cancelled" }>;
 
+type TextReadResult =
+  | Readonly<{
+      kind: "read";
+      text: string;
+      sourcePath: string;
+    }>
+  | Readonly<{
+      kind: "failed";
+      outcome: CommandOutcome;
+    }>
+  | Readonly<{ kind: "cancelled" }>;
+
 type GrepFailure = Extract<CommandOutcome, { kind: "failed" }>;
 
 type GrepPlannedInput =
   | Readonly<{ kind: "file"; file: VirtualFileNode }>
+  | Readonly<{ kind: "stdin"; text: string }>
   | Readonly<{ kind: "failure"; failure: GrepFailure }>;
 
 type GrepFilePlan =
@@ -510,10 +525,13 @@ function parseGrepOptions(
 
   const pattern = operands[0];
 
-  if (pattern === undefined || operands.length < 2) {
+  if (
+    pattern === undefined ||
+    (operands.length < 2 && invocation.stdin.kind === "none")
+  ) {
     return {
       kind: "invalid",
-      message: "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
+      message: "Usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]",
     };
   }
 
@@ -577,23 +595,39 @@ function parseLineReaderOptions(
     index += 1;
   }
 
-  if (operands.length !== 1) {
+  if (operands.length > 1 || (operands.length === 0 && invocation.stdin.kind === "none")) {
     return {
       kind: "invalid",
-      message: `Usage: ${commandName} [-n count] <path>`,
+      message: `Usage: ${commandName} [-n count] [path]`,
     };
   }
 
   const path = operands[0];
 
   if (path === undefined) {
+    if (invocation.stdin.kind === "text") {
+      return {
+        kind: "parsed",
+        value: {
+          lineCount,
+          input: { kind: "stdin", text: invocation.stdin.text },
+        },
+      };
+    }
+
     return {
       kind: "invalid",
-      message: `Usage: ${commandName} [-n count] <path>`,
+      message: `Usage: ${commandName} [-n count] [path]`,
     };
   }
 
-  return { kind: "parsed", value: { lineCount, path } };
+  return {
+    kind: "parsed",
+    value: {
+      lineCount,
+      input: { kind: "path", path },
+    },
+  };
 }
 
 function displayEntry(node: VirtualNode): DisplayEntry {
@@ -940,6 +974,41 @@ function planGrepFiles(
   return { kind: "planned", inputs, traversalTruncated };
 }
 
+function planGrepInputs(
+  filesystem: VirtualFilesystem,
+  context: CommandExecutionContext,
+  options: GrepOptions,
+  recursiveEntryLimit: number,
+  stdin: CommandInvocation["stdin"],
+): GrepFilePlan {
+  if (options.operands.length === 0 && stdin.kind === "text") {
+    return {
+      kind: "planned",
+      inputs: [{ kind: "stdin", text: stdin.text }],
+      traversalTruncated: false,
+    };
+  }
+
+  return planGrepFiles(filesystem, context, options, recursiveEntryLimit);
+}
+
+function readGrepInput(
+  input: Exclude<GrepPlannedInput, { kind: "failure" }>,
+  filesystem: VirtualFilesystem,
+  documents: VirtualDocumentSupplier,
+  context: CommandExecutionContext,
+): Promise<TextReadResult> {
+  if (input.kind === "stdin") {
+    return Promise.resolve({
+      kind: "read",
+      text: input.text,
+      sourcePath: "(standard input)",
+    });
+  }
+
+  return readFile("grep", filesystem, documents, context, input.file.path);
+}
+
 function createLsCommand(
   filesystem: VirtualFilesystem,
   recursiveEntryLimit: number,
@@ -953,6 +1022,7 @@ function createLsCommand(
       usage: "ls [-a] [-l] [--tree] [path]",
       examples: ["ls", "ls -l projects", "ls --tree projects", "ls -a --tree"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseLsOptions(invocation);
 
@@ -1031,6 +1101,7 @@ function createCdCommand(filesystem: VirtualFilesystem): CommandDefinition {
       usage: "cd [path]",
       examples: ["cd projects", "cd .."],
     },
+    pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "cd [path]", 0, 1);
 
@@ -1068,6 +1139,7 @@ function createCatCommand(
       usage: "cat <path> [path ...]",
       examples: ["cat about.md"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "cat <path> [path ...]", 1, 32);
 
@@ -1106,6 +1178,7 @@ function createPwdCommand(): CommandDefinition {
       usage: "pwd",
       examples: ["pwd"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "pwd", 0, 0);
 
@@ -1129,6 +1202,7 @@ function createTreeCommand(
       usage: "tree [-a] [-L depth] [path]",
       examples: ["tree", "tree -L 1 projects"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseTreeOptions(invocation);
 
@@ -1159,6 +1233,7 @@ function createFindCommand(
       usage: "find [path] [-name pattern]",
       examples: ["find -name '*.md'", "find projects -name '*project*'"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseFindOptions(invocation);
 
@@ -1243,7 +1318,8 @@ function grepIncludesFilename(options: GrepOptions): boolean {
     case "suppress":
       return false;
     case "automatic":
-      return options.recursive || options.operands.length > 1;
+      return options.operands.length > 0 &&
+        (options.recursive || options.operands.length > 1);
   }
 }
 
@@ -1285,13 +1361,15 @@ function createGrepCommand(
       name: "grep",
       aliases: [],
       summary: "Search virtual files with ECMAScript regular expressions.",
-      usage: "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
+      usage: "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]",
       examples: [
+        "cat about.md | grep -n '^Typed'",
         "grep -n '^Typed' about.md",
         "grep -rH 'fixture|typed' projects notes",
         "grep -F -- '-literal' about.md",
       ],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseGrepOptions(invocation);
 
@@ -1326,11 +1404,12 @@ function createGrepCommand(
         return rejectedOutcome("grep", matching.message);
       }
 
-      const plan = planGrepFiles(
+      const plan = planGrepInputs(
         filesystem,
         context,
         parsed.value,
         recursiveEntryLimit,
+        invocation.stdin,
       );
 
       if (plan.kind === "cancelled") {
@@ -1354,20 +1433,19 @@ function createGrepCommand(
           continue;
         }
 
-        const document = await readFile(
-          "grep",
+        const source = await readGrepInput(
+          input,
           filesystem,
           documents,
           context,
-          input.file.path,
         );
 
-        if (document.kind === "cancelled") {
+        if (source.kind === "cancelled") {
           return cancelledOutcome();
         }
 
-        if (document.kind === "failed") {
-          failures.push(failedGrepOutcome(document.outcome));
+        if (source.kind === "failed") {
+          failures.push(failedGrepOutcome(source.outcome));
           continue;
         }
 
@@ -1375,7 +1453,7 @@ function createGrepCommand(
           continue;
         }
 
-        const lines = grepLogicalLines(document.text);
+        const lines = grepLogicalLines(source.text);
 
         for (let index = 0; index < lines.length; index += 1) {
           if (context.signal.aborted) {
@@ -1398,7 +1476,7 @@ function createGrepCommand(
           }
 
           const outputLine = grepOutputLine(
-            document.sourcePath,
+            source.sourcePath,
             line,
             index + 1,
             includeFilename,
@@ -1458,9 +1536,10 @@ function createLineReaderCommand(
       summary: fromEnd
         ? "Print final raw document lines."
         : "Print initial raw document lines.",
-      usage: `${commandName} [-n count] <path>`,
-      examples: [`${commandName} -n 3 about.md`],
+      usage: `${commandName} [-n count] [path]`,
+      examples: [`cat about.md | ${commandName} -n 3`, `${commandName} -n 3 about.md`],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseLineReaderOptions(invocation, commandName);
 
@@ -1468,13 +1547,19 @@ function createLineReaderCommand(
         return rejectedOutcome(commandName, parsed.message);
       }
 
-      const document = await readFile(
-        commandName,
-        filesystem,
-        documents,
-        context,
-        parsed.value.path,
-      );
+      const document: TextReadResult = parsed.value.input.kind === "stdin"
+        ? {
+            kind: "read",
+            text: parsed.value.input.text,
+            sourcePath: "(standard input)",
+          }
+        : await readFile(
+            commandName,
+            filesystem,
+            documents,
+            context,
+            parsed.value.input.path,
+          );
 
       if (document.kind === "cancelled") {
         return cancelledOutcome();
@@ -1482,6 +1567,10 @@ function createLineReaderCommand(
 
       if (document.kind === "failed") {
         return document.outcome;
+      }
+
+      if (context.signal.aborted) {
+        return cancelledOutcome();
       }
 
       const lines = document.text.split("\n");
@@ -1509,6 +1598,7 @@ function createLessCommand(
       usage: "less <path>",
       examples: ["less notes/sample-note.md"],
     },
+    pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "less <path>", 1, 1);
 
@@ -1568,6 +1658,7 @@ function createClearCommand(): CommandDefinition {
       usage: "clear",
       examples: ["clear"],
     },
+    pipeline: "effects",
     execute: async (invocation) => {
       const parsed = parseNoOptionPaths(invocation, "clear", 0, 0);
 
@@ -1692,6 +1783,7 @@ function createHistoryCommand(): CommandDefinition {
       usage: "history",
       examples: ["history"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const parsed = parseNoOptionPaths(invocation, "history", 0, 0);
 
@@ -1716,6 +1808,7 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
       usage: "man [-P less|vi] [--pager=less|vi] <command>",
       examples: ["man grep", "man -P vi grep"],
     },
+    pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseManInvocation(invocation);
 
@@ -1768,6 +1861,7 @@ function createEchoCommand(): CommandDefinition {
       usage: "echo [text ...]",
       examples: ["echo 'hello terminal'"],
     },
+    pipeline: "text",
     execute: async (invocation) =>
       succeededOutcome([textOutput("echo-output", invocation.arguments.join(" "))]),
   };
@@ -1783,6 +1877,7 @@ function createWhoamiCommand(): CommandDefinition {
       usage: "whoami",
       examples: ["whoami"],
     },
+    pipeline: "text",
     execute: async (invocation) => {
       const parsed = parseNoOptionPaths(invocation, "whoami", 0, 0);
 

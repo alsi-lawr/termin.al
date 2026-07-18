@@ -113,24 +113,24 @@
     {
       "name": "grep",
       "section": 1,
-      "usage": "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...",
+      "usage": "grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]",
       "summary": "Search virtual files with ECMAScript regular expressions.",
       "sourcePath": "man/grep.1",
       "artifactPath": "ui/src/generated/manpages/grep.txt",
-      "byteCount": 3810,
-      "lineCount": 86,
-      "sha256": "b1d4c3f3779351597b7c26ace4f8b39c293926675b02a87131f75d4ada9b9815"
+      "byteCount": 3945,
+      "lineCount": 87,
+      "sha256": "b4e077e3ca8a6618eac1fa4fdd8eb036b1b5347ade0a049de166acbadb335c55"
     },
     {
       "name": "head",
       "section": 1,
-      "usage": "head [-n count] <path>",
+      "usage": "head [-n count] [path]",
       "summary": "Print initial raw document lines.",
       "sourcePath": "man/head.1",
       "artifactPath": "ui/src/generated/manpages/head.txt",
-      "byteCount": 1366,
-      "lineCount": 43,
-      "sha256": "b3673252e7087485e3f03e3d73126ab71b7924be2c60b4ab7ae7be046e1a9fbe"
+      "byteCount": 1473,
+      "lineCount": 46,
+      "sha256": "9b9fb0e2bcee6efbe7e3f952defb3844a3ed896bca5cb1a37b40a87ef91788eb"
     },
     {
       "name": "help",
@@ -300,13 +300,13 @@
     {
       "name": "tail",
       "section": 1,
-      "usage": "tail [-n count] <path>",
+      "usage": "tail [-n count] [path]",
       "summary": "Print final raw document lines.",
       "sourcePath": "man/tail.1",
       "artifactPath": "ui/src/generated/manpages/tail.txt",
-      "byteCount": 1442,
-      "lineCount": 44,
-      "sha256": "e96eb686c46b263034ed1b8595c1b039eaaf6ea03752cfe726414459418b4394"
+      "byteCount": 1549,
+      "lineCount": 47,
+      "sha256": "ea439af6c39b6becc8ea2703d5e4b95796d86af4f6376c63aabcf0f1eee89ac3"
     },
     {
       "name": "theme",

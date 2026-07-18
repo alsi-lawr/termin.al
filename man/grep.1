@@ -1,5 +1,5 @@
 .\" termin.al-name: grep
-.\" termin.al-usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...
+.\" termin.al-usage: grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]
 .\" termin.al-summary: Search virtual files with ECMAScript regular expressions.
 .TH GREP 1 "" "termin.al" "termin.al Manual"
 .ftr B R
@@ -9,10 +9,10 @@
 grep \- Search virtual files with ECMAScript regular expressions.
 .SH SYNOPSIS
 .nf
-grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern file...
+grep [-i] [-n] [-r] [-F] [-H|-h] [--] pattern [file ...]
 .fi
 .SH DESCRIPTION
-Searches one or more explicit virtual file or directory operands in the order given. Standard input is not supported. A directory operand is rejected unless
+Searches piped text when no path operand is supplied. Otherwise, searches one or more explicit virtual file or directory operands in the order given. A directory operand is rejected unless
 .B -r
 is present.
 .PP
@@ -67,7 +67,11 @@ If native construction fails, grep rejects the command with the browser's regula
 .SH LINES AND OUTPUT
 Input is split on newline. A final newline does not create a phantom logical line, an empty file has no logical lines, and carriage return remains part of line content. An empty pattern therefore matches every actual logical line.
 .PP
-By default, one explicit file omits the filename prefix. Multiple operands or recursive mode include it. Filename comes first, then an optional line number, then the line text. A successful search with no match produces no output.
+By default, piped text and one explicit file omit the filename prefix. Multiple operands or recursive mode include it. With
+.BR -H ,
+piped matches use
+.BR (standard\ input) .
+Filename comes first, then an optional line number, then the line text. A successful search with no match produces no output.
 .PP
 At most 1,000 matching lines and 1 MiB of UTF-8 output are emitted. The command stops before an additional line would exceed either bound and reports
 .BR runtime.truncated .
@@ -78,6 +82,7 @@ Files are read sequentially. Missing, locked and unavailable operands or descend
 Cancellation is checked during traversal and reads, between files and logical lines, and before output is returned. One native regular-expression operation is synchronous and is not interrupted after it begins.
 .SH EXAMPLES
 .nf
+$ cat about.md | grep -n '^Typed'
 $ grep -n '^Typed' about.md
 $ grep -rH 'fixture|typed' projects notes
 $ grep -F -- '-literal' about.md

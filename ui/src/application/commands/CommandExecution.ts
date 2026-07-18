@@ -4,7 +4,6 @@ import {
   type LexedArgument,
   type OptionTerminator,
   type ShellSyntaxError,
-  type SourceOffset,
 } from "../../domain/terminal/ArgumentLexer.ts";
 import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
@@ -19,6 +18,8 @@ import {
 } from "../../domain/terminal/Shell.ts";
 import {
   resolveCommand,
+  type CommandDefinition,
+  type CommandInvocation,
   type CommandRegistry,
 } from "./CommandRegistry.ts";
 
@@ -28,19 +29,24 @@ export type ExecuteCommandLineOptions = Readonly<{
   signal: AbortSignal;
 }>;
 
+type ListConnector = "always" | "and" | "or";
+
 type ParsedCommand = Readonly<{
-  connector: "always" | "and" | "or";
   command: LexedArgument;
   arguments: ReadonlyArray<LexedArgument>;
   optionTerminator: OptionTerminator;
+}>;
+
+type ParsedPipeline = Readonly<{
+  connector: ListConnector;
+  commands: ReadonlyArray<ParsedCommand>;
 }>;
 
 type CommandLineParseResult =
   | Readonly<{ kind: "empty" }>
   | Readonly<{
       kind: "success";
-      commands: ReadonlyArray<ParsedCommand>;
-      pipelinePosition: SourceOffset | undefined;
+      pipelines: ReadonlyArray<ParsedPipeline>;
     }>
   | Readonly<{
       kind: "error";
@@ -135,17 +141,20 @@ function emptyCommandOutcome(): CommandOutcome {
   };
 }
 
-function unsupportedPipelineOutcome(position: SourceOffset): CommandOutcome {
+function rejectedPipelineOutcome(commandName: string): CommandOutcome {
   return {
     kind: "failed",
-    failure: { kind: "unsupported-pipeline", position },
+    failure: {
+      kind: "command-rejected",
+      commandName,
+      message: `${commandName} cannot be used in a pipeline.`,
+    },
     diagnostics: [
       {
         kind: "command",
-        id: createShellDiagnosticId("pipeline-unsupported"),
-        code: "command.pipeline-unsupported",
-        message: "Pipelines are not supported yet.",
-        position,
+        id: createShellDiagnosticId("pipeline-command-rejected"),
+        code: "command.rejected",
+        message: `${commandName} cannot be used in a pipeline.`,
       },
     ],
   };
@@ -191,10 +200,10 @@ function parseCommandLine(
     return { kind: "empty" };
   }
 
-  const commands: ParsedCommand[] = [];
-  let connector: ParsedCommand["connector"] = "always";
+  const pipelines: ParsedPipeline[] = [];
+  let commands: ParsedCommand[] = [];
+  let connector: ListConnector = "always";
   let hasEmptyCommand = false;
-  let pipelinePosition: SourceOffset | undefined;
   let tokenIndex = 0;
 
   while (tokenIndex < tokens.length) {
@@ -240,7 +249,6 @@ function parseCommandLine(
       hasEmptyCommand = true;
     } else {
       commands.push({
-        connector,
         command,
         arguments: argumentsList,
         optionTerminator,
@@ -275,26 +283,34 @@ function parseCommandLine(
     }
 
     if (operator.operator === "|") {
-      pipelinePosition ??= operator.position;
-      connector = "always";
+      tokenIndex += 1;
+      continue;
     } else if (operator.operator === "&&") {
+      pipelines.push({ connector, commands });
+      commands = [];
       connector = "and";
     } else if (operator.operator === "||") {
+      pipelines.push({ connector, commands });
+      commands = [];
       connector = "or";
     } else {
+      pipelines.push({ connector, commands });
+      commands = [];
       connector = "always";
     }
 
     tokenIndex += 1;
   }
 
+  pipelines.push({ connector, commands });
+
   return hasEmptyCommand
     ? { kind: "empty" }
-    : { kind: "success", commands, pipelinePosition };
+    : { kind: "success", pipelines };
 }
 
 function shouldExecute(
-  connector: ParsedCommand["connector"],
+  connector: ListConnector,
   previousOutcome: CommandOutcome | undefined,
 ): boolean {
   if (connector === "always" || previousOutcome === undefined) {
@@ -391,22 +407,19 @@ function reachesInteractionBoundary(outcome: CommandOutcome): boolean {
 
 async function executeCommand(
   command: ParsedCommand,
+  definition: CommandDefinition,
+  stdin: CommandInvocation["stdin"],
   currentDirectory: VirtualDirectoryPath,
   options: ExecuteCommandLineOptions,
 ): Promise<CommandOutcome> {
-  const resolution = resolveCommand(options.registry, command.command.value);
-
-  if (resolution.kind === "missing") {
-    return missingCommandOutcome(resolution.requestedName);
-  }
-
   try {
-    return await resolution.command.execute(
+    return await definition.execute(
       {
         source: options.request.source,
-        name: resolution.command.metadata.name,
+        name: definition.metadata.name,
         arguments: command.arguments.map((argument) => argument.value),
         optionTerminator: command.optionTerminator,
+        stdin,
       },
       {
         shellId: options.request.shellId,
@@ -426,8 +439,94 @@ async function executeCommand(
       ? thrown
       : new Error("Command execution failed.", { cause: thrown });
 
-    return executionFailureOutcome(resolution.command.metadata.name, cause);
+    return executionFailureOutcome(definition.metadata.name, cause);
   }
+}
+
+async function executePipeline(
+  pipeline: ParsedPipeline,
+  currentDirectory: VirtualDirectoryPath,
+  events: CommandLineEvent[],
+  options: ExecuteCommandLineOptions,
+): Promise<CommandOutcome> {
+  const resolved = pipeline.commands.map((command) => ({
+    command,
+    resolution: resolveCommand(options.registry, command.command.value),
+  }));
+
+  if (resolved.length > 1) {
+    const rejected = resolved.find(
+      (entry) =>
+        entry.resolution.kind === "found" &&
+        entry.resolution.command.pipeline === "effects",
+    );
+
+    if (rejected?.resolution.kind === "found") {
+      const outcome = rejectedPipelineOutcome(
+        rejected.resolution.command.metadata.name,
+      );
+      appendOutcome(events, outcome);
+      return outcome;
+    }
+  }
+
+  let stdin: CommandInvocation["stdin"] = { kind: "none" };
+  let outcome: CommandOutcome | undefined;
+
+  for (const entry of resolved) {
+    if (options.signal.aborted) {
+      const cancelled = cancelledOutcome();
+      appendOutcome(events, cancelled);
+      return cancelled;
+    }
+
+    outcome = entry.resolution.kind === "missing"
+      ? missingCommandOutcome(entry.resolution.requestedName)
+      : await executeCommand(
+        entry.command,
+        entry.resolution.command,
+        stdin,
+        currentDirectory,
+        options,
+      );
+
+    const isFinal = entry === resolved[resolved.length - 1];
+
+    if (outcome.kind !== "succeeded" || isFinal) {
+      appendOutcome(events, outcome);
+    } else {
+      for (const output of outcome.outputs) {
+        if (output.kind === "diagnostic") {
+          events.push(outputEvent(output, events.length + 1));
+        }
+      }
+    }
+
+    if (outcome.kind === "cancelled") {
+      return outcome;
+    }
+
+    if (options.signal.aborted) {
+      const cancelled = cancelledOutcome();
+      appendOutcome(events, cancelled);
+      return cancelled;
+    }
+
+    stdin = {
+      kind: "text",
+      text: outcome.kind === "succeeded"
+        ? outcome.outputs
+          .flatMap((output) => output.kind === "text" ? [output.text] : [])
+          .join("\n")
+        : "",
+    };
+  }
+
+  if (outcome === undefined) {
+    throw new Error("A parsed pipeline must contain a command.");
+  }
+
+  return outcome;
 }
 
 function completedLine(
@@ -461,28 +560,25 @@ export async function executeCommandLine(
     return completedLine(parseFailureOutcome(parseResult.error));
   }
 
-  if (parseResult.pipelinePosition !== undefined) {
-    return completedLine(unsupportedPipelineOutcome(parseResult.pipelinePosition));
-  }
-
   const events: CommandLineEvent[] = [];
   let currentDirectory = options.request.currentDirectory;
   let outcome: CommandOutcome | undefined;
 
-  for (const command of parseResult.commands) {
+  for (const pipeline of parseResult.pipelines) {
     if (options.signal.aborted || outcome?.kind === "cancelled") {
       const cancelled = cancelledOutcome();
       appendOutcome(events, cancelled);
       return lineOutcome(events, cancelled);
     }
 
-    if (!shouldExecute(command.connector, outcome)) {
+    if (!shouldExecute(pipeline.connector, outcome)) {
       continue;
     }
 
-    outcome = await executeCommand(command, currentDirectory, options);
-    appendOutcome(events, outcome);
-    currentDirectory = nextCurrentDirectory(currentDirectory, outcome);
+    outcome = await executePipeline(pipeline, currentDirectory, events, options);
+    if (pipeline.commands.length === 1) {
+      currentDirectory = nextCurrentDirectory(currentDirectory, outcome);
+    }
 
     if (outcome.kind === "cancelled") {
       return lineOutcome(events, outcome);

@@ -611,6 +611,7 @@ function createHelpCommand(): CommandDefinition {
       usage: "help",
       examples: ["help", "man open"],
     },
+    pipeline: "text",
     execute: async (invocation, context) => {
       const argumentError = noArguments(invocation, "help");
 
@@ -643,6 +644,7 @@ function createOpenCommand(
       usage: "open [--split horizontal|vertical] <target>",
       examples: ["open about.md", "open --split vertical projects"],
     },
+    pipeline: "effects",
     execute: async (invocation, context) => {
       const parsed = parseOpenCommand(invocation);
 
@@ -694,6 +696,7 @@ function createUnavailableCommand(
       usage,
       examples: [example],
     },
+    pipeline: "effects",
     execute: async () => rejectedOutcome(name, message),
   };
 }
@@ -708,6 +711,7 @@ function createStatsCommand(readStats: PortfolioStatsReader): CommandDefinition 
       usage: "stats",
       examples: ["stats"],
     },
+    pipeline: "text",
     execute: async (invocation) => {
       const argumentError = noArguments(invocation, "stats");
 
@@ -758,6 +762,7 @@ function createThemeCommand(themes: ThemeController): CommandDefinition {
       usage: "theme [list|set <name>|system]",
       examples: ["theme list", "theme set gruber-darker", "theme system"],
     },
+    pipeline: "effects",
     execute: async (invocation) => {
       const [operation, value, ...remaining] = invocation.arguments;
 
@@ -819,6 +824,7 @@ function createNavigationCommand(
       usage: name,
       examples: [name],
     },
+    pipeline: "effects",
     execute: async (invocation, context) => {
       const argumentError = noArguments(invocation, name);
 

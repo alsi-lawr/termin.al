@@ -9,6 +9,8 @@ import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesy
 
 export type CommandGroup = "gnu-like" | "application" | "navigation";
 
+export type CommandPipelinePolicy = "text" | "effects";
+
 export type CommandMetadata = Readonly<{
   group: CommandGroup;
   name: string;
@@ -23,6 +25,9 @@ export type CommandInvocation = Readonly<{
   name: string;
   arguments: ReadonlyArray<string>;
   optionTerminator: OptionTerminator;
+  stdin:
+    | Readonly<{ kind: "none" }>
+    | Readonly<{ kind: "text"; text: string }>;
 }>;
 
 export type CommandExecutionContext = Readonly<{
@@ -36,6 +41,7 @@ export type CommandExecutionContext = Readonly<{
 
 export type CommandDefinition = Readonly<{
   metadata: CommandMetadata;
+  pipeline: CommandPipelinePolicy;
   execute: (
     invocation: CommandInvocation,
     context: CommandExecutionContext,
