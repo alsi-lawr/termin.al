@@ -18,8 +18,11 @@ function wireSnapshot(): unknown {
         count.pageViews,
       ]),
     ),
-    daily: demoStatsSnapshot.daily,
+    daily: demoStatsSnapshot.daily.map((count, index) =>
+      index === 0 ? { ...count, browserBucketMetadata: "ignored" } : count
+    ),
     storageState: demoStatsSnapshot.storageState,
+    browserExtension: "ignored",
   };
 }
 
@@ -33,7 +36,7 @@ function contentId(value: string): ContentId {
   return validation.value;
 }
 
-test("validates exact consecutive statistics snapshots", () => {
+test("validates consecutive statistics snapshots with additive fields", () => {
   const valid = validateStatsSnapshot(wireSnapshot());
   assert.equal(valid.kind, "valid");
 

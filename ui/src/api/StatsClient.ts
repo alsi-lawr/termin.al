@@ -77,18 +77,7 @@ function isObject(value: unknown): value is object {
 }
 
 function property(value: object, name: string): unknown {
-  return Reflect.get(value, name);
-}
-
-function hasExactProperties(
-  value: object,
-  expected: ReadonlyArray<string>,
-): boolean {
-  const actual = Object.keys(value).sort();
-  const sortedExpected = [...expected].sort();
-
-  return actual.length === sortedExpected.length &&
-    actual.every((name, index) => name === sortedExpected[index]);
+  return Object.hasOwn(value, name) ? Reflect.get(value, name) : undefined;
 }
 
 function validateNonNegativeInteger(value: unknown): StatsValidation<number> {
@@ -103,10 +92,7 @@ function validateDailyCount(
   value: unknown,
   index: number,
 ): StatsValidation<StatsDailyCount> {
-  if (
-    !isObject(value) ||
-    !hasExactProperties(value, ["date", "sessions", "pageViews"])
-  ) {
+  if (!isObject(value)) {
     return { kind: "invalid", message: `daily[${index}] must be an object.` };
   }
 
@@ -192,16 +178,7 @@ function validateContentCounts(
 export function validateStatsSnapshot(
   value: unknown,
 ): StatsValidation<StatsSnapshot> {
-  if (
-    !isObject(value) ||
-    !hasExactProperties(value, [
-      "totalSessions",
-      "totalPageViews",
-      "pageViewsByContent",
-      "daily",
-      "storageState",
-    ])
-  ) {
+  if (!isObject(value)) {
     return { kind: "invalid", message: "The statistics snapshot must be an object." };
   }
 
