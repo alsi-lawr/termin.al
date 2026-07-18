@@ -670,6 +670,7 @@ test("substitutes current lines and whole buffers through one undoable Vim edit"
     appendVimCommandInput(press(marked, ":"), String.raw`%s/cat/doggy/i`),
   );
   const undone = press(whole, "u");
+  const redone = pressControl(undone, "r");
 
   assert.equal(vimBufferText(current), "😀 cat cat\n<CAT cat|CAT|&#\nlast");
   assert.deepEqual(current.cursor, { line: 1, column: 0 });
@@ -678,6 +679,9 @@ test("substitutes current lines and whole buffers through one undoable Vim edit"
   assert.deepEqual(whole.marks, [{ name: "a", position: { line: 1, column: 6 } }]);
   assert.equal(whole.undoStack.length, 1);
   assert.equal(vimBufferText(undone), vimBufferText(start));
+  assert.equal(undone.mode.kind, "normal");
+  assert.equal(vimBufferText(redone), vimBufferText(whole));
+  assert.equal(redone.mode.kind, "normal");
   assert.equal(isVimBufferDirty(undone), false);
 });
 

@@ -2888,7 +2888,7 @@ function executeVimSubstitution(
 
   const next = createTextState(lines, firstChanged, VimMode.Normal, { kind: "none" });
   const committed = commitEdit(
-    buffer,
+    { ...buffer, mode: VimMode.Normal, selection: { kind: "none" } },
     next,
     buffer.register,
     lineEditIntervals(buffer, lines, startLine, endLine),
