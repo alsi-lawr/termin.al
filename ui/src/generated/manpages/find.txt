@@ -1,33 +1,50 @@
 FIND(1)                         termin.al Manual                         FIND(1)
 
 NAME
-     find - Find virtual paths by a simple wildcard name pattern.
+     find - Find bounded virtual paths with direct predicates.
 
 SYNOPSIS
-     find [path] [-name pattern]
+     find [path] [-name pattern] [-path pattern] [-type f|d]
+          [-maxdepth depth] [-mindepth depth]
 
 DESCRIPTION
-     Traverses  virtual  entry  names  beneath  a  starting directory and prints
-     matching canonical paths. The default path is the  current  pane  directory
-     and the default pattern is *.  Paths are resolved only inside the read-only
-     virtual corpus.
+     Traverses  entries  beneath a starting directory and prints canonical paths
+     that satisfy every predicate in command order. The default path is the cur‐
+     rent pane directory. With no predicates,  every  traversed  entry  matches.
+     Paths are resolved only inside the read-only virtual corpus.
 
 OPTIONS
      -name pattern
-            Match  each  entry's basename with the simple wildcards * and ?.  No
-            regular-expression syntax is interpreted. The option may appear  be‐
-            fore  or  after  the  single path operand; a later -name replaces an
-            earlier pattern.
+            Match  each  entry's basename with *, ?, [abc], and ascending ranges
+            such as [a-z].  * and ?  never cross  a  slash.  A  leading  dot  is
+            matched  only  when its pattern segment begins with a dot. Malformed
+            bracket constructs are literal; braces, extglob, recursive  **,  and
+            regular expressions are not interpreted.
+
+     -path pattern
+            Match  the  canonical  ~ -rooted absolute virtual path with the same
+            glob rules.
+
+     -type f|d
+            Match files, including locked files, or directories.
+
+     -maxdepth depth
+            Visit entries no deeper than depth.  The starting path has depth 0.
+
+     -mindepth depth
+            Exclude entries shallower than depth.  A value  of  1  excludes  the
+            starting path.
 
 OUTPUT
-     The starting directory is included when its own basename  matches.  Descen‐
-     dants  follow  deterministic  virtual-filesystem  traversal order. No match
-     produces no text output.
+     The starting directory is included at depth 0 when it satisfies every pred‐
+     icate. Descendants follow deterministic virtual-filesystem traversal order.
+     No match produces no text output.
 
 FAILURES
-     Unsupported options, a missing pattern, more  than  one  path,  invalid  or
-     missing  paths,  files  used as the starting path, and locked paths are re‐
-     jected.
+     Unsupported  options,  missing  predicate  values, invalid types or depths,
+     more than one path, invalid or missing paths, files used  as  the  starting
+     path,  and locked starting paths are rejected. Depths must be safe integers
+     from 0 through 8.
 
 LIMITS
      Traversal has a maximum depth of 8 and stops at  the  application's  recur‐
@@ -41,8 +58,8 @@ NOTES
 
 EXAMPLES
      $ find -name '*.md'
-     $ find projects -name '*project*'
-     $ find ~/notes -name 'sample-????.md'
+     $ find projects -type f -maxdepth 2
+     $ find ~/notes -mindepth 1 -path '~/notes/*.md'
 
 SEE ALSO
      tree(1), ls(1), grep(1)

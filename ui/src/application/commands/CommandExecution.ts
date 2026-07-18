@@ -1,11 +1,15 @@
 import {
   lexArguments,
+  createArgumentIndex,
   type ArgumentLexerToken,
   type LexedArgument,
   type OptionTerminator,
   type ShellSyntaxError,
 } from "../../domain/terminal/ArgumentLexer.ts";
-import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
+import {
+  expandVirtualPathGlob,
+  type VirtualDirectoryPath,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createShellDiagnosticId,
   createShellOutputId,
@@ -52,6 +56,11 @@ type CommandLineParseResult =
       kind: "error";
       error: ShellSyntaxError;
     }>;
+
+type ExpandedCommandArguments = Readonly<{
+  arguments: ReadonlyArray<string>;
+  optionTerminator: OptionTerminator;
+}>;
 
 function cancelledOutcome(): CommandOutcome {
   return {
@@ -405,6 +414,37 @@ function reachesInteractionBoundary(outcome: CommandOutcome): boolean {
   );
 }
 
+function expandCommandArguments(
+  command: ParsedCommand,
+  currentDirectory: VirtualDirectoryPath,
+  options: ExecuteCommandLineOptions,
+): ExpandedCommandArguments {
+  const expansions = command.arguments.map((argument) => {
+    const matches = expandVirtualPathGlob({
+      filesystem: options.registry.filesystem,
+      currentDirectory,
+      value: argument.value,
+      protectedMetacharacterOffsets: argument.protectedGlobMetacharacterOffsets,
+    });
+
+    return matches.length === 0 ? [argument.value] : matches;
+  });
+  const expandedArguments = expansions.flat();
+
+  const optionTerminator = command.optionTerminator.kind === "absent"
+    ? command.optionTerminator
+    : {
+        ...command.optionTerminator,
+        argumentIndex: createArgumentIndex(
+          expansions
+            .slice(0, command.optionTerminator.argumentIndex)
+            .flat().length,
+        ),
+      };
+
+  return { arguments: expandedArguments, optionTerminator };
+}
+
 async function executeCommand(
   command: ParsedCommand,
   definition: CommandDefinition,
@@ -412,13 +452,15 @@ async function executeCommand(
   currentDirectory: VirtualDirectoryPath,
   options: ExecuteCommandLineOptions,
 ): Promise<CommandOutcome> {
+  const expanded = expandCommandArguments(command, currentDirectory, options);
+
   try {
     return await definition.execute(
       {
         source: options.request.source,
         name: definition.metadata.name,
-        arguments: command.arguments.map((argument) => argument.value),
-        optionTerminator: command.optionTerminator,
+        arguments: expanded.arguments,
+        optionTerminator: expanded.optionTerminator,
         stdin,
       },
       {

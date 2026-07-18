@@ -102,13 +102,13 @@
     {
       "name": "find",
       "section": 1,
-      "usage": "find [path] [-name pattern]",
-      "summary": "Find virtual paths by a simple wildcard name pattern.",
+      "usage": "find [path] [-name pattern] [-path pattern] [-type f|d] [-maxdepth depth] [-mindepth depth]",
+      "summary": "Find bounded virtual paths with direct predicates.",
       "sourcePath": "man/find.1",
       "artifactPath": "ui/src/generated/manpages/find.txt",
-      "byteCount": 1826,
-      "lineCount": 50,
-      "sha256": "e90607b4440bdc56b5ccf553f41a54fc3931a16cbcd1d13b2fde5c41d5ef85c1"
+      "byteCount": 2595,
+      "lineCount": 67,
+      "sha256": "f6f628ca1d053459bdc28eb795ffaaa8c986f34c38e2299147ee0e078fecf9fc"
     },
     {
       "name": "grep",

@@ -58,6 +58,7 @@ function createRegistry(
   documents: VirtualDocumentSupplier = demoContentCorpus.documents,
 ): CommandRegistry {
   return createCommandRegistry({
+    filesystem: demoContentCorpus.filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents,
@@ -117,6 +118,7 @@ function createGrepFixture(
     },
   };
   const registry = createCommandRegistry({
+    filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -574,6 +576,7 @@ test("uses one canonical artifact for default less, explicit less, vi, and alias
     recursiveEntryLimit: 100,
   });
   const registry = createCommandRegistry({
+    filesystem: demoContentCorpus.filesystem,
     commands: definitions.map((command) =>
       command.metadata.name === "ls"
         ? {
@@ -632,6 +635,7 @@ test("reports stable diagnostics for malformed and unavailable manual requests",
   }
 
   const noManuals = createCommandRegistry({
+    filesystem: demoContentCorpus.filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents: demoContentCorpus.documents,
@@ -699,6 +703,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
     ],
   });
   const registry = createCommandRegistry({
+    filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -714,6 +719,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   const allTree = outputText(await execute("tree -a", registry));
   const lsAllTree = outputText(await execute("ls -a --tree", registry));
   const boundedRegistry = createCommandRegistry({
+    filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -772,6 +778,71 @@ test("marks bounded find results", async () => {
   assert.match(findText.text, /about\.md/u);
   assert.equal(truncation.diagnostic.code, "runtime.truncated");
   assert.equal(shallowTree, "~");
+});
+
+test("expands virtual globs and combines bounded find predicates", async () => {
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("alpha", "~/alpha.md", "alpha"),
+      grepFileEntry("beta", "~/beta.md", "beta"),
+      grepFileEntry("hidden", "~/.hidden.md", "hidden"),
+      grepFileEntry("mixed", "~/pre*x.md", "mixed"),
+      grepDirectoryEntry("docs", "~/docs"),
+      grepFileEntry("a", "~/docs/a.md", "a"),
+      grepFileEntry("b", "~/docs/b.md", "b"),
+      grepFileEntry("text", "~/docs/c.txt", "text"),
+      grepDirectoryEntry("nested", "~/docs/nested"),
+      grepFileEntry("deep", "~/docs/nested/deep.md", "deep"),
+    ],
+    [
+      { handle: "a", path: "~/docs/a.md", text: "hit a" },
+      { handle: "b", path: "~/docs/b.md", text: "hit b" },
+    ],
+  );
+
+  assert.equal(
+    outputText(await execute("echo *.md", fixture.registry)),
+    "~/alpha.md ~/beta.md ~/pre*x.md",
+  );
+  assert.equal(outputText(await execute("echo .*.md", fixture.registry)), "~/.hidden.md");
+  assert.equal(
+    outputText(await execute("echo docs/[a-b].md docs/?.md", fixture.registry)),
+    "~/docs/a.md ~/docs/b.md ~/docs/a.md ~/docs/b.md",
+  );
+  assert.equal(outputText(await execute("echo '*.md' \\*.md", fixture.registry)), "*.md *.md");
+  assert.equal(outputText(await execute("echo pre'*'?.md", fixture.registry)), "~/pre*x.md");
+  assert.equal(
+    outputText(await execute("echo absent*.md '[abc'", fixture.registry)),
+    "absent*.md [abc",
+  );
+  assert.equal(outputText(await execute("cat docs/?.md | grep hit", fixture.registry)), "hit a\nhit b");
+  assert.equal((await execute("e*", fixture.registry)).kind, "failed");
+
+  assert.equal(outputText(await execute("find docs -maxdepth 0", fixture.registry)), "~/docs");
+  assert.equal(
+    outputText(await execute(
+      "find docs -mindepth 1 -type f -path '~/docs/[a-b].md' -name '?.md' -maxdepth 1",
+      fixture.registry,
+    )),
+    "~/docs/a.md\n~/docs/b.md",
+  );
+  assert.equal(
+    outputText(await execute("find docs -mindepth 1 -maxdepth 1 -type d", fixture.registry)),
+    "~/docs/nested",
+  );
+  assert.deepEqual(
+    await Promise.all(["-1", "9", "1.5", "9007199254740992"].map(async (depth) =>
+      failureMessage(await execute(`find -maxdepth ${depth}`, fixture.registry))
+    )),
+    Array.from({ length: 4 }, () => "-maxdepth requires a depth from 0 to 8."),
+  );
+
+  const controller = new AbortController();
+  controller.abort();
+  assert.equal(
+    (await executeWithSignal("find docs -mindepth 1", fixture.registry, controller.signal)).kind,
+    "cancelled",
+  );
 });
 
 test("uses native regex syntax, Unicode and ignore-case behavior, and fixed literals", async () => {
@@ -969,6 +1040,7 @@ test("cancellation discards accumulated grep output", async () => {
     },
   };
   const registry = createCommandRegistry({
+    filesystem,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,

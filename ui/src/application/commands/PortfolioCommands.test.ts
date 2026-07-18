@@ -101,6 +101,7 @@ function createRegistry(
   readStats: PortfolioStatsReader = () => "STATISTICS\nSTATUS       UNAVAILABLE",
 ): CommandRegistry {
   return createCommandRegistry({
+    filesystem,
     commands: [
       ...createReadOnlyCommandDefinitions({
         filesystem,

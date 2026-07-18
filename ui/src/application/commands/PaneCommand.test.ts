@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   applyPaneOperation,
   createPaneId,
@@ -55,7 +56,10 @@ test("executes parsed pane operations through the existing command registry cont
     received = operation;
     return applyPaneOperation(workspace, operation);
   });
-  const registry = createCommandRegistry({ commands: [command] });
+  const registry = createCommandRegistry({
+    commands: [command],
+    filesystem: demoContentCorpus.filesystem,
+  });
   const outcome = await command.execute(
     {
       source: "pane split horizontal viewer",

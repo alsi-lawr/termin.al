@@ -14,6 +14,7 @@ export type ShellOperator = ";" | "&&" | "||" | "|" | "&";
 export type LexedArgument = Readonly<{
   kind: "argument";
   value: string;
+  protectedGlobMetacharacterOffsets: ReadonlyArray<number>;
   sourceStart: SourceOffset;
   sourceEnd: SourceOffset;
 }>;
@@ -107,7 +108,7 @@ function createSourceOffset(value: number, source: string): SourceOffset {
   return value as SourceOffset;
 }
 
-function createArgumentIndex(value: number): ArgumentIndex {
+export function createArgumentIndex(value: number): ArgumentIndex {
   if (!Number.isSafeInteger(value) || value < 0) {
     throw new Error("Argument indexes must be non-negative integers.");
   }
@@ -145,6 +146,16 @@ function shellOperatorAt(
   return undefined;
 }
 
+function protectGlobMetacharacter(
+  value: string,
+  protectedGlobMetacharacterOffsets: number[],
+  character: string,
+): void {
+  if ("*?[]-".includes(character)) {
+    protectedGlobMetacharacterOffsets.push(value.length);
+  }
+}
+
 export function lexArguments(source: string): ArgumentLexerResult {
   const tokens: ArgumentLexerToken[] = [];
   let mode: LexerMode = unquotedMode;
@@ -152,6 +163,7 @@ export function lexArguments(source: string): ArgumentLexerResult {
   let argumentStart = 0;
   let argumentOpen = false;
   let argumentUsesSyntax = false;
+  let protectedGlobMetacharacterOffsets: number[] = [];
   let argumentIndex = 0;
   let optionTerminatorSeen = false;
 
@@ -183,13 +195,20 @@ export function lexArguments(source: string): ArgumentLexerResult {
       });
       optionTerminatorSeen = true;
     } else {
-      tokens.push({ kind: "argument", value, sourceStart, sourceEnd });
+      tokens.push({
+        kind: "argument",
+        value,
+        protectedGlobMetacharacterOffsets,
+        sourceStart,
+        sourceEnd,
+      });
       argumentIndex += 1;
     }
 
     value = "";
     argumentOpen = false;
     argumentUsesSyntax = false;
+    protectedGlobMetacharacterOffsets = [];
   };
 
   const appendOperator = (operator: ShellOperator, position: number): void => {
@@ -210,6 +229,7 @@ export function lexArguments(source: string): ArgumentLexerResult {
       if (character === "'") {
         mode = unquotedMode;
       } else {
+        protectGlobMetacharacter(value, protectedGlobMetacharacterOffsets, character);
         value += character;
       }
 
@@ -235,10 +255,16 @@ export function lexArguments(source: string): ArgumentLexerResult {
 
         argumentUsesSyntax = true;
         position += 1;
+        protectGlobMetacharacter(
+          value,
+          protectedGlobMetacharacterOffsets,
+          source[position] ?? "",
+        );
         value += source[position];
         continue;
       }
 
+      protectGlobMetacharacter(value, protectedGlobMetacharacterOffsets, character);
       value += character;
       continue;
     }
@@ -295,6 +321,11 @@ export function lexArguments(source: string): ArgumentLexerResult {
 
       argumentUsesSyntax = true;
       position += 1;
+      protectGlobMetacharacter(
+        value,
+        protectedGlobMetacharacterOffsets,
+        source[position] ?? "",
+      );
       value += source[position];
       continue;
     }

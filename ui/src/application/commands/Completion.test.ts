@@ -23,6 +23,7 @@ import { createCommandRegistry } from "./CommandRegistry.ts";
 
 test("completes registry command names and aliases", async () => {
   const registry = createCommandRegistry({
+    filesystem: demoContentCorpus.filesystem,
     commands: [
       {
         metadata: {

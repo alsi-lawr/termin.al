@@ -1,5 +1,6 @@
 import {
   listVirtualDirectory,
+  matchesVirtualPathGlob,
   resolveVirtualDirectory,
   resolveVirtualPath,
   traverseVirtualDirectory,
@@ -10,6 +11,7 @@ import {
   type VirtualNode,
   type VirtualPathFailure,
   type VirtualTraversalResult,
+  type VirtualTraversalEntry,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
 import type { ManpageCorpus } from "../../content/ManpageCorpus.ts";
@@ -73,9 +75,18 @@ type TreeExecutionOptions = Readonly<{
 }>;
 
 type FindOptions = Readonly<{
-  pattern: string;
   path: string;
+  predicates: ReadonlyArray<FindPredicate>;
 }>;
+
+type FindPredicate =
+  | Readonly<{ kind: "name"; pattern: string }>
+  | Readonly<{ kind: "path"; pattern: string }>
+  | Readonly<{ kind: "type"; nodeKind: "directory" | "file" }>
+  | Readonly<{ kind: "maximum-depth"; depth: number }>
+  | Readonly<{ kind: "minimum-depth"; depth: number }>;
+
+type FindPredicateOption = "-name" | "-path" | "-type" | "-maxdepth" | "-mindepth";
 
 type GrepOptions = Readonly<{
   caseSensitivity: "sensitive" | "insensitive";
@@ -413,12 +424,51 @@ function parseTreeOptions(
   };
 }
 
+function parseFindPredicate(
+  option: FindPredicateOption,
+  value: string,
+): OptionParseResult<FindPredicate> {
+  if (option === "-name" || option === "-path") {
+    return {
+      kind: "parsed",
+      value: { kind: option === "-name" ? "name" : "path", pattern: value },
+    };
+  }
+
+  if (option === "-type") {
+    return value === "f" || value === "d"
+      ? {
+          kind: "parsed",
+          value: {
+            kind: "type",
+            nodeKind: value === "d" ? "directory" : "file",
+          },
+        }
+      : { kind: "invalid", message: "-type requires f or d." };
+  }
+
+  const depth = parseMaximumDepth(value);
+
+  return depth === undefined
+    ? {
+        kind: "invalid",
+        message: `${option} requires a depth from 0 to ${maximumRecursiveDepth}.`,
+      }
+    : {
+        kind: "parsed",
+        value: {
+          kind: option === "-maxdepth" ? "maximum-depth" : "minimum-depth",
+          depth,
+        },
+      };
+}
+
 function parseFindOptions(
   invocation: CommandInvocation,
 ): OptionParseResult<FindOptions> {
   const boundary = optionBoundary(invocation);
-  let pattern = "*";
   const operands: string[] = [];
+  const predicates: FindPredicate[] = [];
 
   for (let index = 0; index < invocation.arguments.length; index += 1) {
     const value = invocation.arguments[index];
@@ -432,25 +482,38 @@ function parseFindOptions(
       continue;
     }
 
-    if (value !== "-name") {
+    if (value !== "-name" && value !== "-path" && value !== "-type" &&
+      value !== "-maxdepth" && value !== "-mindepth") {
       return { kind: "invalid", message: `Unsupported option: ${value}.` };
     }
 
     const next = invocation.arguments[index + 1];
 
     if (next === undefined) {
-      return { kind: "invalid", message: "-name requires a pattern." };
+      return { kind: "invalid", message: `${value} requires a value.` };
     }
 
-    pattern = next;
+    const predicate = parseFindPredicate(value, next);
+
+    if (predicate.kind === "invalid") {
+      return predicate;
+    }
+
+    predicates.push(predicate.value);
     index += 1;
   }
 
   if (operands.length > 1) {
-    return { kind: "invalid", message: "Usage: find [path] [-name pattern]" };
+    return {
+      kind: "invalid",
+      message: "Usage: find [path] [-name pattern] [-path pattern] [-type f|d] [-maxdepth depth] [-mindepth depth]",
+    };
   }
 
-  return { kind: "parsed", value: { pattern, path: operands[0] ?? "." } };
+  return {
+    kind: "parsed",
+    value: { path: operands[0] ?? ".", predicates },
+  };
 }
 
 function parseGrepOptions(
@@ -773,44 +836,6 @@ async function readFile(
     text: document.document.text,
     sourcePath: document.document.source.path,
   };
-}
-
-function wildcardMatches(pattern: string, value: string): boolean {
-  let patternIndex = 0;
-  let valueIndex = 0;
-  let starIndex = -1;
-  let matchedAfterStar = 0;
-
-  while (valueIndex < value.length) {
-    const patternCharacter = pattern[patternIndex];
-
-    if (patternCharacter === "?" || patternCharacter === value[valueIndex]) {
-      patternIndex += 1;
-      valueIndex += 1;
-      continue;
-    }
-
-    if (patternCharacter === "*") {
-      starIndex = patternIndex;
-      patternIndex += 1;
-      matchedAfterStar = valueIndex;
-      continue;
-    }
-
-    if (starIndex === -1) {
-      return false;
-    }
-
-    patternIndex = starIndex + 1;
-    matchedAfterStar += 1;
-    valueIndex = matchedAfterStar;
-  }
-
-  while (pattern[patternIndex] === "*") {
-    patternIndex += 1;
-  }
-
-  return patternIndex === pattern.length;
 }
 
 function treeLines(
@@ -1229,9 +1254,9 @@ function createFindCommand(
       group: "gnu-like",
       name: "find",
       aliases: [],
-      summary: "Find virtual paths by a simple wildcard name pattern.",
-      usage: "find [path] [-name pattern]",
-      examples: ["find -name '*.md'", "find projects -name '*project*'"],
+      summary: "Find bounded virtual paths with direct predicates.",
+      usage: "find [path] [-name pattern] [-path pattern] [-type f|d] [-maxdepth depth] [-mindepth depth]",
+      examples: ["find -name '*.md'", "find projects -type f -maxdepth 2"],
     },
     pipeline: "text",
     execute: async (invocation, context) => {
@@ -1251,11 +1276,17 @@ function createFindCommand(
         return failureOutcome("find", resolution);
       }
 
+      const maximumDepth = parsed.value.predicates
+        .filter((predicate) => predicate.kind === "maximum-depth")
+        .reduce(
+          (depth, predicate) => Math.min(depth, predicate.depth),
+          maximumRecursiveDepth,
+        );
       const traversal = traverseVirtualDirectory({
         filesystem,
         directory: resolution.directory,
         limit: recursiveEntryLimit,
-        maximumDepth: maximumRecursiveDepth,
+        maximumDepth,
         signal: context.signal,
       });
 
@@ -1263,14 +1294,34 @@ function createFindCommand(
         return cancelledOutcome();
       }
 
-      const matches = [
-        ...(wildcardMatches(parsed.value.pattern, resolution.directory.name)
-          ? [resolution.directory.path]
-          : []),
-        ...traversal.entries
-          .filter((entry) => wildcardMatches(parsed.value.pattern, entry.node.name))
-          .map((entry) => entry.node.path),
-      ];
+      const startingEntry: VirtualTraversalEntry = {
+        node: resolution.directory,
+        depth: 0,
+      };
+      const matches = [startingEntry, ...traversal.entries]
+        .filter((entry) => parsed.value.predicates.every((predicate) => {
+          switch (predicate.kind) {
+            case "name":
+              return matchesVirtualPathGlob(
+                predicate.pattern,
+                entry.node.name,
+              );
+            case "path":
+              return matchesVirtualPathGlob(
+                predicate.pattern,
+                entry.node.path,
+              );
+            case "type":
+              return predicate.nodeKind === "directory"
+                ? entry.node.kind === "directory"
+                : entry.node.kind !== "directory";
+            case "maximum-depth":
+              return entry.depth <= predicate.depth;
+            case "minimum-depth":
+              return entry.depth >= predicate.depth;
+          }
+        }))
+        .map((entry) => entry.node.path);
       const outputs: ShellOutput[] =
         matches.length === 0 ? [] : [textOutput("find-output", matches.join("\n"))];
 

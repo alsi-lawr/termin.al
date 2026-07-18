@@ -182,6 +182,13 @@ export type VirtualTraversalOptions = Readonly<{
   signal: AbortSignal;
 }>;
 
+export type ExpandVirtualPathGlobOptions = Readonly<{
+  filesystem: VirtualFilesystem;
+  currentDirectory: VirtualDirectoryPath;
+  value: string;
+  protectedMetacharacterOffsets: ReadonlyArray<number>;
+}>;
+
 export type VirtualDocumentClassification =
   | Readonly<{ kind: "page" }>
   | Readonly<{
@@ -350,6 +357,227 @@ function failureFromNormalization(
 
 function pathForSegments(segments: ReadonlyArray<string>): VirtualAbsolutePath {
   return createCanonicalPath(segments);
+}
+
+const protectedGlobMarker = "\uFDD0";
+
+type BracketClass = Readonly<{ endOffset: number; matches: boolean }>;
+
+function globValueAt(pattern: string, offset: number): string | undefined {
+  return pattern[offset] === protectedGlobMarker
+    ? pattern[offset + 1]
+    : pattern[offset];
+}
+
+function nextGlobOffset(pattern: string, offset: number): number {
+  return offset + (pattern[offset] === protectedGlobMarker ? 2 : 1);
+}
+
+function protectedVirtualPathGlob(
+  value: string,
+  protectedMetacharacterOffsets: ReadonlyArray<number>,
+): string {
+  let pattern = "";
+
+  for (let offset = 0; offset < value.length; offset += 1) {
+    pattern += protectedMetacharacterOffsets.includes(offset) ||
+      value[offset] === protectedGlobMarker
+      ? protectedGlobMarker + value[offset]
+      : value[offset];
+  }
+
+  return pattern;
+}
+
+function bracketClassAt(
+  pattern: string,
+  openingOffset: number,
+  value: string,
+): BracketClass | undefined {
+  let memberOffset = nextGlobOffset(pattern, openingOffset);
+  let matches = false;
+  let members = 0;
+
+  while (memberOffset < pattern.length) {
+    const member = globValueAt(pattern, memberOffset) ?? "";
+    const memberActive = pattern[memberOffset] !== protectedGlobMarker;
+
+    if (member === "/" || memberActive && member === "[") {
+      return undefined;
+    }
+
+    if (memberActive && member === "]") {
+      return members === 0
+        ? undefined
+        : { endOffset: nextGlobOffset(pattern, memberOffset), matches };
+    }
+
+    const markerOffset = nextGlobOffset(pattern, memberOffset);
+    const rangeMarker = globValueAt(pattern, markerOffset);
+    const rangeOffset = nextGlobOffset(pattern, markerOffset);
+    const rangeEnd = rangeMarker === "-" &&
+      pattern[markerOffset] !== protectedGlobMarker
+      ? globValueAt(pattern, rangeOffset)
+      : undefined;
+
+    if (rangeEnd !== undefined && rangeEnd !== "]" && rangeEnd !== "/") {
+      if (member > rangeEnd) {
+        return undefined;
+      }
+
+      matches = matches || member <= value && value <= rangeEnd;
+      memberOffset = nextGlobOffset(pattern, rangeOffset);
+    } else {
+      if (memberActive && member === "-") {
+        return undefined;
+      }
+
+      matches = matches || member === value;
+      memberOffset = markerOffset;
+    }
+
+    members += 1;
+  }
+
+  return undefined;
+}
+
+function matchingGlobOffset(
+  pattern: string,
+  patternOffset: number,
+  value: string,
+): number | undefined {
+  const character = globValueAt(pattern, patternOffset);
+  const syntaxActive = pattern[patternOffset] !== protectedGlobMarker;
+  const nextOffset = nextGlobOffset(pattern, patternOffset);
+
+  if (syntaxActive && character === "?") {
+    return nextOffset;
+  }
+
+  if (syntaxActive && character === "[") {
+    const bracket = bracketClassAt(pattern, patternOffset, value);
+
+    if (bracket !== undefined) {
+      return bracket.matches ? bracket.endOffset : undefined;
+    }
+  }
+
+  return character === value ? nextOffset : undefined;
+}
+
+function matchesVirtualPathSegment(pattern: string, value: string): boolean {
+  if (value.startsWith(".") && pattern[0] !== ".") {
+    return false;
+  }
+
+  let patternOffset = 0;
+  let valueOffset = 0;
+  let starPatternOffset = -1;
+  let starValueOffset = -1;
+
+  while (valueOffset < value.length) {
+    const character = globValueAt(pattern, patternOffset);
+    const syntaxActive = pattern[patternOffset] !== protectedGlobMarker;
+    const nextOffset = nextGlobOffset(pattern, patternOffset);
+
+    if (syntaxActive && character === "*") {
+      starPatternOffset = nextOffset;
+      starValueOffset = valueOffset;
+      patternOffset = nextOffset;
+      continue;
+    }
+
+    const matchedOffset = matchingGlobOffset(
+      pattern,
+      patternOffset,
+      value[valueOffset] ?? "",
+    );
+
+    if (matchedOffset !== undefined) {
+      patternOffset = matchedOffset;
+      valueOffset += 1;
+      continue;
+    }
+
+    if (starPatternOffset < 0) {
+      return false;
+    }
+
+    starValueOffset += 1;
+    valueOffset = starValueOffset;
+    patternOffset = starPatternOffset;
+  }
+
+  let remaining = globValueAt(pattern, patternOffset);
+
+  while (pattern[patternOffset] !== protectedGlobMarker && remaining === "*") {
+    patternOffset = nextGlobOffset(pattern, patternOffset);
+    remaining = globValueAt(pattern, patternOffset);
+  }
+
+  return remaining === undefined;
+}
+
+function matchesProtectedVirtualPathGlob(
+  pattern: string,
+  value: string,
+): boolean {
+  const patterns = pattern.split("/");
+  const segments = value.split("/");
+
+  return patterns.length === segments.length && patterns.every(
+    (pattern, index) => matchesVirtualPathSegment(pattern, segments[index] ?? ""),
+  );
+}
+
+export function matchesVirtualPathGlob(pattern: string, value: string): boolean {
+  return matchesProtectedVirtualPathGlob(
+    protectedVirtualPathGlob(pattern, []),
+    value,
+  );
+}
+
+function hasActiveGlobMetacharacter(pattern: string): boolean {
+  for (let offset = 0; offset < pattern.length;) {
+    const character = globValueAt(pattern, offset);
+
+    if (character === undefined) {
+      return false;
+    }
+
+    if (pattern[offset] !== protectedGlobMarker && "*?[".includes(character)) {
+      return true;
+    }
+
+    offset = nextGlobOffset(pattern, offset);
+  }
+
+  return false;
+}
+
+export function expandVirtualPathGlob({
+  filesystem,
+  currentDirectory,
+  value,
+  protectedMetacharacterOffsets,
+}: ExpandVirtualPathGlobOptions): ReadonlyArray<VirtualAbsolutePath> {
+  const pattern = protectedVirtualPathGlob(value, protectedMetacharacterOffsets);
+
+  if (!hasActiveGlobMetacharacter(pattern)) {
+    return [];
+  }
+
+  const normalized = normalizeVirtualPath(currentDirectory, pattern);
+
+  if (normalized.kind === "invalid-path") {
+    return [];
+  }
+
+  return [...filesystem.nodesByPath.values()]
+    .filter((node) => matchesProtectedVirtualPathGlob(normalized.path, node.path))
+    .map((node) => node.path)
+    .sort();
 }
 
 export function createVirtualNodeId(value: string): VirtualNodeId {

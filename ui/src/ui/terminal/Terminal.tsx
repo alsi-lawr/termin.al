@@ -125,6 +125,7 @@ export function Terminal({
   );
   const [registry] = useState(() =>
     createCommandRegistry({
+      filesystem,
       commands: [
         ...createReadOnlyCommandDefinitions({
           filesystem,

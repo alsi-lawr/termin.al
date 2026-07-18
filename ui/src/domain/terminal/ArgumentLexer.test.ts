@@ -36,15 +36,15 @@ test("recognises an unescaped unquoted option terminator", () => {
   const result = successfulLex("find -- -hidden --literal");
 
   assert.deepEqual(result.tokens, [
-    { kind: "argument", value: "find", sourceStart: 0, sourceEnd: 4 },
+    { kind: "argument", value: "find", protectedGlobMetacharacterOffsets: [], sourceStart: 0, sourceEnd: 4 },
     {
       kind: "option-terminator",
       argumentIndex: 1,
       sourceStart: 5,
       sourceEnd: 7,
     },
-    { kind: "argument", value: "-hidden", sourceStart: 8, sourceEnd: 15 },
-    { kind: "argument", value: "--literal", sourceStart: 16, sourceEnd: 25 },
+    { kind: "argument", value: "-hidden", protectedGlobMetacharacterOffsets: [], sourceStart: 8, sourceEnd: 15 },
+    { kind: "argument", value: "--literal", protectedGlobMetacharacterOffsets: [], sourceStart: 16, sourceEnd: 25 },
   ]);
 });
 

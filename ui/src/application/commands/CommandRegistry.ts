@@ -5,7 +5,10 @@ import type {
   ShellId,
   ShellSessionId,
 } from "../../domain/terminal/Shell.ts";
-import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
+import type {
+  VirtualDirectoryPath,
+  VirtualFilesystem,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 
 export type CommandGroup = "gnu-like" | "application" | "navigation";
 
@@ -50,6 +53,7 @@ export type CommandDefinition = Readonly<{
 
 export type CommandRegistry = Readonly<{
   commands: ReadonlyArray<CommandDefinition>;
+  filesystem: VirtualFilesystem;
 }>;
 
 export type CommandResolution =
@@ -64,6 +68,7 @@ export type CommandResolution =
 
 export type CreateCommandRegistryOptions = Readonly<{
   commands: ReadonlyArray<CommandDefinition>;
+  filesystem: VirtualFilesystem;
 }>;
 
 function assertCommandName(name: string): void {
@@ -74,6 +79,7 @@ function assertCommandName(name: string): void {
 
 export function createCommandRegistry({
   commands,
+  filesystem,
 }: CreateCommandRegistryOptions): CommandRegistry {
   const registeredNames = new Set<string>();
 
@@ -91,7 +97,7 @@ export function createCommandRegistry({
     }
   }
 
-  return { commands: [...commands] };
+  return { commands: [...commands], filesystem };
 }
 
 export function resolveCommand(

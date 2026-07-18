@@ -1,34 +1,56 @@
 .\" termin.al-name: find
-.\" termin.al-usage: find [path] [-name pattern]
-.\" termin.al-summary: Find virtual paths by a simple wildcard name pattern.
+.\" termin.al-usage: find [path] [-name pattern] [-path pattern] [-type f|d] [-maxdepth depth] [-mindepth depth]
+.\" termin.al-summary: Find bounded virtual paths with direct predicates.
 .TH FIND 1 "" "termin.al" "termin.al Manual"
 .ftr B R
 .ftr I R
 .ftr BI R
 .SH NAME
-find \- Find virtual paths by a simple wildcard name pattern.
+find \- Find bounded virtual paths with direct predicates.
 .SH SYNOPSIS
 .nf
-find [path] [-name pattern]
+find [path] [-name pattern] [-path pattern] [-type f|d]
+     [-maxdepth depth] [-mindepth depth]
 .fi
 .SH DESCRIPTION
-Traverses virtual entry names beneath a starting directory and prints matching canonical paths. The default path is the current pane directory and the default pattern is
-.BR * .
-Paths are resolved only inside the read-only virtual corpus.
+Traverses entries beneath a starting directory and prints canonical paths that satisfy every predicate in command order. The default path is the current pane directory. With no predicates, every traversed entry matches. Paths are resolved only inside the read-only virtual corpus.
 .SH OPTIONS
 .TP
 .B -name pattern
-Match each entry's basename with the simple wildcards
+Match each entry's basename with
+.BR * ,
+.BR ? ,
+.BR [abc] ,
+and ascending ranges such as
+.BR [a-z] .
 .B *
 and
-.BR ? .
-No regular-expression syntax is interpreted. The option may appear before or after the single path operand; a later
-.B -name
-replaces an earlier pattern.
+.B ?
+never cross a slash. A leading dot is matched only when its pattern segment begins with a dot. Malformed bracket constructs are literal; braces, extglob, recursive
+.BR ** ,
+and regular expressions are not interpreted.
+.TP
+.B -path pattern
+Match the canonical
+.B ~
+-rooted absolute virtual path with the same glob rules.
+.TP
+.B -type f|d
+Match files, including locked files, or directories.
+.TP
+.B -maxdepth depth
+Visit entries no deeper than
+.IR depth .
+The starting path has depth 0.
+.TP
+.B -mindepth depth
+Exclude entries shallower than
+.IR depth .
+A value of 1 excludes the starting path.
 .SH OUTPUT
-The starting directory is included when its own basename matches. Descendants follow deterministic virtual-filesystem traversal order. No match produces no text output.
+The starting directory is included at depth 0 when it satisfies every predicate. Descendants follow deterministic virtual-filesystem traversal order. No match produces no text output.
 .SH FAILURES
-Unsupported options, a missing pattern, more than one path, invalid or missing paths, files used as the starting path, and locked paths are rejected.
+Unsupported options, missing predicate values, invalid types or depths, more than one path, invalid or missing paths, files used as the starting path, and locked starting paths are rejected. Depths must be safe integers from 0 through 8.
 .SH LIMITS
 Traversal has a maximum depth of 8 and stops at the application's recursive-entry limit, currently 100 in the browser demo. Truncation keeps the matches already found and adds a
 .B runtime.truncated
@@ -38,8 +60,8 @@ Cancellation discards the command outcome. Locked descendants may be listed by p
 .SH EXAMPLES
 .nf
 $ find -name '*.md'
-$ find projects -name '*project*'
-$ find ~/notes -name 'sample-????.md'
+$ find projects -type f -maxdepth 2
+$ find ~/notes -mindepth 1 -path '~/notes/*.md'
 .fi
 .SH SEE ALSO
 tree(1), ls(1), grep(1)
