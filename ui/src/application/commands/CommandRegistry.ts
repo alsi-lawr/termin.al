@@ -45,7 +45,7 @@ export type CommandExecutionContext = Readonly<{
 
 export type CommandDefinition = Readonly<{
   metadata: CommandMetadata;
-  historyPersistence: CommandHistoryPersistence;
+  historyPersistence?: Extract<CommandHistoryPersistence, { kind: "memory-only" }>;
   pipeline: CommandPipelinePolicy;
   execute: (
     invocation: CommandInvocation,

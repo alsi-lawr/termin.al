@@ -343,7 +343,7 @@ export function commandHistoryPersistenceForSource(
 
       if (
         resolution.kind === "found" &&
-        resolution.command.historyPersistence.kind === "memory-only"
+        resolution.command.historyPersistence !== undefined
       ) {
         return resolution.command.historyPersistence;
       }

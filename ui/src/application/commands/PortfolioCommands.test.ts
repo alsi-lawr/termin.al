@@ -14,8 +14,6 @@ import {
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import { createPaneId } from "../../domain/workspace/PaneTree.ts";
 import {
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
   createShellId,
   createShellSessionId,
   createShellState,
@@ -140,12 +138,6 @@ function commandRequest(source: string): ShellCommandRequest {
     kind: "prompt.submit",
     submission: {
       kind: "command",
-      timestamp: createCommandHistoryTimestamp(
-        typed.nextCommandHistorySequence,
-      ),
-      tieBreaker: createCommandHistoryTieBreaker(
-        typed.nextCommandHistorySequence,
-      ),
       persistence: { kind: "persistent" },
     },
   });

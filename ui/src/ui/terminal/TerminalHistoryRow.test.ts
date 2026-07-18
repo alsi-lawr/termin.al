@@ -5,8 +5,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createServer } from "vite";
 import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
   createShellDiagnosticId,
   createShellId,
   createShellOutputId,
@@ -57,8 +55,6 @@ test("does not render secret-bearing execution errors from shell history", async
     kind: "prompt.submit",
     submission: {
       kind: "command",
-      timestamp: createCommandHistoryTimestamp(1),
-      tieBreaker: createCommandHistoryTieBreaker(1),
       persistence: { kind: "persistent" },
     },
   });

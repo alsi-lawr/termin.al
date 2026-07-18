@@ -5,8 +5,6 @@ import {
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
   createShellOutputId,
   type CommandLineOutcome,
   type CompletionCycleDirection,
@@ -274,10 +272,6 @@ export function useShellEngine({
       kind: "prompt.submit",
       submission: {
         kind: "command",
-        timestamp: createCommandHistoryTimestamp(Date.now()),
-        tieBreaker: createCommandHistoryTieBreaker(
-          state.nextCommandHistorySequence,
-        ),
         persistence: commandHistoryPersistenceForSource(
           registry,
           prompt.line.text,

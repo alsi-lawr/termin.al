@@ -18,10 +18,6 @@ import type {
   ShellState,
 } from "../../domain/terminal/Shell.ts";
 import {
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
-} from "../../domain/terminal/Shell.ts";
-import {
   applyPaneOperation,
   createPaneWorkspace,
   createShellPaneContent,
@@ -43,16 +39,9 @@ import {
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 import {
-  clearCommandHistory,
   commandHistoryFromStoredValue,
   commandHistoryStorageKey,
-  commandHistoryWithSubmission,
-  emptyCommandHistoryState,
-  mergeCommandHistory,
-  publishCommandHistory,
   readCommandHistory,
-  receiveCommandHistory,
-  reconcileCommandHistory,
   writeCommandHistory,
 } from "./CommandHistoryStorage.ts";
 
@@ -75,7 +64,6 @@ test("keeps collection commands in one shell history row and removes transient s
     commandHistory: [],
   });
   const withInput = insert(initial, paneId, "projects");
-  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
   const submitted = reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
@@ -83,8 +71,6 @@ test("keeps collection commands in one shell history row and removes transient s
       kind: "prompt.submit",
       submission: {
         kind: "command",
-        timestamp: createCommandHistoryTimestamp(sequence),
-        tieBreaker: createCommandHistoryTieBreaker(sequence),
         persistence: { kind: "persistent" },
       },
     },
@@ -153,8 +139,6 @@ test("hydrates new panes and projects one shared history into existing panes", (
   const hydratedEntry: CommandHistoryEntry = {
     source: "echo hydrated 😀",
     currentDirectory: virtualHomeDirectory(),
-    timestamp: createCommandHistoryTimestamp(1),
-    tieBreaker: createCommandHistoryTieBreaker(1),
     persistence: { kind: "persistent" },
   };
   let workspace = createPaneWorkspace({
@@ -191,8 +175,6 @@ test("hydrates new panes and projects one shared history into existing panes", (
     {
       ...hydratedEntry,
       source: "pwd",
-      timestamp: createCommandHistoryTimestamp(2),
-      tieBreaker: createCommandHistoryTieBreaker(2),
     },
   ];
   const synchronized = synchronizePaneCommandHistory(runtimes, nextHistory);
@@ -202,56 +184,50 @@ test("hydrates new panes and projects one shared history into existing panes", (
   }
 });
 
-test("validates, deterministically merges, and bounds browser history records", () => {
-  const alpha: CommandHistoryEntry = {
-    source: "alpha 😀",
+test("validates, bounds, and parses replacement browser history records", () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string): string | null => values.get(key) ?? null,
+    setItem: (key: string, value: string): void => {
+      values.set(key, value);
+    },
+  };
+  const entry: CommandHistoryEntry = {
+    source: "echo 0",
     currentDirectory: virtualHomeDirectory(),
-    timestamp: createCommandHistoryTimestamp(1),
-    tieBreaker: createCommandHistoryTieBreaker(1),
     persistence: { kind: "persistent" },
   };
-  const zeta = { ...alpha, source: "zeta" };
-  const bounded = mergeCommandHistory(
-    Array.from({ length: 101 }, (_, index): CommandHistoryEntry => ({
-      ...alpha,
+  const written = writeCommandHistory(
+    storage,
+    Array.from({ length: 101 }, (_, index) => ({
+      ...entry,
       source: `echo ${index}`,
-      timestamp: createCommandHistoryTimestamp(index),
-      tieBreaker: createCommandHistoryTieBreaker(index),
     })),
   );
-  const hydrated = commandHistoryFromStoredValue(
+  const hydrated = readCommandHistory(storage, demoContentCorpus.filesystem);
+  const replacement = commandHistoryFromStoredValue(
     JSON.stringify({
-      version: 2,
-      clearedAt: 0,
-      entries: [{
-        source: "echo 😀",
-        currentDirectory: "~",
-        timestamp: 2,
-        tieBreaker: 3,
-      }],
+      version: 1,
+      entries: [{ source: "echo remote", currentDirectory: "~" }],
     }),
     demoContentCorpus.filesystem,
   );
 
-  assert.deepEqual(
-    mergeCommandHistory([zeta], [alpha]).map((entry) => entry.source),
-    ["alpha 😀", "zeta"],
-  );
-  assert.equal(bounded.length, 100);
-  assert.equal(bounded[0]?.source, "echo 1");
+  assert.equal(written.kind, "available");
   assert.equal(hydrated.kind, "available");
-  assert.equal(hydrated.state.entries[0]?.source, "echo 😀");
+  assert.equal(hydrated.entries.length, 100);
+  assert.equal(hydrated.entries[0]?.source, "echo 1");
+  assert.deepEqual(
+    replacement.entries.map((candidate) => candidate.source),
+    ["echo remote"],
+  );
   assert.equal(
     commandHistoryFromStoredValue("{", demoContentCorpus.filesystem).kind,
     "unavailable",
   );
   assert.equal(
     commandHistoryFromStoredValue(
-      JSON.stringify({
-        version: 1,
-        clearedAt: 0,
-        entries: [],
-      }),
+      JSON.stringify({ version: 2, entries: [] }),
       demoContentCorpus.filesystem,
     ).kind,
     "unavailable",
@@ -265,199 +241,7 @@ test("validates, deterministically merges, and bounds browser history records", 
   );
 });
 
-test("queued tombstones repair stale overwrites and retain same-millisecond submissions", () => {
-  const values = new Map<string, string>();
-  let writes = 0;
-  const storage = {
-    getItem: (key: string): string | null => values.get(key) ?? null,
-    setItem: (key: string, value: string): void => {
-      writes += 1;
-      values.set(key, value);
-    },
-  };
-  const initial = emptyCommandHistoryState();
-  const oldEntry: CommandHistoryEntry = {
-    source: "echo old",
-    currentDirectory: virtualHomeDirectory(),
-    timestamp: createCommandHistoryTimestamp(1),
-    tieBreaker: createCommandHistoryTieBreaker(1),
-    persistence: { kind: "persistent" },
-  };
-  const reducedBeforeClear = {
-    ...initial,
-    entries: [
-      oldEntry,
-      {
-        ...oldEntry,
-        source: "echo concurrent-before-clear",
-        timestamp: createCommandHistoryTimestamp(2),
-        tieBreaker: createCommandHistoryTieBreaker(2),
-      },
-    ],
-  };
-  writeCommandHistory(storage, { ...initial, entries: [oldEntry] });
-  writes = 0;
-
-  const cleared = clearCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    { ...initial, entries: [oldEntry] },
-    createCommandHistoryTimestamp(3),
-  );
-  const tombstoneEvent = values.get(commandHistoryStorageKey) ?? "";
-  const staleOverwrite = writeCommandHistory(storage, reducedBeforeClear);
-  const repaired = receiveCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    reducedBeforeClear,
-    tombstoneEvent,
-  );
-  const afterRepair = readCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-  );
-
-  assert.equal(cleared.kind, "available");
-  assert.equal(staleOverwrite.kind, "available");
-  assert.equal(repaired.kind, "available");
-  assert.deepEqual(afterRepair.state.entries, []);
-  assert.equal(writes, 3);
-  assert.equal(
-    values.get(commandHistoryStorageKey),
-    JSON.stringify({ version: 2, clearedAt: 3, entries: [] }),
-  );
-
-  const sameMillisecondEntry: CommandHistoryEntry = {
-    ...oldEntry,
-    source: "echo genuinely-later-same-millisecond",
-    timestamp: createCommandHistoryTimestamp(3),
-    tieBreaker: createCommandHistoryTieBreaker(4),
-  };
-  const withSubmission = commandHistoryWithSubmission(repaired.state, [
-    oldEntry,
-    sameMillisecondEntry,
-  ]);
-  const laterPublication = publishCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    withSubmission,
-  );
-
-  assert.equal(laterPublication.kind, "available");
-  assert.equal(laterPublication.state.entries[0]?.timestamp, 4);
-  assert.deepEqual(
-    laterPublication.state.entries.map((entry) => entry.source),
-    ["echo genuinely-later-same-millisecond"],
-  );
-  assert.equal(writes, 4);
-});
-
-test("incoming history handles no-op, write-back, null, and unavailable writes", () => {
-  let writes = 0;
-  const values = new Map<string, string>();
-  const storage = {
-    getItem: (key: string): string | null => values.get(key) ?? null,
-    setItem: (key: string, value: string): void => {
-      writes += 1;
-      values.set(key, value);
-    },
-  };
-  const initial = emptyCommandHistoryState();
-  const first: CommandHistoryEntry = {
-    source: "echo first",
-    currentDirectory: virtualHomeDirectory(),
-    timestamp: createCommandHistoryTimestamp(1),
-    tieBreaker: createCommandHistoryTieBreaker(1),
-    persistence: { kind: "persistent" },
-  };
-  const second = {
-    ...first,
-    source: "echo second",
-    timestamp: createCommandHistoryTimestamp(2),
-    tieBreaker: createCommandHistoryTieBreaker(2),
-  };
-  const local = { ...initial, entries: [first] };
-  const receivedSuperset = { ...initial, entries: [first, second] };
-  const supersetValue = JSON.stringify({
-    version: 2,
-    clearedAt: 0,
-    entries: receivedSuperset.entries.map((entry) => ({
-      source: entry.source,
-      currentDirectory: entry.currentDirectory,
-      timestamp: entry.timestamp,
-      tieBreaker: entry.tieBreaker,
-    })),
-  });
-  const subsetValue = JSON.stringify({
-    version: 2,
-    clearedAt: 0,
-    entries: [{
-      source: second.source,
-      currentDirectory: second.currentDirectory,
-      timestamp: second.timestamp,
-      tieBreaker: second.tieBreaker,
-    }],
-  });
-  values.set(commandHistoryStorageKey, supersetValue);
-  const noOp = receiveCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    local,
-    supersetValue,
-  );
-  assert.equal(writes, 0);
-  const pureNoOp = reconcileCommandHistory(local, receivedSuperset);
-  values.set(commandHistoryStorageKey, subsetValue);
-  const writeBack = receiveCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    local,
-    subsetValue,
-  );
-  assert.equal(writes, 1);
-  writes = 0;
-  values.delete(commandHistoryStorageKey);
-  const nullEvent = receiveCommandHistory(
-    storage,
-    demoContentCorpus.filesystem,
-    local,
-    null,
-  );
-  const blocked = receiveCommandHistory(
-    undefined,
-    demoContentCorpus.filesystem,
-    local,
-    subsetValue,
-  );
-  const quotaSecret = "incoming-quota-private-payload";
-  const quotaFailed = receiveCommandHistory(
-    {
-      getItem: () => null,
-      setItem: () => {
-        throw new Error(quotaSecret);
-      },
-    },
-    demoContentCorpus.filesystem,
-    local,
-    subsetValue,
-  );
-
-  assert.equal(noOp.kind, "available");
-  assert.equal(pureNoOp.kind, "accepted");
-  assert.deepEqual(noOp.state.entries, [first, second]);
-  assert.equal(writeBack.kind, "available");
-  assert.deepEqual(writeBack.state.entries, [first, second]);
-  assert.equal(nullEvent.kind, "available");
-  assert.deepEqual(nullEvent.state.entries, [first]);
-  assert.equal(writes, 1);
-  assert.equal(blocked.kind, "unavailable");
-  assert.equal(quotaFailed.kind, "unavailable");
-  if (quotaFailed.kind === "unavailable") {
-    assert.equal(quotaFailed.diagnostic.includes(quotaSecret), false);
-  }
-});
-
-test("storage excludes memory-only payloads and returns payload-free failures", () => {
+test("clear, credential exclusion, and storage failures keep memory functional", () => {
   const values = new Map<string, string>();
   const storage = {
     getItem: (key: string): string | null => values.get(key) ?? null,
@@ -466,30 +250,24 @@ test("storage excludes memory-only payloads and returns payload-free failures", 
     },
   };
   const secretSource = "credential-command private-token";
-  const state = {
-    ...emptyCommandHistoryState(),
-    entries: [
-      {
-        source: "echo public",
-        currentDirectory: virtualHomeDirectory(),
-        timestamp: createCommandHistoryTimestamp(1),
-        tieBreaker: createCommandHistoryTieBreaker(1),
-        persistence: { kind: "persistent" as const },
+  const entries: ReadonlyArray<CommandHistoryEntry> = [
+    {
+      source: "echo public",
+      currentDirectory: virtualHomeDirectory(),
+      persistence: { kind: "persistent" },
+    },
+    {
+      source: secretSource,
+      currentDirectory: virtualHomeDirectory(),
+      persistence: {
+        kind: "memory-only",
+        reason: "credential-arguments",
       },
-      {
-        source: secretSource,
-        currentDirectory: virtualHomeDirectory(),
-        timestamp: createCommandHistoryTimestamp(2),
-        tieBreaker: createCommandHistoryTieBreaker(2),
-        persistence: {
-          kind: "memory-only" as const,
-          reason: "credential-arguments" as const,
-        },
-      },
-    ],
-  };
-  const persisted = writeCommandHistory(storage, state);
+    },
+  ];
+  const persisted = writeCommandHistory(storage, entries);
   const stored = values.get(commandHistoryStorageKey) ?? "";
+  const cleared = writeCommandHistory(storage, []);
   const blocked = readCommandHistory(
     {
       getItem: () => {
@@ -507,16 +285,22 @@ test("storage excludes memory-only payloads and returns payload-free failures", 
         throw new Error(quotaSecret);
       },
     },
-    state,
+    entries,
   );
 
   assert.equal(persisted.kind, "available");
-  assert.equal(stored.includes("echo public"), true);
-  assert.equal(stored.includes(secretSource), false);
-  assert.equal(stored.includes("persistence"), false);
-  assert.equal(stored.includes("id"), false);
+  assert.equal(stored, JSON.stringify({
+    version: 1,
+    entries: [{ source: "echo public", currentDirectory: "~" }],
+  }));
+  assert.equal(cleared.kind, "available");
+  assert.equal(
+    values.get(commandHistoryStorageKey),
+    JSON.stringify({ version: 1, entries: [] }),
+  );
   assert.equal(blocked.kind, "unavailable");
   assert.equal(quotaFailed.kind, "unavailable");
+  assert.equal(quotaFailed.entries, entries);
   if (blocked.kind === "unavailable" && quotaFailed.kind === "unavailable") {
     assert.equal(blocked.diagnostic.includes(secretSource), false);
     assert.equal(quotaFailed.diagnostic.includes(quotaSecret), false);
@@ -546,7 +330,6 @@ function settleCurrentDirectory(
     paneId,
     action: { kind: "input.insert", text: "cd projects" },
   });
-  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
   const submitted = reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
@@ -554,8 +337,6 @@ function settleCurrentDirectory(
       kind: "prompt.submit",
       submission: {
         kind: "command",
-        timestamp: createCommandHistoryTimestamp(sequence),
-        tieBreaker: createCommandHistoryTieBreaker(sequence),
         persistence: { kind: "persistent" },
       },
     },
@@ -609,8 +390,6 @@ function submitRunningCommand(
     paneId,
     action: { kind: "input.insert", text: "find ." },
   });
-  const sequence = stateFor(withInput, paneId).nextCommandHistorySequence;
-
   return reducePaneShellRuntime({
     runtimes: withInput,
     paneId,
@@ -618,8 +397,6 @@ function submitRunningCommand(
       kind: "prompt.submit",
       submission: {
         kind: "command",
-        timestamp: createCommandHistoryTimestamp(sequence),
-        tieBreaker: createCommandHistoryTieBreaker(sequence),
         persistence: { kind: "persistent" },
       },
     },

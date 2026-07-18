@@ -13,8 +13,6 @@ import {
   type VirtualFilesystem,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
   createShellId,
   createShellSessionId,
   createShellState,
@@ -186,12 +184,6 @@ function commandRequest(
       kind: "prompt.submit",
       submission: {
         kind: "command",
-        timestamp: createCommandHistoryTimestamp(
-          state.nextCommandHistorySequence,
-        ),
-        tieBreaker: createCommandHistoryTieBreaker(
-          state.nextCommandHistorySequence,
-        ),
         persistence: { kind: "persistent" },
       },
     });
@@ -212,12 +204,6 @@ function commandRequest(
     kind: "prompt.submit",
     submission: {
       kind: "command",
-      timestamp: createCommandHistoryTimestamp(
-        typed.nextCommandHistorySequence,
-      ),
-      tieBreaker: createCommandHistoryTieBreaker(
-        typed.nextCommandHistorySequence,
-      ),
       persistence: { kind: "persistent" },
     },
   });

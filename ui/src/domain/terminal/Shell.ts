@@ -34,8 +34,6 @@ declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
 declare const commandIdBrand: unique symbol;
 declare const shellHistoryEntryIdBrand: unique symbol;
-declare const commandHistoryTimestampBrand: unique symbol;
-declare const commandHistoryTieBreakerBrand: unique symbol;
 declare const secretPromptIdBrand: unique symbol;
 declare const secretPromptValueBrand: unique symbol;
 declare const shellDiagnosticIdBrand: unique symbol;
@@ -55,14 +53,6 @@ export type CommandId = string & {
 
 export type ShellHistoryEntryId = string & {
   readonly [shellHistoryEntryIdBrand]: "ShellHistoryEntryId";
-};
-
-export type CommandHistoryTimestamp = number & {
-  readonly [commandHistoryTimestampBrand]: "CommandHistoryTimestamp";
-};
-
-export type CommandHistoryTieBreaker = number & {
-  readonly [commandHistoryTieBreakerBrand]: "CommandHistoryTieBreaker";
 };
 
 export type SecretPromptId = string & {
@@ -271,8 +261,6 @@ export type ShellHistoryEntry = Readonly<{
 export type CommandHistoryEntry = Readonly<{
   source: string;
   currentDirectory: VirtualDirectoryPath;
-  timestamp: CommandHistoryTimestamp;
-  tieBreaker: CommandHistoryTieBreaker;
   persistence: CommandHistoryPersistence;
 }>;
 
@@ -375,7 +363,6 @@ export type ShellState = Readonly<{
   autosuggestion: ShellAutosuggestionState;
   nextCommandSequence: number;
   nextHistorySequence: number;
-  nextCommandHistorySequence: number;
   pendingEffect: ShellEffect;
 }>;
 
@@ -404,8 +391,6 @@ export type CommandSubmission =
   | Readonly<{ kind: "secret" }>
   | Readonly<{
       kind: "command";
-      timestamp: CommandHistoryTimestamp;
-      tieBreaker: CommandHistoryTieBreaker;
       persistence: CommandHistoryPersistence;
     }>;
 
@@ -862,26 +847,6 @@ export function createShellOutputId(value: string): ShellOutputId {
   return value as ShellOutputId;
 }
 
-export function createCommandHistoryTimestamp(
-  value: number,
-): CommandHistoryTimestamp {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error("Command history timestamps must be non-negative safe integers.");
-  }
-
-  return value as CommandHistoryTimestamp;
-}
-
-export function createCommandHistoryTieBreaker(
-  value: number,
-): CommandHistoryTieBreaker {
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new Error("Command history tie breakers must be non-negative safe integers.");
-  }
-
-  return value as CommandHistoryTieBreaker;
-}
-
 export function createSecretPromptRequest(
   id: SecretPromptId,
   label: string,
@@ -920,7 +885,6 @@ export function createShellState({
     autosuggestion: { kind: "available" },
     nextCommandSequence: 1,
     nextHistorySequence: 1,
-    nextCommandHistorySequence: 1,
     pendingEffect: { kind: "none" },
   };
 }
@@ -1164,8 +1128,6 @@ export function reduceShellState(
       const commandHistoryEntry: CommandHistoryEntry = {
         source: state.input.text,
         currentDirectory: state.currentDirectory,
-        timestamp: action.submission.timestamp,
-        tieBreaker: action.submission.tieBreaker,
         persistence: action.submission.persistence,
       };
       const commandHistory = appendCommandHistory(
@@ -1191,7 +1153,6 @@ export function reduceShellState(
         completion: { kind: "idle" },
         autosuggestion: { kind: "available" },
         nextCommandSequence: state.nextCommandSequence + 1,
-        nextCommandHistorySequence: state.nextCommandHistorySequence + 1,
         pendingEffect: { kind: "execute-command", command },
       };
     }

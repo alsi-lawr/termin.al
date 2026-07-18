@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
-import {
-  createCommandHistoryTimestamp,
-  type ShellAction,
+import type {
+  CommandHistoryEntry,
+  ShellAction,
 } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
@@ -25,13 +25,10 @@ import {
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 import {
-  clearCommandHistory,
-  commandHistoryWithSubmission,
+  commandHistoryFromStoredValue,
   commandHistoryStorageKey,
-  publishCommandHistory,
   readCommandHistory,
-  receiveCommandHistory,
-  type CommandHistoryState,
+  writeCommandHistory,
   type CommandHistoryStorageBackend,
   type CommandHistoryStorageResult,
 } from "./CommandHistoryStorage.ts";
@@ -114,7 +111,7 @@ export function usePaneWorkspace(
     createPaneShellRuntimes({
       workspace,
       currentDirectory,
-      commandHistory: hydratedHistory.state.entries,
+      commandHistory: hydratedHistory.entries,
     }),
   );
   const [focusVersion, setFocusVersion] = useState(0);
@@ -128,8 +125,8 @@ export function usePaneWorkspace(
   const mobileCtrlModifierRef = useRef<MobileCtrlModifier>(
     initialMobileCtrlModifier,
   );
-  const commandHistoryStateRef = useRef<CommandHistoryState>(
-    hydratedHistory.state,
+  const commandHistoryRef = useRef<ReadonlyArray<CommandHistoryEntry>>(
+    hydratedHistory.entries,
   );
   useEffect(() => {
     reportStorageFailure(hydratedHistory);
@@ -139,18 +136,19 @@ export function usePaneWorkspace(
       if (event.key !== commandHistoryStorageKey) {
         return;
       }
-      const received = receiveCommandHistory(
-        historyStorage,
-        corpus.filesystem,
-        commandHistoryStateRef.current,
+      const received = commandHistoryFromStoredValue(
         event.newValue,
+        corpus.filesystem,
       );
-      const currentRuntimes = shellRuntimesRef.current;
       reportStorageFailure(received);
-      commandHistoryStateRef.current = received.state;
+      if (received.kind === "unavailable") {
+        return;
+      }
+      const currentRuntimes = shellRuntimesRef.current;
+      commandHistoryRef.current = received.entries;
       const nextRuntimes = synchronizePaneCommandHistory(
         currentRuntimes,
-        received.state.entries,
+        received.entries,
       );
       if (nextRuntimes === currentRuntimes) {
         return;
@@ -160,7 +158,7 @@ export function usePaneWorkspace(
     };
     window.addEventListener("storage", receiveStoredHistory);
     return () => window.removeEventListener("storage", receiveStoredHistory);
-  }, [corpus.filesystem, historyStorage]);
+  }, [corpus.filesystem]);
   const setMobileCtrl = useCallback((modifier: MobileCtrlModifier): void => {
     mobileCtrlModifierRef.current = modifier;
     setMobileCtrlModifier(modifier);
@@ -207,7 +205,7 @@ export function usePaneWorkspace(
           runtimes: currentShellRuntimes,
           workspace: result.workspace,
           currentDirectory,
-          commandHistory: commandHistoryStateRef.current.entries,
+          commandHistory: commandHistoryRef.current,
         });
         workspaceRef.current = result.workspace;
         shellRuntimesRef.current = nextShellRuntimes;
@@ -244,32 +242,20 @@ export function usePaneWorkspace(
       let nextRuntimes = applied.runtimes;
       let historyResult: CommandHistoryStorageResult | undefined;
       const previousCommandHistory = currentShellRuntimes.get(paneId)?.state
-        .commandHistory ?? commandHistoryStateRef.current.entries;
+        .commandHistory ?? commandHistoryRef.current;
       const reducedCommandHistory = nextRuntimes.get(paneId)?.state.commandHistory ??
         previousCommandHistory;
       if (clearsCommandHistory(action)) {
-        historyResult = clearCommandHistory(
-          historyStorage,
-          corpus.filesystem,
-          commandHistoryStateRef.current,
-          createCommandHistoryTimestamp(Date.now()),
-        );
+        historyResult = writeCommandHistory(historyStorage, []);
       } else if (reducedCommandHistory !== previousCommandHistory) {
-        historyResult = publishCommandHistory(
-          historyStorage,
-          corpus.filesystem,
-          commandHistoryWithSubmission(
-            commandHistoryStateRef.current,
-            reducedCommandHistory,
-          ),
-        );
+        historyResult = writeCommandHistory(historyStorage, reducedCommandHistory);
       }
       if (historyResult !== undefined) {
         reportStorageFailure(historyResult);
-        commandHistoryStateRef.current = historyResult.state;
+        commandHistoryRef.current = historyResult.entries;
         nextRuntimes = synchronizePaneCommandHistory(
           nextRuntimes,
-          historyResult.state.entries,
+          historyResult.entries,
         );
       }
       const next = { ...applied, runtimes: nextRuntimes };
@@ -296,7 +282,6 @@ export function usePaneWorkspace(
       }
     },
     [
-      corpus.filesystem,
       historyStorage,
       onAcceptedContentOpen,
       onConsumeMobileCtrl,

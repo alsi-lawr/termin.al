@@ -30,12 +30,11 @@ LIMITS
      lapse to the latest submission.
 
 PRIVACY
-     Browser storage contains a record schema version and clear tombstone  time‐
-     stamp.  Each  retained  entry contains only command source, virtual working
-     directory, merge timestamp and deterministic tie ordering data. It does not
-     contain scrollback, command outcomes, errors,  diagnostics,  secret  prompt
-     values  or  pane identifiers. Commands explicitly defined as accepting cre‐
-     dential arguments remain in memory but are not written to storage.
+     Browser storage contains a record schema version. Each retained entry  con‐
+     tains  only  command source and virtual working directory. It does not con‐
+     tain scrollback, command outcomes, errors, diagnostics, secret prompt  val‐
+     ues  or  pane identifiers. Commands explicitly defined as accepting creden‐
+     tial arguments remain in memory but are not written to storage.
 
 NOTES
      Stored history is local to this browser origin and survives  pane  changes,
@@ -43,9 +42,9 @@ NOTES
      browsing therefore uses the browser's ephemeral storage  lifetime.  History
      is not stored in the virtual filesystem and is not sent to a server or API.
 
-     Active  tabs converge through browser storage events. Simultaneously inter‐
-     leaved tab writes are not atomic and may be observed  transiently  until  a
-     queued event repairs the shared record.
+     Active  tabs  replace  their  in-memory history when the browser delivers a
+     storage event. Simultaneous or stale tab writes use ordinary browser  last-
+     write-wins behavior and may lose commands or supersede a clear.
 
 EXAMPLES
      $ echo one

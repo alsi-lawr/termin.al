@@ -8,8 +8,6 @@ import {
 } from "../filesystem/VirtualFilesystem.ts";
 import {
   createSecretPromptId,
-  createCommandHistoryTieBreaker,
-  createCommandHistoryTimestamp,
   createSecretPromptRequest,
   createShellDiagnosticId,
   createShellId,
@@ -49,12 +47,6 @@ function submit(state: ShellState, source: string): ShellState {
     kind: "prompt.submit",
     submission: {
       kind: "command",
-      timestamp: createCommandHistoryTimestamp(
-        withInput.nextCommandHistorySequence,
-      ),
-      tieBreaker: createCommandHistoryTieBreaker(
-        withInput.nextCommandHistorySequence,
-      ),
       persistence: { kind: "persistent" },
     },
   });
@@ -147,8 +139,6 @@ test("reduces command execution and captures stable command cwd history", () => 
         {
           source: "first",
           currentDirectory: "~",
-          timestamp: 1,
-          tieBreaker: 1,
           persistence: { kind: "persistent" },
         },
       ],
@@ -185,8 +175,6 @@ test("hydrates navigation and autosuggestion and collapses consecutive duplicate
     commandHistory: [{
       source: "echo first",
       currentDirectory: virtualHomeDirectory(),
-      timestamp: createCommandHistoryTimestamp(1),
-      tieBreaker: createCommandHistoryTieBreaker(1),
       persistence: { kind: "persistent" },
     }],
   });
@@ -208,7 +196,6 @@ test("hydrates navigation and autosuggestion and collapses consecutive duplicate
     suffix: "irst",
   });
   assert.equal(secondDuplicate.commandHistory.length, 1);
-  assert.equal(secondDuplicate.commandHistory[0]?.timestamp, 2);
 });
 
 test("clears command history without applying scrollback clear semantics", () => {
@@ -515,12 +502,6 @@ test("uses one-line native replacements and preserves astral command input", () 
     kind: "prompt.submit",
     submission: {
       kind: "command",
-      timestamp: createCommandHistoryTimestamp(
-        replaced.nextCommandHistorySequence,
-      ),
-      tieBreaker: createCommandHistoryTieBreaker(
-        replaced.nextCommandHistorySequence,
-      ),
       persistence: { kind: "persistent" },
     },
   });
