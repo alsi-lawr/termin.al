@@ -725,16 +725,15 @@ function parseLineReaderOptions(
   };
 }
 
-function sedAddress(source: string): SedAddress {
+function sedAddress(source: string): SedAddress | undefined {
   if (source === "$") {
     return { kind: "last" };
   }
 
   const number = Number(source);
-  return {
-    kind: "line",
-    number: Number.isSafeInteger(number) ? number : Number.MAX_SAFE_INTEGER,
-  };
+  return Number.isSafeInteger(number) && number > 0
+    ? { kind: "line", number }
+    : undefined;
 }
 
 function sedAddressSelection(
@@ -754,18 +753,30 @@ function sedAddressSelection(
     return { error: `Malformed sed address: ${source}` };
   }
 
+  const startAddress = sedAddress(start);
+
+  if (startAddress === undefined) {
+    return { error: "Sed addresses must be positive safe integers or $." };
+  }
+
   if (end === undefined) {
     return {
-      selection: { kind: "single", address: sedAddress(start) },
+      selection: { kind: "single", address: startAddress },
       commandOffset: match[0].length,
     };
+  }
+
+  const endAddress = sedAddress(end);
+
+  if (endAddress === undefined) {
+    return { error: "Sed addresses must be positive safe integers or $." };
   }
 
   return {
     selection: {
       kind: "range",
-      start: sedAddress(start),
-      end: sedAddress(end),
+      start: startAddress,
+      end: endAddress,
     },
     commandOffset: match[0].length,
   };

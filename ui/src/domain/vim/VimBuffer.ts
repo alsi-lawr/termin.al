@@ -2823,9 +2823,9 @@ type VimSubstitutionCommand = Readonly<{
   substitution: TextSubstitution;
 }>;
 
-function vimSubstitutionFailure(
+function finishVimSubstitution(
   buffer: VimBuffer,
-  status: Extract<VimStatus, { kind: "invalid-substitution" | "no-substitution-match" }>,
+  status: VimStatus,
   search: VimSearch,
 ): VimBuffer {
   return {
@@ -2874,12 +2874,16 @@ function executeVimSubstitution(
     direction: buffer.search.kind === "active" ? buffer.search.direction : "forward",
   };
 
-  if (!matched || firstChanged === undefined) {
-    return vimSubstitutionFailure(
+  if (!matched) {
+    return finishVimSubstitution(
       buffer,
       { kind: "no-substitution-match", pattern: command.substitution.pattern },
       search,
     );
+  }
+
+  if (firstChanged === undefined) {
+    return finishVimSubstitution(buffer, { kind: "none" }, search);
   }
 
   const next = createTextState(lines, firstChanged, VimMode.Normal, { kind: "none" });
@@ -2909,6 +2913,26 @@ function submitVimSubstitution(
     return { kind: "unrecognized" };
   }
 
+  const previousPattern = buffer.search.kind === "active"
+    ? buffer.search.query
+    : undefined;
+  const wholeBuffer = source.startsWith("%s");
+  const substitution = parseTextSubstitution(
+    wholeBuffer ? source.slice(1) : source,
+    previousPattern,
+  );
+
+  if (substitution.kind === "invalid") {
+    return {
+      kind: "handled",
+      buffer: finishVimSubstitution(
+        buffer,
+        { kind: "invalid-substitution", message: substitution.message },
+        buffer.search,
+      ),
+    };
+  }
+
   const capability = gateVimCapability(buffer, {
     kind: "text-mutation",
     source: ":" + source,
@@ -2922,26 +2946,6 @@ function submitVimSubstitution(
         mode: VimMode.Normal,
         selection: { kind: "none" },
       },
-    };
-  }
-
-  const previousPattern = buffer.search.kind === "active"
-    ? buffer.search.query
-    : undefined;
-  const wholeBuffer = source.startsWith("%s");
-  const substitution = parseTextSubstitution(
-    wholeBuffer ? source.slice(1) : source,
-    previousPattern,
-  );
-
-  if (substitution.kind === "invalid") {
-    return {
-      kind: "handled",
-      buffer: vimSubstitutionFailure(
-        buffer,
-        { kind: "invalid-substitution", message: substitution.message },
-        buffer.search,
-      ),
     };
   }
 

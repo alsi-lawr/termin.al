@@ -1011,6 +1011,8 @@ test("rejects every invalid sed option and script before reading or emitting", a
     ["sed -e 's/a/b/x' one.txt", "Unsupported substitution flags: x"],
     ["sed -e 's//b/' one.txt", "No previous substitution pattern."],
     ["sed 's/a/b' one.txt", "Substitution replacement is not terminated."],
+    ["sed -n '0p' one.txt", "positive safe integers"],
+    ["sed -n '9007199254740992p' one.txt", "positive safe integers"],
   ]) {
     assert.match(failureMessage(await execute(source, registry)), new RegExp(message, "u"));
   }

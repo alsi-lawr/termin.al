@@ -702,10 +702,23 @@ test("reports Vim substitution failures and gates read-only mutation before chan
   const malformed = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s/a/b`));
   const noPrevious = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s//b/`));
   const missed = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`%s/gamma/delta/g`));
+  const identical = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s/alpha/alpha/`));
+  const readonly = createVimBuffer({ text: "alpha", mode: VimMode.Normal, capability: VimCapability.ReadOnly });
+  const malformedReadonly = submitVimCommand(appendVimCommandInput(press(readonly, ":"), "%s"));
   assert.equal(invalid.status.kind, "invalid-substitution");
   assert.deepEqual(malformed.status, { kind: "invalid-substitution", message: "Substitution replacement is not terminated." });
   assert.deepEqual(noPrevious.status, { kind: "invalid-substitution", message: "No previous substitution pattern." });
   assert.deepEqual(missed.status, { kind: "no-substitution-match", pattern: "gamma" });
+  assert.deepEqual(identical.status, { kind: "none" });
+  assert.equal(identical.mode.kind, "normal");
+  assert.deepEqual(identical.search, { kind: "active", query: "alpha", direction: "forward" });
+  assert.equal(vimBufferText(identical), vimBufferText(start));
+  assert.deepEqual(identical.cursor, start.cursor);
+  assert.deepEqual(identical.undoStack, start.undoStack);
+  assert.deepEqual(identical.redoStack, start.redoStack);
+  assert.equal(isVimBufferDirty(identical), false);
+  assert.equal(malformedReadonly.status.kind, "invalid-substitution");
+  assert.equal(vimBufferText(malformedReadonly), vimBufferText(readonly));
 
   for (const unchanged of [invalid, malformed, noPrevious, missed]) {
     assert.equal(vimBufferText(unchanged), vimBufferText(start));
