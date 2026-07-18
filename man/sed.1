@@ -42,7 +42,7 @@ flag adds native Unicode ignore-case matching. The flags may be combined.
 .SH ADDRESSES
 A command may have one one-based numeric or
 .B $
-address, or an inclusive comma-separated range of those addresses. All path operands form one ordered line stream for addressing. A reversed range applies only on its start-address line. Zero, maximum and out-of-range numeric addresses do not match actual lines.
+address, or an inclusive comma-separated range of those addresses. All path operands form one ordered line stream for addressing. A reversed range applies only on its start-address line. Zero and unsafe numeric addresses are rejected. Positive safe out-of-range addresses simply do not match.
 .SH REPLACEMENT
 In a replacement,
 .B &

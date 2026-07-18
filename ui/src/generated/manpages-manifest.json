@@ -282,9 +282,9 @@
       "summary": "Transform piped text or virtual files without mutation.",
       "sourcePath": "man/sed.1",
       "artifactPath": "ui/src/generated/manpages/sed.txt",
-      "byteCount": 3233,
+      "byteCount": 3269,
       "lineCount": 72,
-      "sha256": "4ae1d6dd721b555344f5fa028e9971dfc1b5048d0d49dfb5a4dcf2547132b6ee"
+      "sha256": "60a5483eefe0dee48ac3e7f56163f1c7978795c719444db8465bf81c67952e0d"
     },
     {
       "name": "skills",

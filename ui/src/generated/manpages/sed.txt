@@ -32,16 +32,16 @@ ADDRESSES
      A  command  may  have  one  one-based numeric or $ address, or an inclusive
      comma-separated range of those addresses. All path operands  form  one  or‐
      dered  line  stream  for  addressing.  A reversed range applies only on its
-     start-address line. Zero, maximum and out-of-range numeric addresses do not
-     match actual lines.
+     start-address line. Zero and unsafe numeric addresses are  rejected.  Posi‐
+     tive safe out-of-range addresses simply do not match.
 
 REPLACEMENT
      In a replacement, & inserts the full match and \1 through \9 insert capture
-     groups. A backslash quotes the delimiter, &, or  another  backslash.  Other
+     groups.  A  backslash  quotes the delimiter, &, or another backslash. Other
      characters are retained conservatively.
 
      An empty substitution pattern reuses the most recent non-empty substitution
-     pattern  from the same sed invocation. It is rejected when no prior pattern
+     pattern from the same sed invocation. It is rejected when no prior  pattern
      exists.
 
 PRINTING
@@ -50,14 +50,14 @@ PRINTING
      output is emitted.
 
 FAILURES AND LIMITS
-     Every option, script, delimiter, flag and regular expression  is  validated
+     Every  option,  script, delimiter, flag and regular expression is validated
      before any path is read. Missing, locked or unavailable later operands fail
-     the  command  without  returning earlier text. The unsupported -i option is
+     the command without returning earlier text. The unsupported  -i  option  is
      rejected; sed never writes files, creates backups, reads host paths, starts
      processes or uses the network.
 
-     At most 1,000 output lines and 1 MiB of UTF-8 output are returned.  Trunca‐
-     tion  is reported. Cancellation is checked between reads, lines and scripts
+     At  most 1,000 output lines and 1 MiB of UTF-8 output are returned. Trunca‐
+     tion is reported. Cancellation is checked between reads, lines and  scripts
      and discards accumulated output. One native regular-expression operation is
      synchronous once started.
 
