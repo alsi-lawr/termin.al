@@ -18,7 +18,9 @@ import {
   createShellSessionId,
   createShellState,
   reduceShellState,
-  type CommandOutcome,
+  type CommandEffect,
+  type CommandLineOutcome,
+  type ShellOutput,
   type ShellCommandRequest,
 } from "../../domain/terminal/Shell.ts";
 import {
@@ -142,7 +144,7 @@ function commandRequest(source: string): ShellCommandRequest {
 async function execute(
   source: string,
   registry: CommandRegistry,
-): Promise<CommandOutcome> {
+): Promise<CommandLineOutcome> {
   return executeCommandLine({
     registry,
     request: commandRequest(source),
@@ -150,16 +152,26 @@ async function execute(
   });
 }
 
-function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "succeeded" }> {
+function succeeded(outcome: CommandLineOutcome): Readonly<{
+  outputs: ReadonlyArray<ShellOutput>;
+  effects: ReadonlyArray<CommandEffect>;
+}> {
   if (outcome.kind !== "succeeded") {
     assert.fail("Expected a successful command outcome.");
   }
 
-  return outcome;
+  return {
+    outputs: outcome.events.flatMap((event) =>
+      event.kind === "output" ? [event.output] : []
+    ),
+    effects: outcome.events.flatMap((event) =>
+      event.kind === "effect" ? [event.effect] : []
+    ),
+  };
 }
 
 function documentViewer(
-  outcome: CommandOutcome,
+  outcome: CommandLineOutcome,
 ): Extract<ViewerContent, { kind: "document" }> {
   const effect = succeeded(outcome).effects.find(
     (candidate) => candidate.kind === "open-viewer",
@@ -518,9 +530,15 @@ test("routes portfolio supplier failures through the execution boundary", async 
   }
 
   assert.strictEqual(outcome.failure.cause, cause);
-  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
+  const diagnostics = outcome.events.flatMap((event) =>
+    event.kind === "output" && event.output.kind === "diagnostic"
+      ? [event.output.diagnostic]
+      : []
+  );
+
+  assert.equal(diagnostics[0]?.code, "runtime.execution-failed");
   assert.equal(
-    outcome.diagnostics.some(
+    diagnostics.some(
       (diagnostic) => diagnostic.code === "runtime.content-unavailable",
     ),
     false,

@@ -10,7 +10,7 @@ import {
   createShellState,
   reduceShellState,
   type CommandId,
-  type CommandOutcome,
+  type CommandLineOutcome,
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
@@ -28,7 +28,7 @@ export type PaneShellRuntimeControl = Readonly<{
   finishCommand: (
     commandId: CommandId,
     controller: AbortController,
-    outcome: CommandOutcome,
+    outcome: CommandLineOutcome,
   ) => boolean;
   startCompletion: () => AbortController | undefined;
   finishCompletion: (controller: AbortController) => boolean;
@@ -112,7 +112,7 @@ function createPaneShellRuntimeControl(): PaneShellRuntimeControl {
     finishCommand: (
       commandId: CommandId,
       controller: AbortController,
-      outcome: CommandOutcome,
+      outcome: CommandLineOutcome,
     ): boolean => {
       const command = activeCommand;
 
@@ -349,8 +349,7 @@ export function applyPaneShellAction({
 
   if (
     reducedRuntimes === runtimes ||
-    action.kind !== "command.settled" ||
-    action.outcome.kind !== "succeeded"
+    action.kind !== "command.settled"
   ) {
     return { workspace, runtimes: reducedRuntimes, acceptedContentIds: [] };
   }
@@ -359,10 +358,12 @@ export function applyPaneShellAction({
   let nextRuntimes = reducedRuntimes;
   const acceptedContentIds: ContentId[] = [];
 
-  for (const effect of action.outcome.effects) {
-    if (effect.kind !== "open-viewer") {
+  for (const event of action.outcome.events) {
+    if (event.kind !== "effect" || event.effect.kind !== "open-viewer") {
       continue;
     }
+
+    const effect = event.effect;
 
     if (effect.disposition.kind === "inline") {
       nextRuntimes = showPaneShellViewer(

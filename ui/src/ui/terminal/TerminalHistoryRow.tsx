@@ -3,10 +3,7 @@ import type {
   ShellHistoryEntry,
   ShellHistoryOutcome,
 } from "../../domain/terminal/Shell.ts";
-import {
-  TerminalDiagnosticBlock,
-  TerminalOutputBlock,
-} from "./TerminalOutputBlock";
+import { TerminalOutputBlock } from "./TerminalOutputBlock";
 import { ShellContextLine } from "./ShellContextLine";
 
 type TerminalHistoryRowProps = Readonly<{
@@ -26,32 +23,20 @@ function TerminalHistoryOutcome({
 }: Readonly<{
   outcome: ShellHistoryOutcome;
 }>): ReactElement {
-  switch (outcome.kind) {
-    case "succeeded":
-      return (
-        <div className="space-y-2">
-          {outcome.outputs.map((output) => (
-            <TerminalOutputBlock
-              key={output.id}
-              output={output}
-            />
-          ))}
-        </div>
-      );
-    case "failed":
-      return (
-        <div className="space-y-1">
-          {outcome.diagnostics.map((diagnostic) => (
-            <TerminalDiagnosticBlock
-              key={diagnostic.id}
-              diagnostic={diagnostic}
-            />
-          ))}
-        </div>
-      );
-    case "cancelled":
-      return <TerminalDiagnosticBlock diagnostic={outcome.diagnostic} />;
-  }
+  return (
+    <div className="space-y-2">
+      {outcome.events.map((event) =>
+        event.kind === "output"
+          ? (
+              <TerminalOutputBlock
+                key={event.output.id}
+                output={event.output}
+              />
+            )
+          : undefined
+      )}
+    </div>
+  );
 }
 
 export function TerminalHistoryRow({

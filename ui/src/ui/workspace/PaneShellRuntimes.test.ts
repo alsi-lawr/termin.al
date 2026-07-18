@@ -13,10 +13,9 @@ import {
   virtualHomeDirectory,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type {
-  CommandOutcome,
+  CommandLineOutcome,
   ShellState,
 } from "../../domain/terminal/Shell.ts";
-import { createShellDiagnosticId } from "../../domain/terminal/Shell.ts";
 import {
   applyPaneOperation,
   createPaneWorkspace,
@@ -159,11 +158,13 @@ function settleCurrentDirectory(
       commandId: state.lifecycle.command.id,
       outcome: {
         kind: "succeeded",
-        outputs: [],
-        effects: [
+        events: [
           {
-            kind: "set-current-directory",
-            directory: projectsDirectoryPath(),
+            kind: "effect",
+            effect: {
+              kind: "set-current-directory",
+              directory: projectsDirectoryPath(),
+            },
           },
         ],
       },
@@ -200,25 +201,27 @@ function submitRunningCommand(
   });
 }
 
-function successfulCommandOutcome(): CommandOutcome {
-  return { kind: "succeeded", outputs: [], effects: [] };
+function successfulCommandOutcome(): CommandLineOutcome {
+  return { kind: "succeeded", events: [] };
 }
 
 function viewerCommandOutcome(
   viewer: ViewerContent,
   disposition: "inline" | "split",
-): CommandOutcome {
+): CommandLineOutcome {
   return {
     kind: "succeeded",
-    outputs: [],
-    effects: [
+    events: [
       {
-        kind: "open-viewer",
-        viewer,
-        disposition:
-          disposition === "inline"
-            ? { kind: "inline" }
-            : { kind: "split", orientation: "vertical" },
+        kind: "effect",
+        effect: {
+          kind: "open-viewer",
+          viewer,
+          disposition:
+            disposition === "inline"
+              ? { kind: "inline" }
+              : { kind: "split", orientation: "vertical" },
+        },
       },
     ],
   };
@@ -235,13 +238,13 @@ function contentId(value: string): ContentId {
 }
 
 function deferredCommandOutcome(): Readonly<{
-  promise: Promise<CommandOutcome>;
-  resolve: (outcome: CommandOutcome) => void;
+  promise: Promise<CommandLineOutcome>;
+  resolve: (outcome: CommandLineOutcome) => void;
 }> {
-  let resolveOutcome: (outcome: CommandOutcome) => void = () => {
+  let resolveOutcome: (outcome: CommandLineOutcome) => void = () => {
     throw new Error("Deferred command outcomes must initialize their resolver.");
   };
-  const promise = new Promise<CommandOutcome>((resolve) => {
+  const promise = new Promise<CommandLineOutcome>((resolve) => {
     resolveOutcome = resolve;
   });
 
@@ -755,7 +758,7 @@ test("does not report collection roots, uncounted viewers, failed commands, or c
           commandName: "open",
           message: "failed",
         },
-        diagnostics: [],
+        events: [],
       },
     },
   });
@@ -768,12 +771,7 @@ test("does not report collection roots, uncounted viewers, failed commands, or c
       commandId: nextRunning.lifecycle.command.id,
       outcome: {
         kind: "cancelled",
-        diagnostic: {
-          kind: "runtime",
-          id: createShellDiagnosticId("runtime-test-cancelled"),
-          code: "runtime.cancelled",
-          message: "cancelled",
-        },
+        events: [],
       },
     },
   });

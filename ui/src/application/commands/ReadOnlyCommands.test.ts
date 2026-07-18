@@ -17,7 +17,9 @@ import {
   createShellSessionId,
   createShellState,
   reduceShellState,
-  type CommandOutcome,
+  type CommandEffect,
+  type CommandLineOutcome,
+  type ShellOutput,
   type ShellCommandRequest,
 } from "../../domain/terminal/Shell.ts";
 import { executeCommandLine } from "./CommandExecution.ts";
@@ -181,7 +183,7 @@ function commandRequest(
     state = reduceShellState(state, {
       kind: "command.settled",
       commandId: state.lifecycle.command.id,
-      outcome: { kind: "succeeded", outputs: [], effects: [] },
+      outcome: { kind: "succeeded", events: [] },
     });
   }
 
@@ -200,7 +202,7 @@ async function execute(
   registry: CommandRegistry,
   currentDirectory: VirtualDirectoryPath = virtualHomeDirectory(),
   previousCommands: ReadonlyArray<string> = [],
-): Promise<CommandOutcome> {
+): Promise<CommandLineOutcome> {
   return executeCommandLine({
     registry,
     request: commandRequest(source, currentDirectory, previousCommands),
@@ -212,7 +214,7 @@ async function executeWithSignal(
   source: string,
   registry: CommandRegistry,
   signal: AbortSignal,
-): Promise<CommandOutcome> {
+): Promise<CommandLineOutcome> {
   return executeCommandLine({
     registry,
     request: commandRequest(source),
@@ -220,15 +222,31 @@ async function executeWithSignal(
   });
 }
 
-function succeeded(outcome: CommandOutcome): Extract<CommandOutcome, { kind: "succeeded" }> {
+function succeeded(
+  outcome: CommandLineOutcome,
+): Readonly<{
+  kind: "succeeded";
+  events: Extract<CommandLineOutcome, { kind: "succeeded" }>["events"];
+  outputs: ReadonlyArray<ShellOutput>;
+  effects: ReadonlyArray<CommandEffect>;
+}> {
   if (outcome.kind !== "succeeded") {
     assert.fail("Expected a successful command outcome.");
   }
 
-  return outcome;
+  return {
+    kind: "succeeded",
+    events: outcome.events,
+    outputs: outcome.events.flatMap((event) =>
+      event.kind === "output" ? [event.output] : []
+    ),
+    effects: outcome.events.flatMap((event) =>
+      event.kind === "effect" ? [event.effect] : []
+    ),
+  };
 }
 
-function outputText(outcome: CommandOutcome): string {
+function outputText(outcome: CommandLineOutcome): string {
   const successful = succeeded(outcome);
   const output = successful.outputs.find((candidate) => candidate.kind === "text");
 
@@ -240,7 +258,7 @@ function outputText(outcome: CommandOutcome): string {
 }
 
 function documentViewer(
-  outcome: CommandOutcome,
+  outcome: CommandLineOutcome,
 ): Extract<ViewerContent, { kind: "document" }> {
   const effect = succeeded(outcome).effects.find(
     (candidate) => candidate.kind === "open-viewer",
@@ -257,29 +275,36 @@ function documentViewer(
   return effect.viewer;
 }
 
-function failureMessage(outcome: CommandOutcome): string {
+function failureMessage(outcome: CommandLineOutcome): string {
   if (outcome.kind !== "failed") {
     assert.fail("Expected a failed command outcome.");
   }
 
-  const diagnostic = outcome.diagnostics[0];
+  const event = outcome.events.find(
+    (candidate) =>
+      candidate.kind === "output" && candidate.output.kind === "diagnostic",
+  );
 
-  if (diagnostic === undefined) {
+  if (event?.kind !== "output" || event.output.kind !== "diagnostic") {
     assert.fail("Expected a failure diagnostic.");
   }
 
-  return diagnostic.message;
+  return event.output.diagnostic.message;
 }
 
-function failureMessages(outcome: CommandOutcome): ReadonlyArray<string> {
+function failureMessages(outcome: CommandLineOutcome): ReadonlyArray<string> {
   if (outcome.kind !== "failed") {
     assert.fail("Expected a failed command outcome.");
   }
 
-  return outcome.diagnostics.map((diagnostic) => diagnostic.message);
+  return outcome.events.flatMap((event) =>
+    event.kind === "output" && event.output.kind === "diagnostic"
+      ? [event.output.diagnostic.message]
+      : []
+  );
 }
 
-function runtimeTruncations(outcome: CommandOutcome): ReadonlyArray<string> {
+function runtimeTruncations(outcome: CommandLineOutcome): ReadonlyArray<string> {
   return succeeded(outcome).outputs.flatMap((output) =>
     output.kind === "diagnostic" && output.diagnostic.code === "runtime.truncated"
       ? [output.diagnostic.message]
@@ -433,6 +458,73 @@ test("executes virtual readers for quoted, relative, and current-directory paths
   assert.equal(relative, quoted);
   assert.equal(pwd, "~/projects");
   assert.equal(projects, "~");
+});
+
+test("sequences compound directories and retains completed results at terminal status", async () => {
+  const registry = createRegistry();
+  const sequence = await execute("cd projects ; pwd", registry);
+  const conditional = await execute("cd projects && pwd", registry);
+  const latest = await execute("cd projects ; cd .. ; pwd", registry);
+  const failed = await execute("echo before ; cat missing.md", registry);
+  const cancelled = await execute(
+    "echo before ; cat about.md ; echo after",
+    createRegistry(100, {
+      read: () => Promise.resolve({ kind: "cancelled" }),
+    }),
+  );
+  assert.equal(outputText(sequence), "~/projects");
+  assert.equal(outputText(conditional), "~/projects");
+  assert.equal(outputText(latest), "~");
+  assert.equal(failed.kind, "failed");
+  assert.equal(cancelled.kind, "cancelled");
+  assert.deepEqual(
+    failed.events.flatMap((event) =>
+      event.kind === "output" && event.output.kind === "text"
+        ? [event.output.text]
+        : []
+    ),
+    ["before"],
+  );
+  assert.deepEqual(
+    cancelled.events.flatMap((event) =>
+      event.kind === "output" && event.output.kind === "text"
+        ? [event.output.text]
+        : []
+    ),
+    ["before"],
+  );
+  assert.equal(
+    cancelled.events.some(
+      (event) =>
+        event.kind === "output" &&
+        event.output.kind === "diagnostic" &&
+        event.output.diagnostic.code === "runtime.cancelled",
+    ),
+    true,
+  );
+});
+
+test("stops compound execution at a viewer interaction boundary", async () => {
+  const registry = createRegistry();
+  const viewer = await execute(
+    "echo before ; less notes/field-notes/filesystems/sample-note.md ; echo after",
+    registry,
+  );
+
+  assert.deepEqual(
+    viewer.events.flatMap((event) =>
+      event.kind === "output" && event.output.kind === "text"
+        ? [event.output.text]
+        : []
+    ),
+    ["before"],
+  );
+  assert.equal(
+    viewer.events.some(
+      (event) => event.kind === "effect" && event.effect.kind === "open-viewer",
+    ),
+    true,
+  );
 });
 
 test("implements line readers, terminal history, manual pages, and pager effects", async () => {
@@ -950,10 +1042,16 @@ test("routes unexpected supplier failures through the execution boundary", async
   }
 
   assert.strictEqual(outcome.failure.cause, cause);
-  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
-  assert.equal(outcome.diagnostics[0]?.message, "The command could not complete.");
+  const diagnostics = outcome.events.flatMap((event) =>
+    event.kind === "output" && event.output.kind === "diagnostic"
+      ? [event.output.diagnostic]
+      : []
+  );
+
+  assert.equal(diagnostics[0]?.code, "runtime.execution-failed");
+  assert.equal(diagnostics[0]?.message, "The command could not complete.");
   assert.equal(
-    outcome.diagnostics.some((diagnostic) => diagnostic.message.includes(cause.message)),
+    diagnostics.some((diagnostic) => diagnostic.message.includes(cause.message)),
     false,
   );
 });
@@ -981,5 +1079,16 @@ test("normalizes non-Error supplier failures at the execution boundary", async (
 
   assert.equal(outcome.failure.cause.message, "Command execution failed.");
   assert.strictEqual(outcome.failure.cause.cause, thrown);
-  assert.equal(outcome.diagnostics[0]?.code, "runtime.execution-failed");
+  const diagnosticEvent = outcome.events.find(
+    (event) => event.kind === "output" && event.output.kind === "diagnostic",
+  );
+
+  if (
+    diagnosticEvent?.kind !== "output" ||
+    diagnosticEvent.output.kind !== "diagnostic"
+  ) {
+    assert.fail("Expected the execution failure diagnostic.");
+  }
+
+  assert.equal(diagnosticEvent.output.diagnostic.code, "runtime.execution-failed");
 });

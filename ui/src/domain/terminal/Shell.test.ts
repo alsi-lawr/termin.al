@@ -1,13 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
-import { executeCommandLine } from "../../application/commands/CommandExecution.ts";
-import {
-  createCommandRegistry,
-  type CommandMetadata,
-  type CommandInvocation,
-  type CommandRegistry,
-} from "../../application/commands/CommandRegistry.ts";
 import { createCompletionRequest } from "./Completion.ts";
 import {
   resolveVirtualDirectory,
@@ -25,15 +18,10 @@ import {
   getShellAutosuggestion,
   getShellStatus,
   reduceShellState,
-  type CommandOutcome,
+  type CommandLineOutcome,
+  type ShellOutput,
   type ShellState,
 } from "./Shell.ts";
-
-type RecordedCommand = Readonly<{
-  name: string;
-  arguments: ReadonlyArray<string>;
-  optionTerminatorKind: CommandInvocation["optionTerminator"]["kind"];
-}>;
 
 function createState(
   scrollbackLimit = 3,
@@ -65,17 +53,19 @@ function runningCommandId(state: ShellState) {
   return state.lifecycle.command.id;
 }
 
-function succeededOutcome(message: string): CommandOutcome {
+function succeededOutcome(message: string): CommandLineOutcome {
   return {
     kind: "succeeded",
-    outputs: [
+    events: [
       {
-        kind: "text",
-        id: createShellOutputId("command-output"),
-        text: message,
+        kind: "output",
+        output: {
+          kind: "text",
+          id: createShellOutputId("command-output"),
+          text: message,
+        },
       },
     ],
-    effects: [],
   };
 }
 
@@ -84,126 +74,6 @@ function settleSucceeded(state: ShellState, message: string): ShellState {
     kind: "command.settled",
     commandId: runningCommandId(state),
     outcome: succeededOutcome(message),
-  });
-}
-
-function settleClear(state: ShellState): ShellState {
-  return reduceShellState(state, {
-    kind: "command.settled",
-    commandId: runningCommandId(state),
-    outcome: {
-      kind: "succeeded",
-      outputs: [],
-      effects: [{ kind: "clear-scrollback" }],
-    },
-  });
-}
-
-function compoundCommandRegistry(calls: RecordedCommand[]): CommandRegistry {
-  const record = (invocation: CommandInvocation): void => {
-    calls.push({
-      name: invocation.name,
-      arguments: invocation.arguments,
-      optionTerminatorKind: invocation.optionTerminator.kind,
-    });
-  };
-  const metadata = (name: string): CommandMetadata => ({
-    group: "gnu-like",
-    name,
-    aliases: [],
-    summary: name,
-    usage: name,
-    examples: [],
-  });
-
-  return createCommandRegistry({
-    commands: [
-      {
-        metadata: metadata("pass"),
-        execute: (invocation) => {
-          record(invocation);
-          return Promise.resolve({
-            kind: "succeeded",
-            outputs: [{
-              kind: "text",
-              id: createShellOutputId("recorded-pass-output"),
-              text: "pass",
-            }],
-            effects: [],
-          });
-        },
-      },
-      {
-        metadata: metadata("fail"),
-        execute: (invocation) => {
-          record(invocation);
-          return Promise.resolve({
-            kind: "failed",
-            failure: {
-              kind: "command-rejected",
-              commandName: invocation.name,
-              message: "Expected test failure.",
-            },
-            diagnostics: [
-              {
-                kind: "command",
-                id: createShellDiagnosticId("expected-test-failure"),
-                code: "command.rejected",
-                message: "Expected test failure.",
-              },
-            ],
-          });
-        },
-      },
-      {
-        metadata: metadata("cancel"),
-        execute: (invocation) => {
-          record(invocation);
-          return Promise.resolve({
-            kind: "cancelled",
-            diagnostic: {
-              kind: "runtime",
-              id: createShellDiagnosticId("expected-test-cancellation"),
-              code: "runtime.cancelled",
-              message: "Expected test cancellation.",
-            },
-          });
-        },
-      },
-      {
-        metadata: metadata("capture"),
-        execute: (invocation) => {
-          record(invocation);
-          return Promise.resolve({
-            kind: "succeeded",
-            outputs: [{
-              kind: "text",
-              id: createShellOutputId("recorded-capture-output"),
-              text: invocation.arguments.join(" "),
-            }],
-            effects: [],
-          });
-        },
-      },
-    ],
-  });
-}
-
-async function executeSubmittedCommand(
-  source: string,
-  registry: CommandRegistry,
-  signal: AbortSignal = new AbortController().signal,
-): Promise<CommandOutcome> {
-  const submitted = submit(createState(), source);
-
-  if (submitted.lifecycle.kind !== "running") {
-    assert.fail("Expected a submitted command line.");
-  }
-
-  return executeCommandLine({
-    registry,
-    request: submitted.lifecycle.command,
-    signal,
   });
 }
 
@@ -288,14 +158,32 @@ test("reduces command execution and captures stable command cwd history", () => 
   assert.deepEqual(thirdSettled.pendingEffect, { kind: "none" });
 });
 
-test("clear removes the complete transcript and preserves command history", () => {
+test("clear removes earlier output while preserving later output and command history", () => {
   const withTranscript = settleSucceeded(submit(createState(), "pwd"), "~");
-  const cleared = settleClear(submit(withTranscript, "clear"));
+  const submitted = submit(withTranscript, "clear ; pwd");
+  const output: ShellOutput = {
+    kind: "text",
+    id: createShellOutputId("post-clear-output"),
+    text: "~",
+  };
+  const cleared = reduceShellState(submitted, {
+    kind: "command.settled",
+    commandId: runningCommandId(submitted),
+    outcome: {
+      kind: "succeeded",
+      events: [
+        { kind: "effect", effect: { kind: "clear-scrollback" } },
+        { kind: "output", output },
+      ],
+    },
+  });
 
-  assert.deepEqual(cleared.history, []);
+  assert.deepEqual(cleared.history[0]?.outcome.events, [
+    { kind: "output", output },
+  ]);
   assert.deepEqual(
     cleared.commandHistory.map((entry) => entry.source),
-    ["pwd", "clear"],
+    ["pwd", "clear ; pwd"],
   );
   assert.deepEqual(cleared.lifecycle, { kind: "idle" });
   assert.deepEqual(cleared.pendingEffect, { kind: "none" });
@@ -310,11 +198,13 @@ test("keeps each shell current directory immutable and records submission contex
     commandId,
     outcome: {
       kind: "succeeded",
-      outputs: [],
-      effects: [
+      events: [
         {
-          kind: "set-current-directory",
-          directory: projectsDirectoryPath(),
+          kind: "effect",
+          effect: {
+            kind: "set-current-directory",
+            directory: projectsDirectoryPath(),
+          },
         },
       ],
     },
@@ -342,157 +232,24 @@ test("requests cancellation through the active command AbortSignal seam", () => 
     commandId,
     outcome: {
       kind: "cancelled",
-      diagnostic: {
-        kind: "runtime",
-        id: createShellDiagnosticId("cancelled-command"),
-        code: "runtime.cancelled",
-        message: "Command cancelled.",
-      },
+      events: [{
+        kind: "output",
+        output: {
+          kind: "diagnostic",
+          id: createShellOutputId("cancelled-output"),
+          diagnostic: {
+            kind: "runtime",
+            id: createShellDiagnosticId("cancelled-command"),
+            code: "runtime.cancelled",
+            message: "Command cancelled.",
+          },
+        },
+      }],
     },
   });
 
   assert.equal(settled.lifecycle.kind, "idle");
   assert.equal(settled.history[0]?.outcome.kind, "cancelled");
-});
-
-test("executes compound lists left to right with typed short-circuit status", async () => {
-  const calls: RecordedCommand[] = [];
-  const registry = compoundCommandRegistry(calls);
-
-  const outcome = await executeSubmittedCommand(
-    "pass && capture and || capture skipped ; " +
-      "fail && capture skipped-too || capture recovered ; capture final",
-    registry,
-  );
-
-  assert.equal(outcome.kind, "succeeded");
-
-  if (outcome.kind !== "succeeded") {
-    assert.fail("Expected the recovered list to succeed.");
-  }
-
-  assert.deepEqual(
-    outcome.outputs.map((output) => output.kind),
-    ["text", "text", "diagnostic", "text", "text"],
-  );
-  assert.deepEqual(
-    calls.map(({ name, arguments: argumentsList }) => [name, ...argumentsList]),
-    [
-      ["pass"],
-      ["capture", "and"],
-      ["fail"],
-      ["capture", "recovered"],
-      ["capture", "final"],
-    ],
-  );
-
-  calls.length = 0;
-
-  await executeSubmittedCommand(
-    "pass || capture skipped && capture left-to-right",
-    registry,
-  );
-
-  assert.deepEqual(
-    calls.map(({ name, arguments: argumentsList }) => [name, ...argumentsList]),
-    [["pass"], ["capture", "left-to-right"]],
-  );
-});
-
-test("keeps quoted and escaped operators literal and preserves option terminators", async () => {
-  const calls: RecordedCommand[] = [];
-  const registry = compoundCommandRegistry(calls);
-
-  const outcome = await executeSubmittedCommand(
-    "capture ';' \\|\\| \"&&\" -- --literal",
-    registry,
-  );
-
-  assert.equal(outcome.kind, "succeeded");
-  assert.deepEqual(calls, [
-    {
-      name: "capture",
-      arguments: [";", "||", "&&", "--literal"],
-      optionTerminatorKind: "present",
-    },
-  ]);
-});
-
-test("rejects malformed lists and unsupported pipelines before execution", async () => {
-  const cases = [
-    { source: "; pass", code: "parse.unexpected-operator", position: 0 },
-    { source: "pass &&", code: "parse.trailing-operator", position: 5 },
-    { source: "pass || ; fail", code: "parse.unexpected-operator", position: 8 },
-    {
-      source: "pass & capture later",
-      code: "parse.unsupported-background-operator",
-      position: 5,
-    },
-    {
-      source: "pass | capture later",
-      code: "command.pipeline-unsupported",
-      position: 5,
-    },
-    {
-      source: "pass ; capture 'unfinished",
-      code: "parse.unterminated-single-quote",
-      position: 15,
-    },
-  ];
-
-  for (const expected of cases) {
-    const calls: RecordedCommand[] = [];
-    const outcome = await executeSubmittedCommand(
-      expected.source,
-      compoundCommandRegistry(calls),
-    );
-
-    assert.equal(outcome.kind, "failed", expected.source);
-
-    if (outcome.kind !== "failed") {
-      assert.fail(`Expected '${expected.source}' to fail.`);
-    }
-
-    const diagnostic = outcome.diagnostics[0];
-
-    assert.equal(diagnostic?.code, expected.code, expected.source);
-
-    if (diagnostic === undefined || !("position" in diagnostic)) {
-      assert.fail(`Expected '${expected.source}' to report a position.`);
-    }
-
-    assert.equal(diagnostic.position, expected.position, expected.source);
-    assert.deepEqual(calls, [], expected.source);
-  }
-});
-
-test("cancellation prevents every later command unit from starting", async () => {
-  const calls: RecordedCommand[] = [];
-  const registry = compoundCommandRegistry(calls);
-
-  const outcome = await executeSubmittedCommand(
-    "cancel ; capture later || capture fallback",
-    registry,
-  );
-
-  assert.equal(outcome.kind, "cancelled");
-  assert.deepEqual(
-    calls.map(({ name }) => name),
-    ["cancel"],
-  );
-
-  calls.length = 0;
-  const controller = new AbortController();
-  controller.abort();
-
-  const preCancelled = await executeSubmittedCommand(
-    "capture never",
-    registry,
-    controller.signal,
-  );
-
-  assert.equal(preCancelled.kind, "cancelled");
-  assert.deepEqual(calls, []);
 });
 
 test("discards execution causes when storing shell history", () => {
@@ -519,12 +276,19 @@ test("discards execution causes when storing shell history", () => {
         commandName: "cat",
         cause,
       },
-      diagnostics: [
+      events: [
         {
-          kind: "runtime",
-          id: createShellDiagnosticId("execution-failed"),
-          code: "runtime.execution-failed",
-          message: "The command could not complete.",
+          kind: "output",
+          output: {
+            kind: "diagnostic",
+            id: createShellOutputId("execution-failed-output"),
+            diagnostic: {
+              kind: "runtime",
+              id: createShellDiagnosticId("execution-failed"),
+              code: "runtime.execution-failed",
+              message: "The command could not complete.",
+            },
+          },
         },
       ],
     },

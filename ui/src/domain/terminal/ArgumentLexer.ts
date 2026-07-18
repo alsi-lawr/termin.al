@@ -9,7 +9,7 @@ export type ArgumentIndex = number & {
   readonly [argumentIndexBrand]: "ArgumentIndex";
 };
 
-export type ShellOperator = ";" | "&&" | "||" | "|";
+export type ShellOperator = ";" | "&&" | "||" | "|" | "&";
 
 export type LexedArgument = Readonly<{
   kind: "argument";
@@ -128,6 +128,10 @@ function shellOperatorAt(
 
   if (character === "&" && nextCharacter === "&") {
     return "&&";
+  }
+
+  if (character === "&") {
+    return "&";
   }
 
   if (character === "|" && nextCharacter === "|") {
@@ -254,16 +258,6 @@ export function lexArguments(source: string): ArgumentLexerResult {
       }
 
       continue;
-    }
-
-    if (character === "&") {
-      return {
-        kind: "error",
-        error: {
-          kind: "unsupported-background-operator",
-          position: createSourceOffset(position, source),
-        },
-      };
     }
 
     if (character === "'") {

@@ -7,10 +7,11 @@ import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.
 import {
   createShellDiagnosticId,
   createShellId,
+  createShellOutputId,
   createShellSessionId,
   createShellState,
   reduceShellState,
-  type CommandOutcome,
+  type CommandLineOutcome,
 } from "../../domain/terminal/Shell.ts";
 
 function isTerminalHistoryRowModule(
@@ -55,19 +56,26 @@ test("does not render secret-bearing execution errors from shell history", async
     assert.fail("Expected the shell to be running a command.");
   }
 
-  const outcome: CommandOutcome = {
+  const outcome: CommandLineOutcome = {
     kind: "failed",
     failure: {
       kind: "execution-error",
       commandName: "cat",
       cause,
     },
-    diagnostics: [
+    events: [
       {
-        kind: "runtime",
-        id: createShellDiagnosticId("execution-failed"),
-        code: "runtime.execution-failed",
-        message: "The command could not complete.",
+        kind: "output",
+        output: {
+          kind: "diagnostic",
+          id: createShellOutputId("execution-failed-output"),
+          diagnostic: {
+            kind: "runtime",
+            id: createShellDiagnosticId("execution-failed"),
+            code: "runtime.execution-failed",
+            message: "The command could not complete.",
+          },
+        },
       },
     ],
   };

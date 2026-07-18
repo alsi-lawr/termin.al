@@ -207,6 +207,31 @@ export type CommandOutcome =
       diagnostic: Extract<ShellDiagnostic, { kind: "runtime" }>;
     }>;
 
+export type CommandLineEvent =
+  | Readonly<{
+      kind: "output";
+      output: ShellOutput;
+    }>
+  | Readonly<{
+      kind: "effect";
+      effect: CommandEffect;
+    }>;
+
+export type CommandLineOutcome =
+  | Readonly<{
+      kind: "succeeded";
+      events: ReadonlyArray<CommandLineEvent>;
+    }>
+  | Readonly<{
+      kind: "failed";
+      events: ReadonlyArray<CommandLineEvent>;
+      failure: CommandFailure;
+    }>
+  | Readonly<{
+      kind: "cancelled";
+      events: ReadonlyArray<CommandLineEvent>;
+    }>;
+
 type ShellHistoryFailure =
   | Exclude<CommandFailure, { kind: "execution-error" }>
   | Readonly<{
@@ -215,11 +240,11 @@ type ShellHistoryFailure =
     }>;
 
 export type ShellHistoryOutcome =
-  | Exclude<CommandOutcome, { kind: "failed" }>
+  | Exclude<CommandLineOutcome, { kind: "failed" }>
   | Readonly<{
       kind: "failed";
       failure: ShellHistoryFailure;
-      diagnostics: ReadonlyArray<ShellDiagnostic>;
+      events: ReadonlyArray<CommandLineEvent>;
     }>;
 
 export type ShellCommandRequest = Readonly<{
@@ -423,7 +448,7 @@ export type ShellAction =
   | Readonly<{
       kind: "command.settled";
       commandId: CommandId;
-      outcome: CommandOutcome;
+      outcome: CommandLineOutcome;
     }>
   | Readonly<{
       kind: "effect.consumed";
@@ -622,13 +647,12 @@ function browseNewerHistory(state: ShellState): ShellState {
   };
 }
 
-function commandEffects(outcome: CommandOutcome): ReadonlyArray<CommandEffect> {
-  return outcome.kind === "succeeded" ? outcome.effects : [];
-}
-
-function historyOutcome(outcome: CommandOutcome): ShellHistoryOutcome {
+function historyOutcome(
+  outcome: CommandLineOutcome,
+  events: ReadonlyArray<CommandLineEvent>,
+): ShellHistoryOutcome {
   if (outcome.kind !== "failed") {
-    return outcome;
+    return { ...outcome, events };
   }
 
   const failure: ShellHistoryFailure = outcome.failure.kind === "execution-error"
@@ -641,36 +665,49 @@ function historyOutcome(outcome: CommandOutcome): ShellHistoryOutcome {
   return {
     kind: "failed",
     failure,
-    diagnostics: outcome.diagnostics,
+    events,
   };
 }
 
 function requestedSecretPrompt(
-  effects: ReadonlyArray<CommandEffect>,
+  events: ReadonlyArray<CommandLineEvent>,
 ): SecretPromptState | undefined {
-  const effect = effects.find(
-    (candidate) => candidate.kind === "request-secret-prompt",
-  );
-
-  if (!effect || effect.kind !== "request-secret-prompt") {
-    return undefined;
+  for (const event of events) {
+    if (event.kind === "effect" && event.effect.kind === "request-secret-prompt") {
+      return createSecretPromptState(event.effect.request);
+    }
   }
 
-  return createSecretPromptState(effect.request);
+  return undefined;
 }
 
-function clearsScrollback(effects: ReadonlyArray<CommandEffect>): boolean {
-  return effects.some((effect) => effect.kind === "clear-scrollback");
+function lastClearIndex(events: ReadonlyArray<CommandLineEvent>): number {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+
+    if (event?.kind === "effect" && event.effect.kind === "clear-scrollback") {
+      return index;
+    }
+  }
+
+  return -1;
 }
 
 function changedCurrentDirectory(
-  effects: ReadonlyArray<CommandEffect>,
+  events: ReadonlyArray<CommandLineEvent>,
 ): VirtualDirectoryPath | undefined {
-  const effect = effects.find(
-    (candidate) => candidate.kind === "set-current-directory",
-  );
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
 
-  return effect?.kind === "set-current-directory" ? effect.directory : undefined;
+    if (
+      event?.kind === "effect" &&
+      event.effect.kind === "set-current-directory"
+    ) {
+      return event.effect.directory;
+    }
+  }
+
+  return undefined;
 }
 
 function selectedCompletionCandidate(
@@ -1222,21 +1259,27 @@ export function reduceShellState(
         return state;
       }
 
-      const effects = commandEffects(action.outcome);
-      const clearsTranscript = clearsScrollback(effects);
-      const secretPrompt = requestedSecretPrompt(effects);
-      const currentDirectory = changedCurrentDirectory(effects);
-      const storedOutcome = historyOutcome(action.outcome);
-      const history = clearsTranscript
-        ? []
-        : appendBounded(state.history, state.scrollbackLimit, {
+      const clearIndex = lastClearIndex(action.outcome.events);
+      const visibleEvents = clearIndex === -1
+        ? action.outcome.events
+        : action.outcome.events.slice(clearIndex + 1);
+      const secretPrompt = requestedSecretPrompt(action.outcome.events);
+      const currentDirectory = changedCurrentDirectory(action.outcome.events);
+      const storedOutcome = historyOutcome(action.outcome, visibleEvents);
+      const priorHistory = clearIndex === -1 ? state.history : [];
+      const keepsCommandLine = clearIndex === -1 || visibleEvents.some(
+        (event) => event.kind === "output",
+      );
+      const history = keepsCommandLine
+        ? appendBounded(priorHistory, state.scrollbackLimit, {
             id: createHistoryEntryId(
               state.sessionId,
               state.nextHistorySequence,
             ),
             command: state.lifecycle.command,
             outcome: storedOutcome,
-          });
+          })
+        : priorHistory;
 
       return {
         ...state,

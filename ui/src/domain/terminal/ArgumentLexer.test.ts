@@ -77,6 +77,13 @@ test("separates unquoted operators and keeps quoted or escaped operators literal
       .map((token) => token.position),
     [12, 24, 29],
   );
+
+  assert.deepEqual(
+    successfulLex("one&two").tokens.map((token) =>
+      token.kind === "operator" ? token.operator : token.kind
+    ),
+    ["argument", "&", "argument"],
+  );
 });
 
 test("tracks option terminators independently for each command unit", () => {
@@ -113,9 +120,5 @@ test("reports each explicit lexer error", () => {
   assert.deepEqual(lexArguments('open "trailing\\'), {
     kind: "error",
     error: { kind: "trailing-escape", position: 14 },
-  });
-  assert.deepEqual(lexArguments("echo one & echo two"), {
-    kind: "error",
-    error: { kind: "unsupported-background-operator", position: 9 },
   });
 });

@@ -6,11 +6,13 @@ import {
   type ShellSyntaxError,
   type SourceOffset,
 } from "../../domain/terminal/ArgumentLexer.ts";
+import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createShellDiagnosticId,
   createShellOutputId,
+  type CommandLineEvent,
+  type CommandLineOutcome,
   type CommandOutcome,
-  type CommandEffect,
   type ShellDiagnostic,
   type ShellCommandRequest,
   type ShellOutput,
@@ -27,46 +29,18 @@ export type ExecuteCommandLineOptions = Readonly<{
 }>;
 
 type ParsedCommand = Readonly<{
+  connector: "always" | "and" | "or";
+  command: LexedArgument;
   arguments: ReadonlyArray<LexedArgument>;
   optionTerminator: OptionTerminator;
 }>;
-
-type ParsedPipeline =
-  | Readonly<{
-      kind: "command";
-      command: ParsedCommand;
-    }>
-  | Readonly<{
-      kind: "pipeline";
-      commands: ReadonlyArray<ParsedCommand>;
-      position: SourceOffset;
-    }>;
-
-type ConditionalCommand = Readonly<{
-  connector: "first" | "and" | "or";
-  pipeline: ParsedPipeline;
-}>;
-
-type ParsedCommandLine = ReadonlyArray<ReadonlyArray<ConditionalCommand>>;
-
-type ParsedValue<Value> = Readonly<{
-  kind: "success";
-  value: Value;
-  nextIndex: number;
-}>;
-
-type ParseResult<Value> =
-  | ParsedValue<Value>
-  | Readonly<{
-      kind: "error";
-      error: ShellSyntaxError;
-    }>;
 
 type CommandLineParseResult =
   | Readonly<{ kind: "empty" }>
   | Readonly<{
       kind: "success";
-      commandLine: ParsedCommandLine;
+      commands: ReadonlyArray<ParsedCommand>;
+      pipelinePosition: SourceOffset | undefined;
     }>
   | Readonly<{
       kind: "error";
@@ -210,163 +184,6 @@ function executionFailureOutcome(
   };
 }
 
-function parseCommand(
-  tokens: ReadonlyArray<ArgumentLexerToken>,
-  startIndex: number,
-): ParseResult<ParsedCommand> {
-  const firstToken = tokens[startIndex];
-
-  if (firstToken === undefined || firstToken.kind === "operator") {
-    const position = firstToken?.position;
-
-    if (position === undefined) {
-      throw new Error("A trailing operator must be handled by its owning parser.");
-    }
-
-    return {
-      kind: "error",
-      error: { kind: "unexpected-operator", position },
-    };
-  }
-
-  const argumentsList: LexedArgument[] = [];
-  let optionTerminator: OptionTerminator = { kind: "absent" };
-  let nextIndex = startIndex;
-
-  while (nextIndex < tokens.length) {
-    const token = tokens[nextIndex];
-
-    if (token === undefined || token.kind === "operator") {
-      break;
-    }
-
-    if (token.kind === "argument") {
-      argumentsList.push(token);
-    } else {
-      optionTerminator = {
-        kind: "present",
-        argumentIndex: token.argumentIndex,
-        sourceStart: token.sourceStart,
-        sourceEnd: token.sourceEnd,
-      };
-    }
-
-    nextIndex += 1;
-  }
-
-  return {
-    kind: "success",
-    value: { arguments: argumentsList, optionTerminator },
-    nextIndex,
-  };
-}
-
-function parsePipeline(
-  tokens: ReadonlyArray<ArgumentLexerToken>,
-  startIndex: number,
-): ParseResult<ParsedPipeline> {
-  const firstCommand = parseCommand(tokens, startIndex);
-
-  if (firstCommand.kind === "error") {
-    return firstCommand;
-  }
-
-  const commands = [firstCommand.value];
-  let nextIndex = firstCommand.nextIndex;
-  let pipelinePosition: SourceOffset | undefined;
-
-  while (nextIndex < tokens.length) {
-    const token = tokens[nextIndex];
-
-    if (token?.kind !== "operator" || token.operator !== "|") {
-      break;
-    }
-
-    pipelinePosition ??= token.position;
-    const commandIndex = nextIndex + 1;
-
-    if (commandIndex >= tokens.length) {
-      return {
-        kind: "error",
-        error: { kind: "trailing-operator", position: token.position },
-      };
-    }
-
-    const command = parseCommand(tokens, commandIndex);
-
-    if (command.kind === "error") {
-      return command;
-    }
-
-    commands.push(command.value);
-    nextIndex = command.nextIndex;
-  }
-
-  if (pipelinePosition === undefined) {
-    return {
-      kind: "success",
-      value: { kind: "command", command: firstCommand.value },
-      nextIndex,
-    };
-  }
-
-  return {
-    kind: "success",
-    value: { kind: "pipeline", commands, position: pipelinePosition },
-    nextIndex,
-  };
-}
-
-function parseAndOrList(
-  tokens: ReadonlyArray<ArgumentLexerToken>,
-  startIndex: number,
-): ParseResult<ReadonlyArray<ConditionalCommand>> {
-  const firstPipeline = parsePipeline(tokens, startIndex);
-
-  if (firstPipeline.kind === "error") {
-    return firstPipeline;
-  }
-
-  const commands: ConditionalCommand[] = [
-    { connector: "first", pipeline: firstPipeline.value },
-  ];
-  let nextIndex = firstPipeline.nextIndex;
-
-  while (nextIndex < tokens.length) {
-    const token = tokens[nextIndex];
-
-    if (
-      token?.kind !== "operator" ||
-      (token.operator !== "&&" && token.operator !== "||")
-    ) {
-      break;
-    }
-
-    const pipelineIndex = nextIndex + 1;
-
-    if (pipelineIndex >= tokens.length) {
-      return {
-        kind: "error",
-        error: { kind: "trailing-operator", position: token.position },
-      };
-    }
-
-    const pipeline = parsePipeline(tokens, pipelineIndex);
-
-    if (pipeline.kind === "error") {
-      return pipeline;
-    }
-
-    commands.push({
-      connector: token.operator === "&&" ? "and" : "or",
-      pipeline: pipeline.value,
-    });
-    nextIndex = pipeline.nextIndex;
-  }
-
-  return { kind: "success", value: commands, nextIndex };
-}
-
 function parseCommandLine(
   tokens: ReadonlyArray<ArgumentLexerToken>,
 ): CommandLineParseResult {
@@ -374,78 +191,113 @@ function parseCommandLine(
     return { kind: "empty" };
   }
 
-  const lists: Array<ReadonlyArray<ConditionalCommand>> = [];
-  let nextIndex = 0;
+  const commands: ParsedCommand[] = [];
+  let connector: ParsedCommand["connector"] = "always";
+  let hasEmptyCommand = false;
+  let pipelinePosition: SourceOffset | undefined;
+  let tokenIndex = 0;
 
-  while (nextIndex < tokens.length) {
-    const list = parseAndOrList(tokens, nextIndex);
+  while (tokenIndex < tokens.length) {
+    const firstToken = tokens[tokenIndex];
 
-    if (list.kind === "error") {
-      return list;
+    if (firstToken?.kind === "operator") {
+      return {
+        kind: "error",
+        error: { kind: "unexpected-operator", position: firstToken.position },
+      };
     }
 
-    lists.push(list.value);
-    nextIndex = list.nextIndex;
+    let command: LexedArgument | undefined;
+    const argumentsList: LexedArgument[] = [];
+    let optionTerminator: OptionTerminator = { kind: "absent" };
 
-    if (nextIndex >= tokens.length) {
+    while (tokenIndex < tokens.length) {
+      const token = tokens[tokenIndex];
+
+      if (token === undefined || token.kind === "operator") {
+        break;
+      }
+
+      if (token.kind === "argument") {
+        if (command === undefined) {
+          command = token;
+        } else {
+          argumentsList.push(token);
+        }
+      } else {
+        optionTerminator = {
+          kind: "present",
+          argumentIndex: token.argumentIndex,
+          sourceStart: token.sourceStart,
+          sourceEnd: token.sourceEnd,
+        };
+      }
+
+      tokenIndex += 1;
+    }
+
+    if (command === undefined) {
+      hasEmptyCommand = true;
+    } else {
+      commands.push({
+        connector,
+        command,
+        arguments: argumentsList,
+        optionTerminator,
+      });
+    }
+
+    const operator = tokens[tokenIndex];
+
+    if (operator === undefined) {
       break;
     }
 
-    const token = tokens[nextIndex];
+    if (operator.kind !== "operator") {
+      throw new Error("Command parsing stopped before a non-operator token.");
+    }
 
-    if (token?.kind !== "operator" || token.operator !== ";") {
-      if (token?.kind !== "operator") {
-        throw new Error("Command parsing stopped before a non-operator token.");
-      }
-
+    if (operator.operator === "&") {
       return {
         kind: "error",
-        error: { kind: "unexpected-operator", position: token.position },
+        error: {
+          kind: "unsupported-background-operator",
+          position: operator.position,
+        },
       };
     }
 
-    nextIndex += 1;
-
-    if (nextIndex >= tokens.length) {
+    if (tokenIndex + 1 >= tokens.length) {
       return {
         kind: "error",
-        error: { kind: "trailing-operator", position: token.position },
+        error: { kind: "trailing-operator", position: operator.position },
       };
     }
-  }
 
-  return { kind: "success", commandLine: lists };
-}
-
-function pipelinePosition(commandLine: ParsedCommandLine): SourceOffset | undefined {
-  for (const list of commandLine) {
-    for (const command of list) {
-      if (command.pipeline.kind === "pipeline") {
-        return command.pipeline.position;
-      }
+    if (operator.operator === "|") {
+      pipelinePosition ??= operator.position;
+      connector = "always";
+    } else if (operator.operator === "&&") {
+      connector = "and";
+    } else if (operator.operator === "||") {
+      connector = "or";
+    } else {
+      connector = "always";
     }
+
+    tokenIndex += 1;
   }
 
-  return undefined;
-}
-
-function hasCommandName(commandLine: ParsedCommandLine): boolean {
-  return commandLine.every((list) =>
-    list.every((command) => {
-      const commands = command.pipeline.kind === "command"
-        ? [command.pipeline.command]
-        : command.pipeline.commands;
-
-      return commands.every((candidate) => candidate.arguments.length > 0);
-    })
-  );
+  return hasEmptyCommand
+    ? { kind: "empty" }
+    : { kind: "success", commands, pipelinePosition };
 }
 
 function shouldExecute(
-  connector: ConditionalCommand["connector"],
+  connector: ParsedCommand["connector"],
   previousOutcome: CommandOutcome | undefined,
 ): boolean {
-  if (connector === "first" || previousOutcome === undefined) {
+  if (connector === "always" || previousOutcome === undefined) {
     return true;
   }
 
@@ -458,83 +310,113 @@ function shouldExecute(
     : previousOutcome.kind === "failed";
 }
 
-function listOutput(output: ShellOutput, sequence: number): ShellOutput {
-  const id = createShellOutputId(`command-list-output-${sequence}`);
-
-  switch (output.kind) {
-    case "text":
-      return { ...output, id };
-    case "diagnostic":
-      return { ...output, id };
-    case "prompt":
-      return { ...output, id };
-  }
+function outputEvent(output: ShellOutput, sequence: number): CommandLineEvent {
+  return {
+    kind: "output",
+    output: {
+      ...output,
+      id: createShellOutputId(`command-list-output-${sequence}`),
+    },
+  };
 }
 
-function appendCommandResult(
+function appendOutcome(
+  events: CommandLineEvent[],
   outcome: CommandOutcome,
-  outputs: ShellOutput[],
-  effects: CommandEffect[],
 ): void {
   if (outcome.kind === "succeeded") {
     for (const output of outcome.outputs) {
-      outputs.push(listOutput(output, outputs.length + 1));
+      events.push(outputEvent(output, events.length + 1));
     }
 
-    effects.push(...outcome.effects);
+    for (const effect of outcome.effects) {
+      events.push({ kind: "effect", effect });
+    }
     return;
   }
 
-  if (outcome.kind === "failed") {
-    for (const diagnostic of outcome.diagnostics) {
-      outputs.push(listOutput({
-        kind: "diagnostic",
-        id: createShellOutputId("command-list-diagnostic"),
-        diagnostic,
-      }, outputs.length + 1));
+  const diagnostics = outcome.kind === "failed"
+    ? outcome.diagnostics
+    : [outcome.diagnostic];
+
+  for (const diagnostic of diagnostics) {
+    events.push(outputEvent({
+      kind: "diagnostic",
+      id: createShellOutputId("command-list-diagnostic"),
+      diagnostic,
+    }, events.length + 1));
+  }
+}
+
+function lineOutcome(
+  events: ReadonlyArray<CommandLineEvent>,
+  outcome: CommandOutcome,
+): CommandLineOutcome {
+  switch (outcome.kind) {
+    case "succeeded":
+      return { kind: "succeeded", events };
+    case "failed":
+      return { kind: "failed", events, failure: outcome.failure };
+    case "cancelled":
+      return { kind: "cancelled", events };
+  }
+}
+
+function nextCurrentDirectory(
+  currentDirectory: VirtualDirectoryPath,
+  outcome: CommandOutcome,
+): VirtualDirectoryPath {
+  if (outcome.kind !== "succeeded") {
+    return currentDirectory;
+  }
+
+  let nextDirectory = currentDirectory;
+
+  for (const effect of outcome.effects) {
+    if (effect.kind === "set-current-directory") {
+      nextDirectory = effect.directory;
     }
   }
+
+  return nextDirectory;
+}
+
+function reachesInteractionBoundary(outcome: CommandOutcome): boolean {
+  return outcome.kind === "succeeded" && outcome.effects.some(
+    (effect) =>
+      effect.kind === "open-viewer" ||
+      effect.kind === "request-secret-prompt",
+  );
 }
 
 async function executeCommand(
   command: ParsedCommand,
+  currentDirectory: VirtualDirectoryPath,
   options: ExecuteCommandLineOptions,
 ): Promise<CommandOutcome> {
-  const [commandArgument, ...argumentsList] = command.arguments;
-
-  if (commandArgument === undefined) {
-    return emptyCommandOutcome();
-  }
-
-  const resolution = resolveCommand(options.registry, commandArgument.value);
+  const resolution = resolveCommand(options.registry, command.command.value);
 
   if (resolution.kind === "missing") {
     return missingCommandOutcome(resolution.requestedName);
   }
 
   try {
-    const outcome = await resolution.command.execute(
+    return await resolution.command.execute(
       {
         source: options.request.source,
         name: resolution.command.metadata.name,
-        arguments: argumentsList.map((argument) => argument.value),
+        arguments: command.arguments.map((argument) => argument.value),
         optionTerminator: command.optionTerminator,
       },
       {
         shellId: options.request.shellId,
         sessionId: options.request.sessionId,
-        currentDirectory: options.request.currentDirectory,
+        currentDirectory,
         commandHistory: options.request.commandHistory,
         registry: options.registry,
         signal: options.signal,
       },
     );
-
-    if (options.signal.aborted) {
-      return cancelledOutcome();
-    }
-
-    return outcome;
   } catch (thrown: unknown) {
     if (options.signal.aborted) {
       return cancelledOutcome();
@@ -548,65 +430,76 @@ async function executeCommand(
   }
 }
 
+function completedLine(
+  outcome: CommandOutcome,
+): CommandLineOutcome {
+  const events: CommandLineEvent[] = [];
+  appendOutcome(events, outcome);
+  return lineOutcome(events, outcome);
+}
+
 export async function executeCommandLine(
   options: ExecuteCommandLineOptions,
-): Promise<CommandOutcome> {
+): Promise<CommandLineOutcome> {
   if (options.signal.aborted) {
-    return cancelledOutcome();
+    return completedLine(cancelledOutcome());
   }
 
   const lexicalResult = lexArguments(options.request.source);
 
   if (lexicalResult.kind === "error") {
-    return parseFailureOutcome(lexicalResult.error);
+    return completedLine(parseFailureOutcome(lexicalResult.error));
   }
 
   const parseResult = parseCommandLine(lexicalResult.tokens);
 
   if (parseResult.kind === "empty") {
-    return emptyCommandOutcome();
+    return completedLine(emptyCommandOutcome());
   }
 
   if (parseResult.kind === "error") {
-    return parseFailureOutcome(parseResult.error);
+    return completedLine(parseFailureOutcome(parseResult.error));
   }
 
-  const unsupportedPosition = pipelinePosition(parseResult.commandLine);
-
-  if (unsupportedPosition !== undefined) {
-    return unsupportedPipelineOutcome(unsupportedPosition);
+  if (parseResult.pipelinePosition !== undefined) {
+    return completedLine(unsupportedPipelineOutcome(parseResult.pipelinePosition));
   }
 
-  if (!hasCommandName(parseResult.commandLine)) {
-    return emptyCommandOutcome();
-  }
-
+  const events: CommandLineEvent[] = [];
+  let currentDirectory = options.request.currentDirectory;
   let outcome: CommandOutcome | undefined;
-  const outputs: ShellOutput[] = [];
-  const effects: CommandEffect[] = [];
 
-  for (const list of parseResult.commandLine) {
-    for (const conditionalCommand of list) {
-      if (options.signal.aborted || outcome?.kind === "cancelled") {
-        return cancelledOutcome();
-      }
+  for (const command of parseResult.commands) {
+    if (options.signal.aborted || outcome?.kind === "cancelled") {
+      const cancelled = cancelledOutcome();
+      appendOutcome(events, cancelled);
+      return lineOutcome(events, cancelled);
+    }
 
-      if (!shouldExecute(conditionalCommand.connector, outcome)) {
-        continue;
-      }
+    if (!shouldExecute(command.connector, outcome)) {
+      continue;
+    }
 
-      if (conditionalCommand.pipeline.kind !== "command") {
-        throw new Error("Unsupported pipelines must be rejected before execution.");
-      }
+    outcome = await executeCommand(command, currentDirectory, options);
+    appendOutcome(events, outcome);
+    currentDirectory = nextCurrentDirectory(currentDirectory, outcome);
 
-      outcome = await executeCommand(conditionalCommand.pipeline.command, options);
-      appendCommandResult(outcome, outputs, effects);
+    if (outcome.kind === "cancelled") {
+      return lineOutcome(events, outcome);
+    }
+
+    if (options.signal.aborted) {
+      const cancelled = cancelledOutcome();
+      appendOutcome(events, cancelled);
+      return lineOutcome(events, cancelled);
+    }
+
+    if (reachesInteractionBoundary(outcome)) {
+      return lineOutcome(events, outcome);
     }
   }
 
-  if (outcome?.kind === "succeeded") {
-    return { kind: "succeeded", outputs, effects };
-  }
-
-  return outcome ?? emptyCommandOutcome();
+  return outcome === undefined
+    ? completedLine(emptyCommandOutcome())
+    : lineOutcome(events, outcome);
 }

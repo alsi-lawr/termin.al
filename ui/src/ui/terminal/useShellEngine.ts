@@ -5,7 +5,8 @@ import {
 import {
   getActiveShellPrompt,
   createShellDiagnosticId,
-  type CommandOutcome,
+  createShellOutputId,
+  type CommandLineOutcome,
   type CompletionCycleDirection,
   type ShellAction,
   type ShellState,
@@ -60,7 +61,7 @@ export type ShellEngine = Readonly<{
   complete: (direction: CompletionCycleDirection) => void;
 }>;
 
-function discardedCommandOutcome(commandName: string): CommandOutcome {
+function discardedCommandOutcome(commandName: string): CommandLineOutcome {
   return {
     kind: "failed",
     failure: {
@@ -68,12 +69,19 @@ function discardedCommandOutcome(commandName: string): CommandOutcome {
       commandName,
       cause: new Error("Command execution failed."),
     },
-    diagnostics: [
+    events: [
       {
-        kind: "runtime",
-        id: createShellDiagnosticId("discarded-command"),
-        code: "runtime.execution-failed",
-        message: "The command could not complete.",
+        kind: "output",
+        output: {
+          kind: "diagnostic",
+          id: createShellOutputId("discarded-command-output"),
+          diagnostic: {
+            kind: "runtime",
+            id: createShellDiagnosticId("discarded-command"),
+            code: "runtime.execution-failed",
+            message: "The command could not complete.",
+          },
+        },
       },
     ],
   };
