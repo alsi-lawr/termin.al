@@ -793,6 +793,9 @@ test("expands virtual globs and combines bounded find predicates", async () => {
       grepFileEntry("text", "~/docs/c.txt", "text"),
       grepDirectoryEntry("nested", "~/docs/nested"),
       grepFileEntry("deep", "~/docs/nested/deep.md", "deep"),
+      grepFileEntry("astral-grin", "~/😀.emoji", "astral-grin"),
+      grepFileEntry("astral-pray", "~/🙏.emoji", "astral-pray"),
+      grepFileEntry("astral-prefix", "~/🙏😀.emoji", "astral-prefix"),
     ],
     [
       { handle: "a", path: "~/docs/a.md", text: "hit a" },
@@ -817,6 +820,10 @@ test("expands virtual globs and combines bounded find predicates", async () => {
   );
   assert.equal(outputText(await execute("cat docs/?.md | grep hit", fixture.registry)), "hit a\nhit b");
   assert.equal((await execute("e*", fixture.registry)).kind, "failed");
+  assert.equal(
+    outputText(await execute("echo ?.emoji [😀].emoji *😀.emoji", fixture.registry)),
+    "~/😀.emoji ~/🙏.emoji ~/😀.emoji ~/😀.emoji ~/🙏😀.emoji",
+  );
 
   assert.equal(outputText(await execute("find docs -maxdepth 0", fixture.registry)), "~/docs");
   assert.equal(
@@ -829,6 +836,11 @@ test("expands virtual globs and combines bounded find predicates", async () => {
   assert.equal(
     outputText(await execute("find docs -mindepth 1 -maxdepth 1 -type d", fixture.registry)),
     "~/docs/nested",
+  );
+  assert.equal(outputText(await execute("find -name '😀.emoji'", fixture.registry)), "~/😀.emoji");
+  assert.equal(
+    outputText(await execute("find -name '[😀-🙏].emoji'", fixture.registry)),
+    "~/😀.emoji\n~/🙏.emoji",
   );
   assert.deepEqual(
     await Promise.all(["-1", "9", "1.5", "9007199254740992"].map(async (depth) =>

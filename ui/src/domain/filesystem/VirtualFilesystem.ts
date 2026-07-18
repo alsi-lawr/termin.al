@@ -364,13 +364,34 @@ const protectedGlobMarker = "\uFDD0";
 type BracketClass = Readonly<{ endOffset: number; matches: boolean }>;
 
 function globValueAt(pattern: string, offset: number): string | undefined {
-  return pattern[offset] === protectedGlobMarker
-    ? pattern[offset + 1]
-    : pattern[offset];
+  const characterOffset = pattern[offset] === protectedGlobMarker
+    ? offset + 1
+    : offset;
+  const codePoint = pattern.codePointAt(characterOffset);
+
+  return codePoint === undefined ? undefined : String.fromCodePoint(codePoint);
 }
 
 function nextGlobOffset(pattern: string, offset: number): number {
-  return offset + (pattern[offset] === protectedGlobMarker ? 2 : 1);
+  const markerWidth = pattern[offset] === protectedGlobMarker ? 1 : 0;
+  const codePoint = pattern.codePointAt(offset + markerWidth);
+  const characterWidth = codePoint !== undefined && codePoint > 0xFFFF ? 2 : 1;
+
+  return offset + markerWidth + characterWidth;
+}
+
+function valueAt(value: string, offset: number): string | undefined {
+  const codePoint = value.codePointAt(offset);
+  return codePoint === undefined ? undefined : String.fromCodePoint(codePoint);
+}
+
+function nextValueOffset(value: string, offset: number): number {
+  const codePoint = value.codePointAt(offset);
+  return offset + (codePoint !== undefined && codePoint > 0xFFFF ? 2 : 1);
+}
+
+function firstCodePoint(value: string): number {
+  return value.codePointAt(0) ?? -1;
 }
 
 function protectedVirtualPathGlob(
@@ -421,11 +442,16 @@ function bracketClassAt(
       : undefined;
 
     if (rangeEnd !== undefined && rangeEnd !== "]" && rangeEnd !== "/") {
-      if (member > rangeEnd) {
+      const memberCodePoint = firstCodePoint(member);
+      const rangeEndCodePoint = firstCodePoint(rangeEnd);
+      const valueCodePoint = firstCodePoint(value);
+
+      if (memberCodePoint > rangeEndCodePoint) {
         return undefined;
       }
 
-      matches = matches || member <= value && value <= rangeEnd;
+      matches = matches ||
+        memberCodePoint <= valueCodePoint && valueCodePoint <= rangeEndCodePoint;
       memberOffset = nextGlobOffset(pattern, rangeOffset);
     } else {
       if (memberActive && member === "-") {
@@ -491,12 +517,12 @@ function matchesVirtualPathSegment(pattern: string, value: string): boolean {
     const matchedOffset = matchingGlobOffset(
       pattern,
       patternOffset,
-      value[valueOffset] ?? "",
+      valueAt(value, valueOffset) ?? "",
     );
 
     if (matchedOffset !== undefined) {
       patternOffset = matchedOffset;
-      valueOffset += 1;
+      valueOffset = nextValueOffset(value, valueOffset);
       continue;
     }
 
@@ -504,7 +530,7 @@ function matchesVirtualPathSegment(pattern: string, value: string): boolean {
       return false;
     }
 
-    starValueOffset += 1;
+    starValueOffset = nextValueOffset(value, starValueOffset);
     valueOffset = starValueOffset;
     patternOffset = starPatternOffset;
   }
