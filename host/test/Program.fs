@@ -4,6 +4,7 @@ open System
 open System.Net
 open System.Net.Http
 open System.Text
+open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
@@ -71,7 +72,7 @@ module Program =
                 (ContentDomain.ContentRevision.tryCreate "test.revision" "main" |> requireValid)
                 (ContentDomain.ContentUrl.tryCreate
                     "test.url"
-                    "https://github.com/example-owner/content/blob/main/content/catalog.json"
+                    "https://github.com/example-owner/content/blob/main/content/catalog.json?left=1&right=2"
                  |> requireValid)
 
         let cache =
@@ -90,6 +91,19 @@ module Program =
                   ContentDomain.VirtualPath.tryCreate "test.path" "~" |> requireValid,
                   timestamp "2026-07-15T00:00:00.000Z",
                   ContentDomain.ByteSize.tryCreate "test.size" 0 |> requireValid
+              )
+              ContentDomain.File(
+                  ContentDomain.CatalogId.tryCreate "test.id" "about-file" |> requireValid,
+                  ContentDomain.VirtualPath.tryCreate "test.path" "~/about.md" |> requireValid,
+                  timestamp "2026-07-15T00:01:00.000Z",
+                  ContentDomain.ByteSize.tryCreate "test.size" 128 |> requireValid,
+                  ContentDomain.ContentId.tryCreate "test.handle" "about" |> requireValid
+              )
+              ContentDomain.LockedFile(
+                  ContentDomain.CatalogId.tryCreate "test.id" "locked-file" |> requireValid,
+                  ContentDomain.VirtualPath.tryCreate "test.path" "~/locked.md" |> requireValid,
+                  timestamp "2026-07-15T00:02:00.000Z",
+                  ContentDomain.ByteSize.tryCreate "test.size" 256 |> requireValid
               ) ]
         |> requireValid
 
@@ -177,9 +191,28 @@ module Program =
                     failwithf "Expected fresh content Cache-Control public, max-age=300, but received %s." cacheControl
 
                 let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                use document = JsonDocument.Parse body
+                let root = document.RootElement
+                let entries = root.GetProperty("entries")
+                let directory = entries[0]
+                let file = entries[1]
+                let lockedFile = entries[2]
 
-                if not (body.Contains("\"state\":\"fresh\"", StringComparison.Ordinal)) then
-                    failwith "Fresh content responses must serialize their fresh cache state.")
+                if
+                    entries.GetArrayLength() <> 3
+                    || directory.GetProperty("kind").GetString() <> "directory"
+                    || directory.GetProperty("size").GetInt32() <> 0
+                    || directory.TryGetProperty("documentHandle") |> fst
+                    || file.GetProperty("kind").GetString() <> "file"
+                    || file.GetProperty("documentHandle").GetString() <> "about"
+                    || lockedFile.GetProperty("kind").GetString() <> "locked-file"
+                    || lockedFile.TryGetProperty("documentHandle") |> fst
+                    || root.GetProperty("source").GetProperty("url").GetString()
+                       <> "https://github.com/example-owner/content/blob/main/content/catalog.json?left=1&right=2"
+                    || root.GetProperty("cache").GetProperty("freshUntil").GetString()
+                       <> "2026-07-15T00:05:00.000Z"
+                then
+                    failwithf "Fresh catalog response shape changed: %O." root)
 
     let private runStaleCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (staleContentClient ())

@@ -1,6 +1,6 @@
 namespace Termin.Al.Host
 
-open System.Text.Json.Nodes
+open System.Text.Json
 
 [<RequireQualifiedAccess>]
 module ContentWire =
@@ -16,18 +16,36 @@ module ContentWire =
           FreshUntil: string
           StaleUntil: string }
 
-    type CatalogEntryDto =
-        | Directory of id: string * path: string * updatedAt: string * size: int
-        | File of id: string * path: string * updatedAt: string * size: int * documentHandle: string
-        | LockedFile of id: string * path: string * updatedAt: string * size: int
+    type CatalogDirectoryDto =
+        { Kind: string
+          Id: string
+          Path: string
+          UpdatedAt: string
+          Size: int }
+
+    type CatalogFileDto =
+        { Kind: string
+          Id: string
+          Path: string
+          UpdatedAt: string
+          Size: int
+          DocumentHandle: string }
+
+    type CatalogLockedFileDto =
+        { Kind: string
+          Id: string
+          Path: string
+          UpdatedAt: string
+          Size: int }
 
     type CatalogDto =
-        { Entries: CatalogEntryDto list
+        { Entries: obj list
           Source: SourceDto
           Cache: CacheDto }
 
     type PageDocumentDto =
-        { Id: string
+        { Kind: string
+          Id: string
           Path: string
           Title: string
           UpdatedAt: string
@@ -124,30 +142,33 @@ module ContentWire =
           FreshUntil = cache |> ContentDomain.CacheMetadata.freshUntil |> ContentDomain.Timestamp.value
           StaleUntil = cache |> ContentDomain.CacheMetadata.staleUntil |> ContentDomain.Timestamp.value }
 
-    let private catalogEntry entry : CatalogEntryDto =
-        match entry with
+    let private catalogEntry: ContentDomain.CatalogEntry -> obj =
+        function
         | ContentDomain.Directory(id, path, updatedAt, size) ->
-            Directory(
-                id |> ContentDomain.CatalogId.value,
-                path |> ContentDomain.VirtualPath.value,
-                updatedAt |> ContentDomain.Timestamp.value,
-                size |> ContentDomain.ByteSize.value
-            )
+            ({ Kind = "directory"
+               Id = id |> ContentDomain.CatalogId.value
+               Path = path |> ContentDomain.VirtualPath.value
+               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
+               Size = size |> ContentDomain.ByteSize.value }
+            : CatalogDirectoryDto)
+            :> obj
         | ContentDomain.File(id, path, updatedAt, size, documentHandle) ->
-            File(
-                id |> ContentDomain.CatalogId.value,
-                path |> ContentDomain.VirtualPath.value,
-                updatedAt |> ContentDomain.Timestamp.value,
-                size |> ContentDomain.ByteSize.value,
-                documentHandle |> ContentDomain.ContentId.value
-            )
+            ({ Kind = "file"
+               Id = id |> ContentDomain.CatalogId.value
+               Path = path |> ContentDomain.VirtualPath.value
+               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
+               Size = size |> ContentDomain.ByteSize.value
+               DocumentHandle = documentHandle |> ContentDomain.ContentId.value }
+            : CatalogFileDto)
+            :> obj
         | ContentDomain.LockedFile(id, path, updatedAt, size) ->
-            LockedFile(
-                id |> ContentDomain.CatalogId.value,
-                path |> ContentDomain.VirtualPath.value,
-                updatedAt |> ContentDomain.Timestamp.value,
-                size |> ContentDomain.ByteSize.value
-            )
+            ({ Kind = "locked-file"
+               Id = id |> ContentDomain.CatalogId.value
+               Path = path |> ContentDomain.VirtualPath.value
+               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
+               Size = size |> ContentDomain.ByteSize.value }
+            : CatalogLockedFileDto)
+            :> obj
 
     let catalog (catalog: ContentDomain.Catalog) : CatalogDto =
         { Entries = catalog |> ContentDomain.Catalog.entries |> List.map catalogEntry
@@ -155,8 +176,7 @@ module ContentWire =
           Cache = catalog |> ContentDomain.Catalog.cache |> cache }
 
     let document (document: ContentDomain.ContentDocument) : DocumentDto =
-        let id =
-            document |> ContentDomain.ContentDocument.id |> ContentDomain.ContentId.value
+        let id = ContentDomain.ContentId.value (ContentDomain.ContentDocument.id document)
 
         let path =
             document
@@ -184,7 +204,8 @@ module ContentWire =
         match document |> ContentDomain.ContentDocument.metadata with
         | ContentDomain.ContentDocumentMetadata.Page ->
             PageDocument
-                { Id = id
+                { Kind = "page"
+                  Id = id
                   Path = path
                   Title = title
                   UpdatedAt = updatedAt
@@ -282,166 +303,15 @@ module ContentWire =
           Code = ContentDomain.ProblemCode.value code
           Detail = problem |> ContentDomain.Problem.detail }
 
-    let private text (value: string) : JsonNode =
-        JsonValue.Create<string>(value) :> JsonNode
-
-    let private number (value: int) : JsonNode =
-        JsonValue.Create<int>(value) :> JsonNode
-
-    let private objectOf (properties: (string * JsonNode) list) : JsonNode =
-        let result = JsonObject()
-
-        for key, value in properties do
-            result[key] <- value
-
-        result :> JsonNode
-
-    let private arrayOf (values: JsonNode list) : JsonNode =
-        let result = JsonArray()
-
-        for value in values do
-            result.Add value
-
-        result :> JsonNode
-
-    let private sourceNode (value: SourceDto) =
-        objectOf
-            [ "repository", text value.Repository
-              "path", text value.Path
-              "revision", text value.Revision
-              "url", text value.Url ]
-
-    let private cacheNode (value: CacheDto) =
-        objectOf
-            [ "state", text value.State
-              "fetchedAt", text value.FetchedAt
-              "freshUntil", text value.FreshUntil
-              "staleUntil", text value.StaleUntil ]
-
-    let private catalogEntryNode (value: CatalogEntryDto) =
-        match value with
-        | Directory(id, path, updatedAt, size) ->
-            objectOf
-                [ "kind", text "directory"
-                  "id", text id
-                  "path", text path
-                  "updatedAt", text updatedAt
-                  "size", number size ]
-        | File(id, path, updatedAt, size, documentHandle) ->
-            objectOf
-                [ "kind", text "file"
-                  "id", text id
-                  "path", text path
-                  "updatedAt", text updatedAt
-                  "size", number size
-                  "documentHandle", text documentHandle ]
-        | LockedFile(id, path, updatedAt, size) ->
-            objectOf
-                [ "kind", text "locked-file"
-                  "id", text id
-                  "path", text path
-                  "updatedAt", text updatedAt
-                  "size", number size ]
-
-    let private catalogNode (value: CatalogDto) =
-        objectOf
-            [ "entries", value.Entries |> List.map catalogEntryNode |> arrayOf
-              "source", sourceNode value.Source
-              "cache", cacheNode value.Cache ]
-
-    let private documentNode (value: DocumentDto) =
-        match value with
-        | PageDocument page ->
-            objectOf
-                [ "kind", text "page"
-                  "id", text page.Id
-                  "path", text page.Path
-                  "title", text page.Title
-                  "updatedAt", text page.UpdatedAt
-                  "body", text page.Body
-                  "source", sourceNode page.Source
-                  "cache", cacheNode page.Cache ]
-        | PublicationDocument publication ->
-            objectOf
-                [ "kind", text publication.Kind
-                  "id", text publication.Id
-                  "slug", text publication.Slug
-                  "path", text publication.Path
-                  "title", text publication.Title
-                  "summary", text publication.Summary
-                  "publishedAt", text publication.PublishedAt
-                  "updatedAt", text publication.UpdatedAt
-                  "tags", publication.Tags |> List.map text |> arrayOf
-                  "body", text publication.Body
-                  "source", sourceNode publication.Source
-                  "cache", cacheNode publication.Cache ]
-
-    let private projectNode (value: ProjectDto) =
-        objectOf
-            [ "id", text value.Id
-              "slug", text value.Slug
-              "name", text value.Name
-              "summary", text value.Summary
-              "url", text value.Url
-              "repository", text value.Repository
-              "collectionPath", text value.CollectionPath
-              "updatedAt", text value.UpdatedAt
-              "tags", value.Tags |> List.map text |> arrayOf
-              "readme", text value.Readme ]
-
-    let private projectsNode (value: ProjectsDto) =
-        objectOf
-            [ "projects", value.Projects |> List.map projectNode |> arrayOf
-              "source", sourceNode value.Source
-              "cache", cacheNode value.Cache ]
-
-    let private nowNode (value: NowDto) =
-        objectOf
-            [ "title", text value.Title
-              "body", text value.Body
-              "updatedAt", text value.UpdatedAt
-              "source", sourceNode value.Source
-              "cache", cacheNode value.Cache ]
-
-    let private commitNode (value: CommitDto) =
-        objectOf
-            [ "sha", text value.Sha
-              "summary", text value.Summary
-              "authoredAt", text value.AuthoredAt
-              "url", text value.Url ]
-
-    let private releaseNode (value: ReleaseDto) =
-        objectOf
-            [ "tag", text value.Tag
-              "name", text value.Name
-              "publishedAt", text value.PublishedAt
-              "body", text value.Body
-              "url", text value.Url
-              "commits", value.Commits |> List.map commitNode |> arrayOf ]
-
-    let private changelogNode (value: ChangelogDto) =
-        objectOf
-            [ "unreleased", value.Unreleased |> List.map commitNode |> arrayOf
-              "releases", value.Releases |> List.map releaseNode |> arrayOf
-              "source", sourceNode value.Source
-              "cache", cacheNode value.Cache ]
-
-    let private problemNode (value: ProblemDto) =
-        objectOf
-            [ "type", text value.Type
-              "title", text value.Title
-              "status", number value.Status
-              "code", text value.Code
-              "detail", text value.Detail ]
-
-    let toJsonNode (response: Response) =
-        match response with
-        | CatalogResponse value -> catalogNode value
-        | DocumentResponse value -> documentNode value
-        | ProjectsResponse value -> projectsNode value
-        | NowResponse value -> nowNode value
-        | ChangelogResponse value -> changelogNode value
-        | ProblemResponse value -> problemNode value
+    let private jsonOptions =
+        JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.CamelCase)
 
     let serialize response =
-        response |> toJsonNode |> (fun value -> value.ToJsonString())
+        match response with
+        | CatalogResponse value -> JsonSerializer.Serialize(value, jsonOptions)
+        | DocumentResponse(PageDocument value) -> JsonSerializer.Serialize(value, jsonOptions)
+        | DocumentResponse(PublicationDocument value) -> JsonSerializer.Serialize(value, jsonOptions)
+        | ProjectsResponse value -> JsonSerializer.Serialize(value, jsonOptions)
+        | NowResponse value -> JsonSerializer.Serialize(value, jsonOptions)
+        | ChangelogResponse value -> JsonSerializer.Serialize(value, jsonOptions)
+        | ProblemResponse value -> JsonSerializer.Serialize(value, jsonOptions)
