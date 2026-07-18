@@ -140,7 +140,7 @@ export type SecretPromptEffect =
 export type CommandEffect =
   | Readonly<{ kind: "clear-scrollback" }>
   | Readonly<{ kind: "clear-command-history" }>
-  | Readonly<{ kind: "open-theme-selector" }>
+  | Readonly<{ kind: "open-theme-selector"; storageFailureReported: boolean }>
   | Readonly<{
       kind: "set-current-directory";
       directory: VirtualDirectoryPath;

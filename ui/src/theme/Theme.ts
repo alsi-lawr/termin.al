@@ -39,6 +39,10 @@ const systemThemeDefaults = {
 export const systemThemePreference: ThemePreference = { kind: "system" };
 export const themeStorageUnavailableMessage =
   "Theme storage is unavailable; the active theme remains usable.";
+
+export function selectorStorageDiagnostic(storageFailed: boolean, alreadyReported: boolean): string | undefined {
+  return storageFailed && !alreadyReported ? themeStorageUnavailableMessage : undefined;
+}
 export const themeSelectorChoices = [
   systemThemePreference,
   ...themeNames.map((theme): ThemePreference => ({ kind: "explicit", theme })),

@@ -5,6 +5,7 @@ import {
   createThemeSelectorState,
   moveThemeSelector,
   restoreThemePreview,
+  selectorStorageDiagnostic,
   systemThemePreference,
   themeNameFrom,
   themeNames,
@@ -191,4 +192,13 @@ test("writes or removes a preference once and reports nonfatal failures", () => 
       throw new Error("blocked");
     },
   }, systemThemePreference), true);
+});
+
+test("coalesces selector storage diagnostics within one flow", () => {
+  assert.equal(selectorStorageDiagnostic(false, false), undefined);
+  assert.equal(
+    selectorStorageDiagnostic(true, false),
+    "Theme storage is unavailable; the active theme remains usable.",
+  );
+  assert.equal(selectorStorageDiagnostic(true, true), undefined);
 });

@@ -312,6 +312,7 @@ export function Terminal({
         controller={themeController}
         isActive={isActive}
         focusVersion={focusVersion}
+        storageFailureReported={presentation.storageFailureReported}
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
         onClose={(transientDiagnostic) =>

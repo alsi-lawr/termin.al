@@ -49,7 +49,7 @@ export type PaneShellPresentation =
       kind: "shell";
       transientDiagnostic: string | undefined;
     }>
-  | Readonly<{ kind: "theme-selector" }>
+  | Readonly<{ kind: "theme-selector"; storageFailureReported: boolean }>
   | Readonly<{
       kind: "inline-viewer";
       viewer: ViewerContent;
@@ -363,7 +363,7 @@ export function showPaneShellViewer(
 
 function showPaneThemeSelector(
   runtimes: PaneShellRuntimes,
-  paneId: PaneId,
+  paneId: PaneId, storageFailureReported: boolean,
 ): PaneShellRuntimes {
   const runtime = runtimes.get(paneId);
 
@@ -374,7 +374,7 @@ function showPaneThemeSelector(
   const nextRuntimes = new Map(runtimes);
   nextRuntimes.set(paneId, {
     ...runtime,
-    presentation: { kind: "theme-selector" },
+    presentation: { kind: "theme-selector", storageFailureReported },
   });
   return nextRuntimes;
 }
@@ -429,7 +429,9 @@ export function applyPaneShellAction({
     const effect = event.effect;
 
     if (effect.kind === "open-theme-selector") {
-      nextRuntimes = showPaneThemeSelector(nextRuntimes, paneId);
+      nextRuntimes = showPaneThemeSelector(
+        nextRuntimes, paneId, effect.storageFailureReported,
+      );
       continue;
     }
 

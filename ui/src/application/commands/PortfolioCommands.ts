@@ -761,9 +761,7 @@ function themeStorageOutputs(
   writeFailed = false,
 ): ReadonlyArray<ShellOutput> {
   const loadFailed = themes.takeStorageFailure();
-  return loadFailed || writeFailed
-    ? [themeStorageDiagnosticOutput()]
-    : [];
+  return loadFailed || writeFailed ? [themeStorageDiagnosticOutput()] : [];
 }
 
 function themeOutput(
@@ -771,11 +769,9 @@ function themeOutput(
   text: string,
   diagnostics: ReadonlyArray<ShellOutput> = [],
 ): CommandOutcome {
-  return succeededOutcome([{
-    kind: "text",
-    id: createShellOutputId(id),
-    text,
-  }, ...diagnostics]);
+  return succeededOutcome([
+    { kind: "text", id: createShellOutputId(id), text }, ...diagnostics,
+  ]);
 }
 
 function createThemeCommand(themes: ThemeController): CommandDefinition {
@@ -809,10 +805,11 @@ function createThemeCommand(themes: ThemeController): CommandDefinition {
       }
 
       if (operation === "select" && value === undefined) {
-        return succeededOutcome(
-          themeStorageOutputs(themes),
-          [{ kind: "open-theme-selector" }],
-        );
+        const outputs = themeStorageOutputs(themes);
+        return succeededOutcome(outputs, [{
+          kind: "open-theme-selector",
+          storageFailureReported: outputs.length > 0,
+        }]);
       }
 
       if (operation === "system" && value === undefined) {

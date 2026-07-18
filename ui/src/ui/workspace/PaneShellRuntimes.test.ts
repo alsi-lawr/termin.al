@@ -149,7 +149,13 @@ test("keeps theme select in one history row and scopes its presentation to the i
       commandId: running.lifecycle.command.id,
       outcome: {
         kind: "succeeded",
-        events: [{ kind: "effect", effect: { kind: "open-theme-selector" } }],
+        events: [{
+          kind: "effect",
+          effect: {
+            kind: "open-theme-selector",
+            storageFailureReported: false,
+          },
+        }],
       },
     },
   });
@@ -161,6 +167,12 @@ test("keeps theme select in one history row and scopes its presentation to the i
   }
 
   assert.equal(presented.presentation.kind, "theme-selector");
+  assert.equal(
+    presented.presentation.kind === "theme-selector"
+      ? presented.presentation.storageFailureReported
+      : undefined,
+    false,
+  );
   assert.equal(presented.state.history.length, 1);
   assert.equal(presented.state.history[0]?.command.source, "theme select");
   assert.equal(paneShellRuntime(settled.runtimes, otherPaneId).presentation.kind, "shell");
@@ -189,12 +201,28 @@ test("keeps theme select in one history row and scopes its presentation to the i
       commandId: otherRunning.lifecycle.command.id,
       outcome: {
         kind: "succeeded",
-        events: [{ kind: "effect", effect: { kind: "open-theme-selector" } }],
+        events: [{
+          kind: "effect",
+          effect: {
+            kind: "open-theme-selector",
+            storageFailureReported: true,
+          },
+        }],
       },
     },
   });
   assert.equal(paneShellRuntime(bothPresented.runtimes, paneId).presentation.kind, "theme-selector");
-  assert.equal(paneShellRuntime(bothPresented.runtimes, otherPaneId).presentation.kind, "theme-selector");
+  const otherPresentation = paneShellRuntime(
+    bothPresented.runtimes,
+    otherPaneId,
+  ).presentation;
+  assert.equal(otherPresentation.kind, "theme-selector");
+  assert.equal(
+    otherPresentation.kind === "theme-selector"
+      ? otherPresentation.storageFailureReported
+      : undefined,
+    true,
+  );
   assert.equal(paneShellRuntime(bothPresented.runtimes, otherPaneId).state.history.length, 1);
 
   const closed = closePaneShellPresentation(

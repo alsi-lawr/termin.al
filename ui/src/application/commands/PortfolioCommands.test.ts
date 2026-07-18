@@ -600,7 +600,10 @@ test("lists, selects, and clears terminal theme selections", async () => {
   assert.match(listOutput.text, /gruber-lighter/u);
   assert.match(listOutput.text, /gruber-dark-muted \(current\)/u);
   assert.equal(select.outputs.length, 0);
-  assert.deepEqual(select.effects, [{ kind: "open-theme-selector" }]);
+  assert.deepEqual(select.effects, [{
+    kind: "open-theme-selector",
+    storageFailureReported: false,
+  }]);
   assert.equal(setOutput.text, "Theme set: Current theme: gruber-lighter (explicit)");
   assert.equal(explicitOutput.text, "Current theme: gruber-lighter (explicit)");
   assert.equal(
@@ -648,6 +651,22 @@ test("keeps theme changes usable when browser persistence fails", async () => {
     loadFailure.outputs.filter((output) => output.kind === "diagnostic").length,
     1,
   );
+
+  const selectorLoadFailure = succeeded(await execute(
+    "theme select",
+    createRegistry(demoContentCorpus.documents, {
+      ...themes,
+      takeStorageFailure: () => true,
+    }),
+  ));
+  assert.equal(
+    selectorLoadFailure.outputs.filter((output) => output.kind === "diagnostic").length,
+    1,
+  );
+  assert.deepEqual(selectorLoadFailure.effects, [{
+    kind: "open-theme-selector",
+    storageFailureReported: true,
+  }]);
 });
 
 test("provides discoverable navigation commands and remaining unavailable-feature diagnostics", async () => {
