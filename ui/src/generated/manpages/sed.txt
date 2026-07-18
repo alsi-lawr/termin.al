@@ -1,0 +1,72 @@
+SED(1)                          termin.al Manual                          SED(1)
+
+NAME
+     sed - Transform piped text or virtual files without mutation.
+
+SYNOPSIS
+     sed [-n] [-e script]... [script] [path ...]
+
+DESCRIPTION
+     Applies  a  deliberately  bounded  sequence  of editing commands to logical
+     lines and prints text without modifying a virtual file. Repeated -e scripts
+     run in argument order. Without -e, the first operand is the script.
+
+     With path operands, sed reads virtual files in operand  order  and  ignores
+     piped  input.  Without  paths, typed piped text is required. A request with
+     neither input form is rejected. The -- terminator is preserved  by  command
+     parsing,  and  pathname  globs  are  expanded  through  the shared virtual-
+     filesystem operand boundary before sed runs.
+
+COMMANDS
+     p      Print the current pattern space immediately.
+
+     d      Delete the current pattern space, stop later scripts for  that  line
+            and suppress default printing.
+
+     sdelimiterpatterndelimiterreplacementdelimiterflags
+            Compile  pattern as a browser ECMAScript regular expression with the
+            u flag. Replace the first match, or every match with g.  The i  flag
+            adds native Unicode ignore-case matching. The flags may be combined.
+
+ADDRESSES
+     A  command  may  have  one  one-based numeric or $ address, or an inclusive
+     comma-separated range of those addresses. All path operands  form  one  or‐
+     dered  line  stream  for  addressing.  A reversed range applies only on its
+     start-address line. Zero, maximum and out-of-range numeric addresses do not
+     match actual lines.
+
+REPLACEMENT
+     In a replacement, & inserts the full match and \1 through \9 insert capture
+     groups. A backslash quotes the delimiter, &, or  another  backslash.  Other
+     characters are retained conservatively.
+
+     An empty substitution pattern reuses the most recent non-empty substitution
+     pattern  from the same sed invocation. It is rejected when no prior pattern
+     exists.
+
+PRINTING
+     Unless -n is present, the final pattern space is printed after all scripts.
+     An explicit p therefore duplicates default output. With -n, only explicit p
+     output is emitted.
+
+FAILURES AND LIMITS
+     Every option, script, delimiter, flag and regular expression  is  validated
+     before any path is read. Missing, locked or unavailable later operands fail
+     the  command  without  returning earlier text. The unsupported -i option is
+     rejected; sed never writes files, creates backups, reads host paths, starts
+     processes or uses the network.
+
+     At most 1,000 output lines and 1 MiB of UTF-8 output are returned.  Trunca‐
+     tion  is reported. Cancellation is checked between reads, lines and scripts
+     and discards accumulated output. One native regular-expression operation is
+     synchronous once started.
+
+EXAMPLES
+     $ cat about.md | sed -n '1,3p'
+     $ sed -e 's/demo/live/gi' -e '2d' about.md
+     $ find notes -type f | grep '\.md$' | sed 's#^~/#/#'
+
+SEE ALSO
+     grep(1), find(1), cat(1), head(1), tail(1)
+
+termin.al                                                                 SED(1)

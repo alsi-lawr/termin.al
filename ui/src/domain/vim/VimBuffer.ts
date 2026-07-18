@@ -29,6 +29,11 @@ import {
   type VimSelection,
   type VimVisualRange,
 } from "./VimVisualSelection.ts";
+import {
+  applyTextSubstitution,
+  parseTextSubstitution,
+  type TextSubstitution,
+} from "../text/TextSubstitution.ts";
 
 export type { VimMotion } from "./VimMotion.ts";
 
@@ -135,6 +140,14 @@ export type VimStatus =
       query: string;
     }>
   | Readonly<{ kind: "no-previous-search" }>
+  | Readonly<{
+      kind: "invalid-substitution";
+      message: string;
+    }>
+  | Readonly<{
+      kind: "no-substitution-match";
+      pattern: string;
+    }>
   | Readonly<{
       kind: "read-only";
       source: string;
@@ -569,7 +582,7 @@ function commitEdit(
   buffer: VimBuffer,
   next: VimTextState,
   register: VimRegister,
-  interval: VimEditInterval,
+  intervals: ReadonlyArray<VimEditInterval>,
 ): VimBuffer {
   if (textStateMatches(buffer, next) && buffer.register === register) {
     return resetPending(buffer);
@@ -583,7 +596,7 @@ function commitEdit(
     ),
     redoStack: [],
     register,
-    marks: adjustMarks(buffer, next.lines, [interval]),
+    marks: adjustMarks(buffer, next.lines, intervals),
     pending: { kind: "none" },
     status: { kind: "none" },
     goalColumn: { kind: "none" },
@@ -809,7 +822,7 @@ function deleteRange(
       buffer,
       createTextState(lines, cursor, mode, { kind: "none" }),
       register,
-      lineDeletionInterval(buffer, range),
+      [lineDeletionInterval(buffer, range)],
     );
   }
 
@@ -835,7 +848,7 @@ function deleteRange(
     buffer,
     createTextState(lines, cursor, mode, { kind: "none" }),
     register,
-    { oldStart: start, oldEnd: end, newEnd: start },
+    [{ oldStart: start, oldEnd: end, newEnd: start }],
   );
 }
 
@@ -869,7 +882,7 @@ function deleteBlockRange(
     editSource,
     createTextState(deletion.lines, cursor, mode, { kind: "none" }),
     deletion.register,
-    editInterval(joinLines(buffer.lines), joinLines(deletion.lines)),
+    [editInterval(joinLines(buffer.lines), joinLines(deletion.lines))],
   );
   const next = {
     ...committed,
@@ -1275,11 +1288,11 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
         { kind: "none" },
       ),
       buffer.register,
-      {
+      [{
         oldStart: insertionOffset,
         oldEnd: insertionOffset,
         newEnd: insertionOffset + joinLines(lines).length - oldText.length,
-      },
+      }],
     );
   }
 
@@ -1298,7 +1311,7 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
         { kind: "none" },
       ),
       buffer.register,
-      editInterval(joinLines(buffer.lines), joinLines(put.lines)),
+      [editInterval(joinLines(buffer.lines), joinLines(put.lines))],
     );
 
     return {
@@ -1335,11 +1348,11 @@ function pasteRegister(buffer: VimBuffer, afterCursor: boolean): VimBuffer {
     buffer,
     createTextState(lines, cursor, VimMode.Normal, { kind: "none" }),
     buffer.register,
-    {
+    [{
       oldStart: insertionOffset,
       oldEnd: insertionOffset,
       newEnd: insertionOffset + buffer.register.text.length,
-    },
+    }],
   );
 }
 
@@ -1759,7 +1772,7 @@ export function insertVimText(buffer: VimBuffer, text: string): VimBuffer {
     buffer,
     insertion.textState,
     buffer.register,
-    insertion.interval,
+    [insertion.interval],
   );
 }
 
@@ -1790,7 +1803,7 @@ function deleteVimInsertRange(
       { kind: "none" },
     ),
     buffer.register,
-    { oldStart: safeStart, oldEnd: safeEnd, newEnd: safeStart },
+    [{ oldStart: safeStart, oldEnd: safeEnd, newEnd: safeStart }],
   );
 }
 
@@ -1898,7 +1911,7 @@ export function replaceVimInsertText(
     buffer,
     createTextState(lines, cursor, VimMode.Insert, { kind: "none" }),
     buffer.register,
-    interval,
+    [interval],
   );
 }
 
@@ -2805,6 +2818,142 @@ export function backspaceVimCommandInput(buffer: VimBuffer): VimBuffer {
   };
 }
 
+type VimSubstitutionCommand = Readonly<{
+  range: "current-line" | "whole-buffer";
+  substitution: TextSubstitution;
+}>;
+
+function vimSubstitutionFailure(
+  buffer: VimBuffer,
+  status: Extract<VimStatus, { kind: "invalid-substitution" | "no-substitution-match" }>,
+  search: VimSearch,
+): VimBuffer {
+  return {
+    ...buffer,
+    mode: VimMode.Normal,
+    selection: { kind: "none" },
+    search,
+    commandEffect: { kind: "none" },
+    pending: { kind: "none" },
+    status,
+    goalColumn: { kind: "none" },
+  };
+}
+
+function executeVimSubstitution(
+  buffer: VimBuffer,
+  command: VimSubstitutionCommand,
+): VimBuffer {
+  const lines = [...buffer.lines];
+  const startLine = command.range === "whole-buffer" ? 0 : buffer.cursor.line;
+  const endLine = command.range === "whole-buffer"
+    ? buffer.lines.length - 1
+    : buffer.cursor.line;
+  let matched = false;
+  let firstChanged: VimPosition | undefined;
+
+  for (let lineIndex = startLine; lineIndex <= endLine; lineIndex += 1) {
+    const line = lines[lineIndex];
+
+    if (line === undefined) {
+      continue;
+    }
+
+    const result = applyTextSubstitution(line, command.substitution);
+    matched = matched || result.matched;
+    lines[lineIndex] = result.text;
+
+    if (firstChanged === undefined && result.firstChangedOffset !== undefined) {
+      firstChanged = { line: lineIndex, column: result.firstChangedOffset };
+    }
+  }
+
+  const search: VimSearch = {
+    kind: "active",
+    query: command.substitution.pattern,
+    direction: buffer.search.kind === "active" ? buffer.search.direction : "forward",
+  };
+
+  if (!matched || firstChanged === undefined) {
+    return vimSubstitutionFailure(
+      buffer,
+      { kind: "no-substitution-match", pattern: command.substitution.pattern },
+      search,
+    );
+  }
+
+  const next = createTextState(lines, firstChanged, VimMode.Normal, { kind: "none" });
+  const committed = commitEdit(
+    buffer,
+    next,
+    buffer.register,
+    lineEditIntervals(buffer, lines, startLine, endLine),
+  );
+
+  return {
+    ...committed,
+    search,
+    commandEffect: { kind: "none" },
+  };
+}
+
+type VimSubstitutionSubmission =
+  | Readonly<{ kind: "unrecognized" }>
+  | Readonly<{ kind: "handled"; buffer: VimBuffer }>;
+
+function submitVimSubstitution(
+  buffer: VimBuffer,
+  source: string,
+): VimSubstitutionSubmission {
+  if (!source.startsWith("s") && !source.startsWith("%s")) {
+    return { kind: "unrecognized" };
+  }
+
+  const capability = gateVimCapability(buffer, {
+    kind: "text-mutation",
+    source: ":" + source,
+  });
+
+  if (capability.kind === "handled") {
+    return {
+      kind: "handled",
+      buffer: {
+        ...capability.buffer,
+        mode: VimMode.Normal,
+        selection: { kind: "none" },
+      },
+    };
+  }
+
+  const previousPattern = buffer.search.kind === "active"
+    ? buffer.search.query
+    : undefined;
+  const wholeBuffer = source.startsWith("%s");
+  const substitution = parseTextSubstitution(
+    wholeBuffer ? source.slice(1) : source,
+    previousPattern,
+  );
+
+  if (substitution.kind === "invalid") {
+    return {
+      kind: "handled",
+      buffer: vimSubstitutionFailure(
+        buffer,
+        { kind: "invalid-substitution", message: substitution.message },
+        buffer.search,
+      ),
+    };
+  }
+
+  return {
+    kind: "handled",
+    buffer: executeVimSubstitution(buffer, {
+      range: wholeBuffer ? "whole-buffer" : "current-line",
+      substitution: substitution.substitution,
+    }),
+  };
+}
+
 export function parseVimCommand(source: string): VimCommandParseResult {
   switch (source.trim()) {
     case "w":
@@ -2887,6 +3036,12 @@ export function submitVimCommand(buffer: VimBuffer): VimBuffer {
       direction,
       context,
     );
+  }
+
+  const substitution = submitVimSubstitution(buffer, buffer.mode.input);
+
+  if (substitution.kind === "handled") {
+    return substitution.buffer;
   }
 
   const parsed = parseVimCommand(buffer.mode.input);

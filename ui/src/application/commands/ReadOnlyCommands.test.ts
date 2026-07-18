@@ -327,6 +327,7 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
       "tree",
       "find",
       "grep",
+      "sed",
       "head",
       "tail",
       "less",
@@ -954,6 +955,70 @@ test("uses logical lines without a trailing phantom and preserves carriage retur
   assert.deepEqual(succeeded(await execute("grep '' empty.txt", fixture.registry)).outputs, []);
 });
 
+test("applies ordered sed scripts to typed stdin and one virtual line stream", async () => {
+  const fixture = createGrepFixture(
+    [
+      grepFileEntry("one", "~/one.txt", "one"),
+      grepFileEntry("two", "~/two.txt", "two"),
+    ],
+    [
+      { handle: "one", path: "~/one.txt", text: "Alpha alpha\nbeta\nlast" },
+      { handle: "two", path: "~/two.txt", text: "second\nlast two" },
+    ],
+  );
+
+  for (const [source, expected] of [
+    ["cat one.txt | sed 's/alpha/X/i'", "X alpha\nbeta\nlast"],
+    ["echo ignored | sed -n -e '1p' -e '$p' one.txt two.txt", "Alpha alpha\nlast two"],
+    ["sed -n -e '$p' -- *.txt", "last two"],
+    ["sed -e '1p' -e '2d' one.txt", "Alpha alpha\nAlpha alpha\nlast"],
+    ["sed -n -e '1,2p' -e '3,1p' -e '99p' one.txt", "Alpha alpha\nbeta\nlast"],
+    ["sed -n -e 's/a/A/g' -e p one.txt two.txt", "AlphA AlphA\nbetA\nlAst\nsecond\nlAst two"],
+    ["sed -n -e 's#(Alpha) (alpha)#&|\\1|\\&#' -e p one.txt", "Alpha alpha|Alpha|&\nbeta\nlast"],
+    ["sed -n -e 's#last#last\\#tag#i' -e 's##done#' -e p one.txt", "Alpha alpha\nbeta\ndone#tag"],
+  ]) {
+    assert.equal(outputText(await execute(source, fixture.registry)), expected);
+  }
+  assert.equal(outputText(await execute("cat one.txt", fixture.registry)), "Alpha alpha\nbeta\nlast");
+});
+
+test("rejects every invalid sed option and script before reading or emitting", async () => {
+  let reads = 0;
+  const documents: VirtualDocumentSupplier = {
+    read: (handle) => {
+      reads += 1;
+      return Promise.resolve({ kind: "missing", handle });
+    },
+  };
+  const guarded = createGrepFixture(
+    [grepFileEntry("one", "~/one.txt", "one")],
+    [],
+  );
+  const registry = createCommandRegistry({
+    filesystem: guarded.filesystem,
+    commands: createReadOnlyCommandDefinitions({
+      filesystem: guarded.filesystem,
+      documents,
+      manpages: generatedManpages,
+      recursiveEntryLimit: 100,
+    }),
+  });
+
+  for (const [source, message] of [
+    ["sed -i 's/a/b/' one.txt", "Unsupported option: -i."],
+    ["sed -e 'p' -e 's/[//g' one.txt", "Invalid regular expression"],
+    ["sed -e 'p' -e '2q' one.txt", "Unsupported sed script: 2q"],
+    ["sed -e 's/a/b/x' one.txt", "Unsupported substitution flags: x"],
+    ["sed -e 's//b/' one.txt", "No previous substitution pattern."],
+    ["sed 's/a/b' one.txt", "Substitution replacement is not terminated."],
+  ]) {
+    assert.match(failureMessage(await execute(source, registry)), new RegExp(message, "u"));
+  }
+
+  assert.equal(failureMessage(await execute("sed p", registry)), "Usage: sed [-n] [-e script]... [script] [path ...]");
+  assert.equal(reads, 0);
+});
+
 test("aggregates grep path, locked, and read failures without partial matches", async () => {
   const fixture = createGrepFixture(
     [
@@ -983,7 +1048,7 @@ test("aggregates grep path, locked, and read failures without partial matches", 
   assert.equal(failed.kind, "failed");
 });
 
-test("caps grep output by matching lines, UTF-8 bytes, and recursive traversal", async () => {
+test("caps grep and sed output by lines and UTF-8 bytes", async () => {
   const lineLimited = createGrepFixture(
     [grepFileEntry("many", "~/many.txt", "many")],
     [{ handle: "many", path: "~/many.txt", text: Array.from({ length: 1001 }, () => "x").join("\n") }],
@@ -1012,6 +1077,8 @@ test("caps grep output by matching lines, UTF-8 bytes, and recursive traversal",
   );
   const byteOutcome = await execute("grep x large.txt", byteLimited.registry);
   const traversalOutcome = await execute("grep -r x dir", traversalLimited.registry);
+  const sedLines = await execute("sed p many.txt", lineLimited.registry);
+  const sedBytes = await execute("sed p large.txt", byteLimited.registry);
 
   assert.equal(outputText(lineOutcome).split("\n").length, 1000);
   assert.deepEqual(runtimeTruncations(lineOutcome), [
@@ -1026,10 +1093,14 @@ test("caps grep output by matching lines, UTF-8 bytes, and recursive traversal",
     "grep output stopped before exceeding 1,000 matching lines or 1 MiB.",
   ]);
   assert.deepEqual(runtimeTruncations(traversalOutcome), ["grep stopped after 1 entries."]);
+  assert.equal(outputText(sedLines).split("\n").length, 1000);
+  assert.equal(outputText(sedBytes), byteLine);
+  assert.deepEqual(runtimeTruncations(sedLines), ["sed output stopped before exceeding 1,000 lines or 1 MiB."]);
+  assert.deepEqual(runtimeTruncations(sedBytes), ["sed output stopped before exceeding 1,000 lines or 1 MiB."]);
 });
 
-test("cancellation discards accumulated grep output", async () => {
-  const controller = new AbortController();
+test("cancellation discards accumulated grep and sed output", async () => {
+  let controller = new AbortController();
   const filesystem = createVirtualFilesystem({
     entries: [
       grepDirectoryEntry("root", "~"),
@@ -1065,10 +1136,23 @@ test("cancellation discards accumulated grep output", async () => {
     registry,
     controller.signal,
   );
+  controller = new AbortController();
+  const sedOutcome = await executeWithSignal(
+    "sed p a.txt b.txt ; echo later",
+    registry,
+    controller.signal,
+  );
 
   assert.equal(outcome.kind, "cancelled");
+  assert.equal(sedOutcome.kind, "cancelled");
   assert.equal(
     outcome.events.some(
+      (event) => event.kind === "output" && event.output.kind === "text",
+    ),
+    false,
+  );
+  assert.equal(
+    sedOutcome.events.some(
       (event) => event.kind === "output" && event.output.kind === "text",
     ),
     false,

@@ -91,6 +91,10 @@ function bufferStatusLabel(buffer: VimBuffer): string | undefined {
       return `Pattern not found: ${buffer.status.query}`;
     case "no-previous-search":
       return "No previous search pattern";
+    case "invalid-substitution":
+      return `Invalid substitution: ${buffer.status.message}`;
+    case "no-substitution-match":
+      return `Pattern not found: ${buffer.status.pattern}`;
     case "read-only":
       return `Read-only: ${buffer.status.source}`;
   }

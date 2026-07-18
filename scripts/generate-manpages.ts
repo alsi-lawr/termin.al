@@ -36,6 +36,7 @@ const acceptedCanonicalNames: ReadonlyArray<string> = [
   "pane",
   "projects",
   "pwd",
+  "sed",
   "skills",
   "stats",
   "tail",

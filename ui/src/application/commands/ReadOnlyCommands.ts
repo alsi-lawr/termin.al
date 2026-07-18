@@ -30,6 +30,11 @@ import {
   type CommandExecutionContext,
   type CommandInvocation,
 } from "./CommandRegistry.ts";
+import {
+  applyTextSubstitution,
+  parseTextSubstitution,
+  type TextSubstitution,
+} from "../../domain/text/TextSubstitution.ts";
 
 export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
@@ -105,6 +110,31 @@ type LineReaderOptions = Readonly<{
     | Readonly<{ kind: "stdin"; text: string }>;
 }>;
 
+type SedAddress =
+  | Readonly<{ kind: "line"; number: number }>
+  | Readonly<{ kind: "last" }>;
+
+type SedAddressSelection =
+  | Readonly<{ kind: "all" }>
+  | Readonly<{ kind: "single"; address: SedAddress }>
+  | Readonly<{ kind: "range"; start: SedAddress; end: SedAddress }>;
+
+type SedScript = Readonly<{
+  address: SedAddressSelection;
+  command:
+    | Readonly<{ kind: "print" }>
+    | Readonly<{ kind: "delete" }>
+    | Readonly<{ kind: "substitute"; substitution: TextSubstitution }>;
+}>;
+
+type SedOptions = Readonly<{
+  suppressDefaultPrint: boolean;
+  scripts: ReadonlyArray<SedScript>;
+  input:
+    | Readonly<{ kind: "paths"; paths: ReadonlyArray<string> }>
+    | Readonly<{ kind: "stdin"; text: string }>;
+}>;
+
 type ReadFileResult =
   | Readonly<{
       kind: "read";
@@ -156,6 +186,8 @@ const maximumRecursiveDepth = 8;
 const maximumRequestedLineCount = 1000;
 const maximumGrepMatchingLines = 1000;
 const maximumGrepOutputBytes = 1024 * 1024;
+const maximumSedOutputLines = 1000;
+const maximumSedOutputBytes = 1024 * 1024;
 
 function succeededOutcome(
   outputs: ReadonlyArray<ShellOutput>,
@@ -689,6 +721,187 @@ function parseLineReaderOptions(
     value: {
       lineCount,
       input: { kind: "path", path },
+    },
+  };
+}
+
+function sedAddress(source: string): SedAddress {
+  if (source === "$") {
+    return { kind: "last" };
+  }
+
+  const number = Number(source);
+  return {
+    kind: "line",
+    number: Number.isSafeInteger(number) ? number : Number.MAX_SAFE_INTEGER,
+  };
+}
+
+function sedAddressSelection(
+  source: string,
+): Readonly<{ selection: SedAddressSelection; commandOffset: number }> |
+  Readonly<{ error: string }> {
+  const match = /^(\$|[0-9]+)(?:,(\$|[0-9]+))?/u.exec(source);
+
+  if (match === null) {
+    return { selection: { kind: "all" }, commandOffset: 0 };
+  }
+
+  const start = match[1];
+  const end = match[2];
+
+  if (start === undefined) {
+    return { error: `Malformed sed address: ${source}` };
+  }
+
+  if (end === undefined) {
+    return {
+      selection: { kind: "single", address: sedAddress(start) },
+      commandOffset: match[0].length,
+    };
+  }
+
+  return {
+    selection: {
+      kind: "range",
+      start: sedAddress(start),
+      end: sedAddress(end),
+    },
+    commandOffset: match[0].length,
+  };
+}
+
+function parseSedScript(
+  source: string,
+  previousPattern: string | undefined,
+): OptionParseResult<Readonly<{ script: SedScript; pattern: string | undefined }>> {
+  const addressed = sedAddressSelection(source);
+
+  if ("error" in addressed) {
+    return { kind: "invalid", message: addressed.error };
+  }
+
+  const command = source.slice(addressed.commandOffset);
+
+  if (command === "p" || command === "d") {
+    return {
+      kind: "parsed",
+      value: {
+        script: {
+          address: addressed.selection,
+          command: { kind: command === "p" ? "print" : "delete" },
+        },
+        pattern: previousPattern,
+      },
+    };
+  }
+
+  if (command.startsWith("s")) {
+    const parsed = parseTextSubstitution(command, previousPattern);
+
+    if (parsed.kind === "invalid") {
+      return { kind: "invalid", message: parsed.message };
+    }
+
+    return {
+      kind: "parsed",
+      value: {
+        script: {
+          address: addressed.selection,
+          command: { kind: "substitute", substitution: parsed.substitution },
+        },
+        pattern: parsed.substitution.pattern,
+      },
+    };
+  }
+
+  return { kind: "invalid", message: `Unsupported sed script: ${source}` };
+}
+
+function parseSedOptions(
+  invocation: CommandInvocation,
+): OptionParseResult<SedOptions> {
+  const boundary = optionBoundary(invocation);
+  const scriptSources: string[] = [];
+  const operands: string[] = [];
+  let suppressDefaultPrint = false;
+  let hasExplicitScript = false;
+
+  for (let index = 0; index < invocation.arguments.length; index += 1) {
+    const value = invocation.arguments[index];
+
+    if (value === undefined) {
+      continue;
+    }
+
+    if (index >= boundary || !hasOptionPrefix(value)) {
+      operands.push(value);
+      continue;
+    }
+
+    if (value === "-n") {
+      suppressDefaultPrint = true;
+      continue;
+    }
+
+    if (value === "-e") {
+      const script = invocation.arguments[index + 1];
+
+      if (script === undefined || index + 1 >= boundary) {
+        return { kind: "invalid", message: "-e requires a sed script." };
+      }
+
+      scriptSources.push(script);
+      hasExplicitScript = true;
+      index += 1;
+      continue;
+    }
+
+    return { kind: "invalid", message: `Unsupported option: ${value}.` };
+  }
+
+  if (!hasExplicitScript) {
+    const script = operands.shift();
+
+    if (script === undefined) {
+      return {
+        kind: "invalid",
+        message: "Usage: sed [-n] [-e script]... [script] [path ...]",
+      };
+    }
+
+    scriptSources.push(script);
+  }
+
+  const scripts: SedScript[] = [];
+  let previousPattern: string | undefined;
+
+  for (const source of scriptSources) {
+    const parsed = parseSedScript(source, previousPattern);
+
+    if (parsed.kind === "invalid") {
+      return parsed;
+    }
+
+    scripts.push(parsed.value.script);
+    previousPattern = parsed.value.pattern;
+  }
+
+  if (operands.length === 0 && invocation.stdin.kind === "none") {
+    return {
+      kind: "invalid",
+      message: "Usage: sed [-n] [-e script]... [script] [path ...]",
+    };
+  }
+
+  return {
+    kind: "parsed",
+    value: {
+      suppressDefaultPrint,
+      scripts,
+      input: operands.length > 0
+        ? { kind: "paths", paths: operands }
+        : { kind: "stdin", text: invocation.stdin.kind === "text" ? invocation.stdin.text : "" },
     },
   };
 }
@@ -1573,6 +1786,240 @@ function createGrepCommand(
   };
 }
 
+function sedAddressNumber(address: SedAddress, totalLines: number): number {
+  return address.kind === "last" ? totalLines : address.number;
+}
+
+function sedAddressMatches(
+  selection: SedAddressSelection,
+  lineNumber: number,
+  totalLines: number,
+): boolean {
+  if (selection.kind === "all") {
+    return true;
+  }
+
+  if (selection.kind === "single") {
+    return lineNumber === sedAddressNumber(selection.address, totalLines);
+  }
+
+  const start = sedAddressNumber(selection.start, totalLines);
+  const end = sedAddressNumber(selection.end, totalLines);
+
+  return end < start
+    ? lineNumber === start
+    : lineNumber >= start && lineNumber <= end;
+}
+
+type SedLineResult =
+  | Readonly<{
+      kind: "processed";
+      pattern: string;
+      prints: ReadonlyArray<string>;
+      deleted: boolean;
+    }>
+  | Readonly<{ kind: "cancelled" }>;
+
+type SedInputReadResult =
+  | Readonly<{ kind: "read"; texts: ReadonlyArray<string> }>
+  | Readonly<{ kind: "failed"; outcome: CommandOutcome }>
+  | Readonly<{ kind: "cancelled" }>;
+
+function executeSedScripts(
+  line: string,
+  lineNumber: number,
+  totalLines: number,
+  scripts: ReadonlyArray<SedScript>,
+  signal: AbortSignal,
+): SedLineResult {
+  let pattern = line;
+  const prints: string[] = [];
+
+  for (const script of scripts) {
+    if (signal.aborted) {
+      return { kind: "cancelled" };
+    }
+
+    if (!sedAddressMatches(script.address, lineNumber, totalLines)) {
+      continue;
+    }
+
+    switch (script.command.kind) {
+      case "print":
+        prints.push(pattern);
+        break;
+      case "delete":
+        return { kind: "processed", pattern, prints, deleted: true };
+      case "substitute":
+        pattern = applyTextSubstitution(pattern, script.command.substitution).text;
+        break;
+    }
+  }
+
+  return { kind: "processed", pattern, prints, deleted: false };
+}
+
+type SedOutputAccumulator = {
+  lines: string[];
+  bytes: number;
+  truncated: boolean;
+};
+
+function appendSedOutput(
+  accumulator: SedOutputAccumulator,
+  line: string,
+  encoder: TextEncoder,
+): void {
+  if (accumulator.truncated) {
+    return;
+  }
+
+  const separatorBytes = accumulator.lines.length === 0 ? 0 : 1;
+  const nextBytes = accumulator.bytes + separatorBytes + encoder.encode(line).byteLength;
+
+  if (
+    accumulator.lines.length === maximumSedOutputLines ||
+    nextBytes > maximumSedOutputBytes
+  ) {
+    accumulator.truncated = true;
+    return;
+  }
+
+  accumulator.lines.push(line);
+  accumulator.bytes = nextBytes;
+}
+
+function sedOutputTruncation(): ShellOutput {
+  const diagnostic: ShellDiagnostic = {
+    kind: "runtime",
+    id: createShellDiagnosticId("sed-output-truncated"),
+    code: "runtime.truncated",
+    message: "sed output stopped before exceeding 1,000 lines or 1 MiB.",
+  };
+
+  return {
+    kind: "diagnostic",
+    id: createShellOutputId("sed-output-truncated"),
+    diagnostic,
+  };
+}
+
+async function readSedInput(
+  options: SedOptions,
+  filesystem: VirtualFilesystem,
+  documents: VirtualDocumentSupplier,
+  context: CommandExecutionContext,
+): Promise<SedInputReadResult> {
+  if (options.input.kind === "stdin") {
+    return { kind: "read", texts: [options.input.text] };
+  }
+
+  const texts: string[] = [];
+
+  for (const path of options.input.paths) {
+    if (context.signal.aborted) {
+      return { kind: "cancelled" };
+    }
+
+    const result = await readFile("sed", filesystem, documents, context, path);
+
+    if (result.kind !== "read") {
+      return result;
+    }
+
+    texts.push(result.text);
+  }
+
+  return { kind: "read", texts };
+}
+
+function createSedCommand(
+  filesystem: VirtualFilesystem,
+  documents: VirtualDocumentSupplier,
+): CommandDefinition {
+  return {
+    metadata: {
+      group: "gnu-like",
+      name: "sed",
+      aliases: [],
+      summary: "Transform piped text or virtual files without mutation.",
+      usage: "sed [-n] [-e script]... [script] [path ...]",
+      examples: [
+        "cat about.md | sed -n '1,3p'",
+        "sed -e 's/demo/live/gi' -e '2d' about.md",
+      ],
+    },
+    pipeline: "text",
+    execute: async (invocation, context) => {
+      const parsed = parseSedOptions(invocation);
+
+      if (parsed.kind === "invalid") {
+        return rejectedOutcome("sed", parsed.message);
+      }
+
+      const input = await readSedInput(parsed.value, filesystem, documents, context);
+
+      if (input.kind === "cancelled") {
+        return cancelledOutcome();
+      }
+
+      if (input.kind === "failed") {
+        return input.outcome;
+      }
+
+      const lines = input.texts.flatMap(grepLogicalLines);
+      const output: SedOutputAccumulator = { lines: [], bytes: 0, truncated: false };
+      const encoder = new TextEncoder();
+
+      for (let index = 0; index < lines.length; index += 1) {
+        if (context.signal.aborted) {
+          return cancelledOutcome();
+        }
+
+        const line = lines[index];
+
+        if (line === undefined) {
+          continue;
+        }
+
+        const processed = executeSedScripts(
+          line,
+          index + 1,
+          lines.length,
+          parsed.value.scripts,
+          context.signal,
+        );
+
+        if (processed.kind === "cancelled") {
+          return cancelledOutcome();
+        }
+
+        for (const printed of processed.prints) {
+          appendSedOutput(output, printed, encoder);
+        }
+
+        if (!processed.deleted && !parsed.value.suppressDefaultPrint) {
+          appendSedOutput(output, processed.pattern, encoder);
+        }
+      }
+
+      if (context.signal.aborted) {
+        return cancelledOutcome();
+      }
+
+      const outputs: ShellOutput[] = output.lines.length === 0
+        ? []
+        : [textOutput("sed-output", output.lines.join("\n"))];
+
+      if (output.truncated) {
+        outputs.push(sedOutputTruncation());
+      }
+
+      return succeededOutcome(outputs);
+    },
+  };
+}
+
 function createLineReaderCommand(
   commandName: "head" | "tail",
   fromEnd: boolean,
@@ -1957,6 +2404,7 @@ export function createReadOnlyCommandDefinitions({
     createTreeCommand(filesystem, recursiveEntryLimit),
     createFindCommand(filesystem, recursiveEntryLimit),
     createGrepCommand(filesystem, documents, recursiveEntryLimit),
+    createSedCommand(filesystem, documents),
     createLineReaderCommand("head", false, filesystem, documents),
     createLineReaderCommand("tail", true, filesystem, documents),
     createLessCommand(filesystem, documents),

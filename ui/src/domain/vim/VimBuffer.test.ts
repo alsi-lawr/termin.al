@@ -653,6 +653,69 @@ test("reports invalid and unmatched regular expressions without moving or mutati
   assert.equal(isVimBufferDirty(missed), false);
 });
 
+test("substitutes current lines and whole buffers through one undoable Vim edit", () => {
+  const start = createVimBuffer({
+    text: "😀 cat cat\nCAT cat\nlast",
+    mode: VimMode.Normal,
+  });
+  const currentStart = press(start, "j");
+  const marked = press(start, "j", "w", "m", "a", "g", "g");
+  const current = submitVimCommand(
+    appendVimCommandInput(
+      press(currentStart, ":"),
+      String.raw`s#(CAT) (cat)#<&|\1|\&\##i`,
+    ),
+  );
+  const whole = submitVimCommand(
+    appendVimCommandInput(press(marked, ":"), String.raw`%s/cat/doggy/i`),
+  );
+  const undone = press(whole, "u");
+
+  assert.equal(vimBufferText(current), "😀 cat cat\n<CAT cat|CAT|&#\nlast");
+  assert.deepEqual(current.cursor, { line: 1, column: 0 });
+  assert.equal(vimBufferText(whole), "😀 doggy cat\ndoggy cat\nlast");
+  assert.deepEqual(whole.cursor, { line: 0, column: 3 });
+  assert.deepEqual(whole.marks, [{ name: "a", position: { line: 1, column: 6 } }]);
+  assert.equal(whole.undoStack.length, 1);
+  assert.equal(vimBufferText(undone), vimBufferText(start));
+  assert.equal(isVimBufferDirty(undone), false);
+});
+
+test("reuses Vim search and substitution patterns without changing search direction", () => {
+  const start = createVimBuffer({ text: "cat cat\ncat", mode: VimMode.Normal });
+  const backward = submitVimCommand(appendVimCommandInput(press(start, "?"), "cat"));
+  const substituted = submitVimCommand(appendVimCommandInput(press(backward, ":"), String.raw`%s//cat-x/`));
+  const reused = submitVimCommand(appendVimCommandInput(press(substituted, ":"), String.raw`%s##dog#g`));
+  const repeated = press(substituted, "n");
+  const reversed = press(repeated, "N");
+
+  assert.equal(vimBufferText(substituted), "cat-x cat\ncat-x");
+  assert.equal(vimBufferText(reused), "dog-x dog\ndog-x");
+  assert.deepEqual(substituted.search, { kind: "active", query: "cat", direction: "backward" });
+  assert.deepEqual(repeated.cursor, { line: 1, column: 0 });
+  assert.deepEqual(reversed.cursor, { line: 0, column: 0 });
+});
+
+test("reports Vim substitution failures and gates read-only mutation before change", () => {
+  const start = createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal });
+  const invalid = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s/[//`));
+  const malformed = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s/a/b`));
+  const noPrevious = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`s//b/`));
+  const missed = submitVimCommand(appendVimCommandInput(press(start, ":"), String.raw`%s/gamma/delta/g`));
+  assert.equal(invalid.status.kind, "invalid-substitution");
+  assert.deepEqual(malformed.status, { kind: "invalid-substitution", message: "Substitution replacement is not terminated." });
+  assert.deepEqual(noPrevious.status, { kind: "invalid-substitution", message: "No previous substitution pattern." });
+  assert.deepEqual(missed.status, { kind: "no-substitution-match", pattern: "gamma" });
+
+  for (const unchanged of [invalid, malformed, noPrevious, missed]) {
+    assert.equal(vimBufferText(unchanged), vimBufferText(start));
+    assert.deepEqual(unchanged.cursor, start.cursor);
+    assert.deepEqual(unchanged.undoStack, start.undoStack);
+    assert.equal(isVimBufferDirty(unchanged), false);
+  }
+
+});
+
 test("uses searches as motions and selects counted search matches with gn and gN", () => {
   const text = "one 123 two 456 three 789";
   const start = createVimBuffer({ text, mode: VimMode.Normal });
@@ -768,6 +831,7 @@ test("allows read-only motion marks search and close while rejecting write comma
     "wq!",
     "x",
     "xit",
+    "%s/alpha/changed/",
   ]) {
     const rejected = submitVimCommand(
       appendVimCommandInput(press(start, ":"), source),
