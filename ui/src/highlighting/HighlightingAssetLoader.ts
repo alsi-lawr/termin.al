@@ -89,6 +89,18 @@ export type HighlightingFetch = (
   init: Readonly<{ signal: AbortSignal }>,
 ) => Promise<FetchResponse>;
 
+type SharedLoadState = {
+  activeCallers: number;
+  abandoned: boolean;
+  settled: boolean;
+};
+
+type SharedLoad<T> = Readonly<{
+  controller: AbortController;
+  promise: Promise<T>;
+  state: SharedLoadState;
+}>;
+
 function isObjectValue(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -198,10 +210,10 @@ export class HighlightingAssetLoader {
   readonly #basePath: string;
   readonly #fetch: HighlightingFetch;
   readonly #assetCache = new Map<string, Uint8Array | string>();
-  readonly #bytePromises = new Map<string, Promise<Uint8Array>>();
-  readonly #textPromises = new Map<string, Promise<string>>();
+  readonly #byteLoads = new Map<string, SharedLoad<Uint8Array>>();
+  readonly #textLoads = new Map<string, SharedLoad<string>>();
   #manifest: HighlightingManifest | undefined;
-  #manifestPromise: Promise<HighlightingManifest> | undefined;
+  #manifestLoad: SharedLoad<HighlightingManifest> | undefined;
 
   public constructor(fetchResource: HighlightingFetch, basePath = "/highlighting") {
     this.#fetch = fetchResource;
@@ -214,21 +226,71 @@ export class HighlightingAssetLoader {
     return response;
   }
 
+  async #joinSharedLoad<T>(
+    current: () => SharedLoad<T> | undefined,
+    replace: (load: SharedLoad<T> | undefined) => void,
+    produce: (signal: AbortSignal) => Promise<T>,
+    retain: (value: T) => void,
+    signal: AbortSignal,
+  ): Promise<T> {
+    signal.throwIfAborted();
+    let load = current();
+    if (load === undefined) {
+      const controller = new AbortController();
+      const state: SharedLoadState = { activeCallers: 0, abandoned: false, settled: false };
+      const promise = produce(controller.signal).then(
+        (value) => {
+          state.settled = true;
+          if (!state.abandoned) retain(value);
+          return value;
+        },
+        (error: unknown) => {
+          state.settled = true;
+          throw error;
+        },
+      );
+      load = { controller, promise, state };
+      replace(load);
+    }
+
+    load.state.activeCallers += 1;
+    let abortListener: (() => void) | undefined;
+    const callerAbort = new Promise<never>((_resolve, reject) => {
+      abortListener = () => {
+        try {
+          signal.throwIfAborted();
+        } catch (error: unknown) {
+          reject(error);
+        }
+      };
+      signal.addEventListener("abort", abortListener, { once: true });
+      if (signal.aborted) abortListener();
+    });
+
+    try {
+      return await Promise.race([load.promise, callerAbort]);
+    } finally {
+      if (abortListener !== undefined) signal.removeEventListener("abort", abortListener);
+      load.state.activeCallers -= 1;
+      if (load.state.activeCallers === 0) {
+        if (current() === load) replace(undefined);
+        if (!load.state.settled) {
+          load.state.abandoned = true;
+          load.controller.abort();
+        }
+      }
+    }
+  }
+
   async #loadManifest(signal: AbortSignal): Promise<HighlightingManifest> {
     if (this.#manifest !== undefined) return this.#manifest;
-    signal.throwIfAborted();
-    const existing = this.#manifestPromise;
-    const producer = existing ?? (async (): Promise<HighlightingManifest> =>
-      parseManifest(await (await this.#response("manifest.json", signal)).json()))();
-    if (existing === undefined) this.#manifestPromise = producer;
-    try {
-      const manifest = await producer;
-      signal.throwIfAborted();
-      this.#manifest = manifest;
-      return manifest;
-    } finally {
-      if (this.#manifestPromise === producer) this.#manifestPromise = undefined;
-    }
+    return await this.#joinSharedLoad(
+      () => this.#manifestLoad,
+      (load) => { this.#manifestLoad = load; },
+      async (producerSignal) => parseManifest(await (await this.#response("manifest.json", producerSignal)).json()),
+      (manifest) => { this.#manifest = manifest; },
+      signal,
+    );
   }
 
   async #bytes(manifest: HighlightingManifest, key: string, signal: AbortSignal): Promise<Uint8Array> {
@@ -236,19 +298,16 @@ export class HighlightingAssetLoader {
     if (cached instanceof Uint8Array) return cached;
     const asset = manifest.assets.get(key);
     if (asset === undefined) throw new Error(`Manifest asset ${key} is missing.`);
-    signal.throwIfAborted();
-    const existing = this.#bytePromises.get(key);
-    const producer = existing ?? (async (): Promise<Uint8Array> =>
-      (await this.#response(asset.path, signal)).bytes())();
-    if (existing === undefined) this.#bytePromises.set(key, producer);
-    try {
-      const bytes = await producer;
-      signal.throwIfAborted();
-      this.#assetCache.set(key, bytes);
-      return bytes;
-    } finally {
-      if (this.#bytePromises.get(key) === producer) this.#bytePromises.delete(key);
-    }
+    return await this.#joinSharedLoad(
+      () => this.#byteLoads.get(key),
+      (load) => {
+        if (load === undefined) this.#byteLoads.delete(key);
+        else this.#byteLoads.set(key, load);
+      },
+      async (producerSignal) => (await this.#response(asset.path, producerSignal)).bytes(),
+      (bytes) => { this.#assetCache.set(key, bytes); },
+      signal,
+    );
   }
 
   async #text(manifest: HighlightingManifest, key: string, signal: AbortSignal): Promise<string> {
@@ -256,19 +315,16 @@ export class HighlightingAssetLoader {
     if (typeof cached === "string") return cached;
     const asset = manifest.assets.get(key);
     if (asset === undefined) throw new Error(`Manifest asset ${key} is missing.`);
-    signal.throwIfAborted();
-    const existing = this.#textPromises.get(key);
-    const producer = existing ?? (async (): Promise<string> =>
-      (await this.#response(asset.path, signal)).text())();
-    if (existing === undefined) this.#textPromises.set(key, producer);
-    try {
-      const text = await producer;
-      signal.throwIfAborted();
-      this.#assetCache.set(key, text);
-      return text;
-    } finally {
-      if (this.#textPromises.get(key) === producer) this.#textPromises.delete(key);
-    }
+    return await this.#joinSharedLoad(
+      () => this.#textLoads.get(key),
+      (load) => {
+        if (load === undefined) this.#textLoads.delete(key);
+        else this.#textLoads.set(key, load);
+      },
+      async (producerSignal) => (await this.#response(asset.path, producerSignal)).text(),
+      (text) => { this.#assetCache.set(key, text); },
+      signal,
+    );
   }
 
   public async load(fenceLanguage: string, signal: AbortSignal): Promise<HighlightingAssets> {
