@@ -10,7 +10,6 @@ import {
 import {
   textMateHighlightRanges,
 } from "./TextMateHighlighting.ts";
-import { treeSitterHighlightRanges } from "./TreeSitterHighlighting.ts";
 
 const publicRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 
@@ -97,22 +96,6 @@ test("isolates caller aborts while sharing the CodeQL asset producers", async ()
   assert.equal(requests.filter((request) => request.endsWith("manifest.json")).length, 1);
   assert.equal(requests.filter((request) => request.includes("source.ql")).length, 1);
   assert.equal(requests.filter((request) => request.endsWith(".wasm")).length, 1);
-});
-
-test("loads only the pinned TypeScript closure and highlights its primary variant", async () => {
-  const requests: Array<string> = [];
-  const loader = new HighlightingAssetLoader(localFetch(requests));
-  const loaded = await loader.load("ts", new AbortController().signal);
-
-  assert.equal(loaded.kind, "tree-sitter");
-  if (loaded.kind !== "tree-sitter") assert.fail("Expected TypeScript Tree-sitter assets.");
-  assert.deepEqual(loaded.variants.map((variant) => variant.name), ["typescript", "tsx"]);
-  assert.equal(requests.filter((request) => request.endsWith(".wasm")).length, 3);
-  assert.equal(requests.some((request) => request.includes("tree-sitter-ql")), false);
-  assert.equal(requests.some((request) => request.includes("grammars/")), false);
-
-  const result = await treeSitterHighlightRanges(loaded, "const answer: number = 42;", new AbortController().signal);
-  assert.ok(result !== undefined && result.ranges.length > 0);
 });
 
 test("returns a typed failure and retries a failed known grammar asset", async () => {

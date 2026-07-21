@@ -57,7 +57,6 @@ const treeRoutes: ReadonlyArray<TreeRouteSource> = [
   { canonical: "JavaScript", repository: "tree-sitter/tree-sitter-javascript", tag: "v0.25.0", commit: "44c892e0be055ac465d5eeddae6d3e194424e7de", directory: "tree-sitter-javascript-44c892e0be055ac465d5eeddae6d3e194424e7de", variants: [{ name: "javascript", wasm: "tree-sitter-javascript.wasm", highlights: ["queries/highlights.scm", "queries/highlights-jsx.scm", "queries/highlights-params.scm"], injections: [] }] },
   { canonical: "Nix", repository: "nix-community/tree-sitter-nix", tag: "v0.3.0", commit: "ea1d87f7996be1329ef6555dcacfa63a69bd55c6", directory: "tree-sitter-nix-ea1d87f7996be1329ef6555dcacfa63a69bd55c6", variants: [{ name: "nix", wasm: "tree-sitter-nix.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
   { canonical: "PHP", repository: "tree-sitter/tree-sitter-php", tag: "v0.24.2", commit: "5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", directory: "tree-sitter-php-5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", variants: [
-    { name: "php", wasm: "tree-sitter-php.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm", "queries/injections-text.scm"] },
     { name: "php_only", wasm: "tree-sitter-php_only.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] },
   ] },
   { canonical: "Python", repository: "tree-sitter/tree-sitter-python", tag: "v0.25.0", commit: "293fdc02038ee2bf0e2e206711b69c90ac0d413f", directory: "tree-sitter-python-293fdc02038ee2bf0e2e206711b69c90ac0d413f", variants: [{ name: "python", wasm: "tree-sitter-python.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
@@ -68,7 +67,6 @@ const treeRoutes: ReadonlyArray<TreeRouteSource> = [
   { canonical: "TLA", repository: "tlaplus-community/tree-sitter-tlaplus", tag: "v1.2.4", commit: "c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", directory: "tree-sitter-tlaplus-c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", variants: [{ name: "tlaplus", wasm: "tree-sitter-tlaplus.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
   { canonical: "TypeScript", repository: "tree-sitter/tree-sitter-typescript", tag: "v0.23.2", commit: "f975a621f4e7f532fe322e13c4f79495e0a7b2e7", directory: "tree-sitter-typescript-f975a621f4e7f532fe322e13c4f79495e0a7b2e7", variants: [
     { name: "typescript", wasm: "tree-sitter-typescript.wasm", highlights: ["queries/highlights.scm", "@javascript/queries/highlights.scm"], injections: ["@javascript/queries/injections.scm"] },
-    { name: "tsx", wasm: "tree-sitter-tsx.wasm", highlights: ["queries/highlights.scm", "@javascript/queries/highlights-jsx.scm", "@javascript/queries/highlights.scm"], injections: ["@javascript/queries/injections.scm"] },
   ] },
 ];
 

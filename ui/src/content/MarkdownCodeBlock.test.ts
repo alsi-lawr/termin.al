@@ -101,3 +101,32 @@ test("keeps unknown, Genshi, and failed loads plain while loading an HTML inject
   }));
   assert.equal(await highlightFenceCode(failedLoader, "ql", "select 1", signal), undefined);
 });
+
+test("uses the selected PHP and TypeScript parsers and highlights cold TSX", async () => {
+  const requests: Array<string> = [];
+  const loader = new HighlightingAssetLoader(localFetch(requests));
+  const signal = new AbortController().signal;
+  const phpSnippet = "echo $answer;";
+  const taggedPhp = "<?php echo $answer; ?>";
+  const typeScript = "const answer: number = 42;";
+  const tsx = "const view = <section>{answer}</section>;";
+
+  const phpRanges = await highlightFenceCode(loader, "php", phpSnippet, signal);
+  const taggedPhpRanges = await highlightFenceCode(loader, "php", taggedPhp, signal);
+  const typeScriptRanges = await highlightFenceCode(loader, "ts", typeScript, signal);
+  const tsxRanges = await highlightFenceCode(loader, "tsx", tsx, signal);
+
+  assert.ok(phpRanges !== undefined && phpRanges.length > 0);
+  assert.ok(taggedPhpRanges !== undefined && taggedPhpRanges.length > 0);
+  assert.ok(typeScriptRanges !== undefined && typeScriptRanges.length > 0);
+  assert.ok(tsxRanges !== undefined && tsxRanges.length > 0);
+  assert.equal(rebuiltSource(phpSnippet, phpRanges), phpSnippet);
+  assert.equal(rebuiltSource(taggedPhp, taggedPhpRanges), taggedPhp);
+  assert.equal(rebuiltSource(typeScript, typeScriptRanges), typeScript);
+  assert.equal(rebuiltSource(tsx, tsxRanges), tsx);
+  assert.equal(requests.some((request) => /trees\/php\.[^.]+\.wasm$/u.test(request)), false);
+  assert.equal(requests.some((request) => /trees\/tsx\.[^.]+\.wasm$/u.test(request)), false);
+  assert.equal(requests.some((request) => request.includes("php_only")), true);
+  assert.equal(requests.some((request) => request.includes("typescript")), true);
+  assert.equal(requests.some((request) => request.includes("source.tsx")), true);
+});

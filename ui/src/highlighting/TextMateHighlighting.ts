@@ -5,6 +5,8 @@ import { maximumHighlightRanges, maximumHighlightedCodeUnits, syntaxRole, type H
 
 type TextMateAssets = Extract<HighlightingAssets, Readonly<{ kind: "textmate" }>>;
 
+const tokenizationSliceMilliseconds = 20;
+const maximumTokenizationSlicesPerLine = 4;
 let onigurumaInitialization: Promise<void> | undefined;
 const runtimeLoads = new Map<string, Promise<IGrammar>>();
 
@@ -51,7 +53,12 @@ export async function textMateHighlightRanges(
   let offset = 0;
   for (const [lineIndex, line] of lines.entries()) {
     signal.throwIfAborted();
-    const tokenized = grammar.tokenizeLine(line, state, 20);
+    let tokenized = grammar.tokenizeLine(line, state, tokenizationSliceMilliseconds);
+    for (let slice = 1; tokenized.stoppedEarly && slice < maximumTokenizationSlicesPerLine; slice += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      signal.throwIfAborted();
+      tokenized = grammar.tokenizeLine(line, state, tokenizationSliceMilliseconds);
+    }
     if (tokenized.stoppedEarly) return undefined;
     state = tokenized.ruleStack;
     for (const token of tokenized.tokens) {
