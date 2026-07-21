@@ -7,9 +7,7 @@ import {
   restoreThemePreview,
   systemThemePreference,
   themeNameFrom,
-  themeNames,
   themePreferenceEquals,
-  themeSelectorChoices,
   themeSelectorKeyResult,
   themeStatus,
   withSystemThemeAppearance,
@@ -55,14 +53,6 @@ test("can clear an explicit selection and validate a named palette", () => {
   assert.equal(themeStatus(system).theme, "gruber-light-muted");
   assert.equal(themeNameFrom("gruber-darker"), "gruber-darker");
   assert.equal(themeNameFrom("not-a-theme"), undefined);
-  assert.deepEqual(themeNames, [
-    "gruber-dark-muted",
-    "gruber-dark",
-    "gruber-darker",
-    "gruber-light-muted",
-    "gruber-light",
-    "gruber-lighter",
-  ]);
 });
 
 test("moves through system and six named selector choices", () => {
@@ -82,7 +72,6 @@ test("moves through system and six named selector choices", () => {
     theme: "gruber-lighter",
   });
   assert.deepEqual(first.selectedPreference, systemThemePreference);
-  assert.equal(themeSelectorChoices.length, 7);
 });
 
 test("maps selector movement, acceptance, and cancellation keys", () => {

@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  createElement,
-  isValidElement,
-  type ReactElement,
-} from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createServer } from "vite";
 import { ContentId } from "../../api/ContentContracts.ts";
+import type { ViewerContent } from "../../content/ViewerContent.ts";
+import { ViewerPane } from "./ViewerPane.tsx";
 
 function contentId(value: string): ContentId {
   const validation = ContentId.tryCreate(value, "responsive viewer test content");
@@ -19,52 +16,9 @@ function contentId(value: string): ContentId {
   return validation.value;
 }
 
-type ViewerPaneTestProps = Readonly<{
-  viewer: unknown;
-  isActive: boolean;
-  focusVersion: number;
-  onActivate: () => void;
-  onPaneKeyInput: () => Readonly<{ kind: "unhandled" }>;
-  mobileCtrlPressed: boolean;
-  onToggleMobileCtrl: () => void;
-  onConsumeMobileCtrl: () => void;
-  resolveMobileCtrlInput: (input: unknown) => Readonly<{
-    input: unknown;
-    mobileCtrlApplied: boolean;
-  }>;
-  onAcceptedContentOpen: (contentId: ContentId) => void;
-  onClose: () => void;
-}>;
-
-function isViewerPaneModule(
-  value: unknown,
-): value is Readonly<{
-  ViewerPane: (props: ViewerPaneTestProps) => ReactElement;
-}> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "ViewerPane" in value &&
-    typeof value.ViewerPane === "function"
-  );
-}
-
-async function renderViewerPane(viewer: unknown): Promise<string> {
-  const vite = await createServer({
-    appType: "custom",
-    server: { middlewareMode: true, hmr: false, ws: false },
-  });
-
-  try {
-    const loadedModule: unknown = await vite.ssrLoadModule(
-      "/src/ui/workspace/ViewerPane.tsx",
-    );
-
-    if (!isViewerPaneModule(loadedModule)) {
-      assert.fail("Expected ViewerPane to be available.");
-    }
-
-    const rendered = createElement(loadedModule.ViewerPane, {
+function renderViewerPane(viewer: ViewerContent): string {
+  return renderToStaticMarkup(
+    createElement(ViewerPane, {
       viewer,
       isActive: true,
       focusVersion: 0,
@@ -75,26 +29,18 @@ async function renderViewerPane(viewer: unknown): Promise<string> {
       mobileCtrlPressed: false,
       onToggleMobileCtrl: () => undefined,
       onConsumeMobileCtrl: () => undefined,
-      resolveMobileCtrlInput: (input: unknown) => ({
+      resolveMobileCtrlInput: (input) => ({
         input,
         mobileCtrlApplied: false,
       }),
       onAcceptedContentOpen: () => undefined,
       onClose: () => undefined,
-    });
-
-    if (!isValidElement(rendered)) {
-      assert.fail("Expected ViewerPane to render.");
-    }
-
-    return renderToStaticMarkup(rendered);
-  } finally {
-    await vite.close();
-  }
+    }),
+  );
 }
 
-test("keeps viewer return touch-accessible but hidden at desktop width", async () => {
-  const markup = await renderViewerPane({
+test("keeps viewer return touch-accessible but hidden at desktop width", () => {
+  const markup = renderViewerPane({
     kind: "placeholder",
     title: "Preview",
   });
@@ -106,12 +52,12 @@ test("keeps viewer return touch-accessible but hidden at desktop width", async (
   );
 });
 
-test("renders less as raw text with an inverse prompt above mobile controls", async () => {
+test("renders less as raw text with an inverse prompt above mobile controls", () => {
   const text = Array.from(
     { length: 25 },
     (_, index) => `line ${index + 1}\n`,
   ).join("");
-  const markup = await renderViewerPane({
+  const markup = renderViewerPane({
     kind: "document",
     title: "sample-note.md",
     presentation: "raw-pager",
@@ -156,12 +102,12 @@ test("renders less as raw text with an inverse prompt above mobile controls", as
   assert.equal(mobileControlsPosition > promptPosition, true);
 });
 
-test("renders complete vi manpages in the native read-only Vim editor", async () => {
+test("renders complete vi manpages in the native read-only Vim editor", () => {
   const text = Array.from(
     { length: 25 },
     (_, index) => `manual line ${index + 1}\n`,
   ).join("");
-  const markup = await renderViewerPane({
+  const markup = renderViewerPane({
     kind: "document",
     title: "ls(1)",
     presentation: "vi-manpager",
@@ -199,8 +145,8 @@ test("renders complete vi manpages in the native read-only Vim editor", async ()
   assert.equal(mobileControlsPosition > editorPosition, true);
 });
 
-test("renders hierarchical collections as terminal rows with explicit touch controls and no viewer page chrome", async () => {
-  const markup = await renderViewerPane({
+test("renders hierarchical collections as terminal rows with explicit touch controls and no viewer page chrome", () => {
+  const markup = renderViewerPane({
     kind: "collection",
     title: "Projects",
     emptyMessage: "No projects. Press Esc to return.",

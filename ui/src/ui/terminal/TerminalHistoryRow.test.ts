@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { createServer } from "vite";
 import { virtualHomeDirectory } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createShellDiagnosticId,
@@ -13,21 +11,9 @@ import {
   reduceShellState,
   type CommandLineOutcome,
 } from "../../domain/terminal/Shell.ts";
+import { TerminalHistoryRow } from "./TerminalHistoryRow.tsx";
 
-function isTerminalHistoryRowModule(
-  value: unknown,
-): value is Readonly<{
-  TerminalHistoryRow: (...arguments_: ReadonlyArray<unknown>) => unknown;
-}> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "TerminalHistoryRow" in value &&
-    typeof value.TerminalHistoryRow === "function"
-  );
-}
-
-test("does not render secret-bearing execution errors from shell history", async () => {
+test("does not render secret-bearing execution errors from shell history", () => {
   const messageSecret = "rendered-history-error-message-secret";
   const stackSecret = "rendered-history-error-stack-secret";
   const nestedCauseSecret = "rendered-history-error-cause-secret";
@@ -97,39 +83,16 @@ test("does not render secret-bearing execution errors from shell history", async
     assert.fail("Expected a stored history entry.");
   }
 
-  const vite = await createServer({
-    appType: "custom",
-    server: { middlewareMode: true, hmr: false, ws: false },
-  });
+  const markup = renderToStaticMarkup(TerminalHistoryRow({ entry }));
 
-  try {
-    const loadedModule: unknown = await vite.ssrLoadModule(
-      "/src/ui/terminal/TerminalHistoryRow.tsx",
-    );
-
-    if (!isTerminalHistoryRowModule(loadedModule)) {
-      assert.fail("Expected TerminalHistoryRow to be available for rendering.");
-    }
-
-    const rendered = loadedModule.TerminalHistoryRow({ entry });
-
-    if (!isValidElement(rendered)) {
-      assert.fail("Expected TerminalHistoryRow to return a React element.");
-    }
-
-    const markup = renderToStaticMarkup(rendered);
-
-    for (const secret of [
-      messageSecret,
-      stackSecret,
-      nestedCauseSecret,
-      fieldSecret,
-    ]) {
-      assert.equal(markup.includes(secret), false);
-    }
-
-    assert.equal(markup.includes("The command could not complete."), true);
-  } finally {
-    await vite.close();
+  for (const secret of [
+    messageSecret,
+    stackSecret,
+    nestedCauseSecret,
+    fieldSecret,
+  ]) {
+    assert.equal(markup.includes(secret), false);
   }
+
+  assert.equal(markup.includes("The command could not complete."), true);
 });

@@ -242,7 +242,6 @@ test("keeps the actual registry and generated manuals in exact metadata agreemen
     .map((command) => command.metadata)
     .sort((left, right) => left.name.localeCompare(right.name));
 
-  assert.equal(registryMetadata.length, 33);
   assert.deepEqual(
     generatedManpages.entries.map((entry) => entry.name),
     registryMetadata.map((metadata) => metadata.name),

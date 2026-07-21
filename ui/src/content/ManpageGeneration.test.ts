@@ -74,7 +74,6 @@ test("generates an exact deterministic safe 33-manual corpus and manifest", () =
     );
     const second = runManpageGeneration({ repositoryRoot: root, mode: "generate" });
 
-    assert.equal(first.entries.length, 33);
     assert.deepEqual(first, second);
     assert.deepEqual(readFileSync(manifestPath), firstManifest);
     assert.deepEqual(

@@ -14,14 +14,12 @@ import {
 } from "react";
 import type { CompletionCycleDirection } from "../../domain/terminal/Shell.ts";
 import { normalizeNativeInputSelection } from "./UnicodeUiBoundary.ts";
-import {
-  selectInputCaptureControl,
-  type InputCapturePromptKind,
-} from "./InputCaptureControl.ts";
 import type {
   MobileCtrlInputResolution,
   MobileCtrlKeyInput,
 } from "../workspace/MobileCtrlModifier.ts";
+
+type InputCapturePromptKind = "command" | "secret";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -82,7 +80,6 @@ function isControlKey(input: InputCapturePaneKeyInput, key: string): boolean {
 
 export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
   function InputCapture(props, ref): ReactElement {
-    const control = selectInputCaptureControl(props.promptKind);
     const inputRef = useRef<NativeInputControlElement | null>(null);
     const composing = useRef(false);
     const setInputRef = useCallback(
@@ -107,7 +104,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       if (props.isActive) {
         inputRef.current?.focus({ preventScroll: true });
       }
-    }, [control.element, props.focusVersion, props.isActive]);
+    }, [props.focusVersion, props.isActive, props.promptKind]);
 
     useLayoutEffect(() => {
       const input = inputRef.current;
@@ -118,7 +115,7 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
 
       const cursor = normalizeNativeInputSelection(props.value, props.cursor);
       input.setSelectionRange(cursor, cursor);
-    }, [control.element, props.cursor, props.value]);
+    }, [props.cursor, props.promptKind, props.value]);
 
     const synchroniseNativeValue = (
       event: SyntheticEvent<NativeInputControlElement>,
@@ -303,11 +300,13 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       autoComplete: "off",
       autoCorrect: "off",
       spellCheck: false,
-      "aria-label": control.accessibleName,
+      "aria-label": props.promptKind === "secret"
+        ? "Secret terminal input"
+        : "Terminal command input",
     };
 
-    if (control.element === "input") {
-      return <input {...sharedControlProps} type={control.inputType} />;
+    if (props.promptKind === "secret") {
+      return <input {...sharedControlProps} type="password" />;
     }
 
     return <textarea {...sharedControlProps} />;
