@@ -1,20 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { HighlightingAssetLoader, type HighlightingFetch } from "../highlighting/HighlightingAssetLoader.ts";
-import { currentHighlightRanges, fenceLanguageKey, highlightFenceCode, type CompletedHighlight } from "../highlighting/FenceHighlighting.ts";
+import { browserHighlightingAssetLoader, currentHighlightRanges, fenceLanguageKey, highlightFenceCode, type CompletedHighlight } from "../highlighting/FenceHighlighting.ts";
 import { type HighlightRange, type SyntaxRole } from "../highlighting/HighlightingTokens.ts";
-
-const browserFetch: HighlightingFetch = async (input, init) => {
-  const response = await fetch(input, { signal: init.signal, credentials: "same-origin" });
-  return {
-    ok: response.ok,
-    status: response.status,
-    json: async (): Promise<unknown> => await response.json(),
-    text: async (): Promise<string> => await response.text(),
-    bytes: async (): Promise<Uint8Array> => new Uint8Array(await response.arrayBuffer()),
-  };
-};
-
-const assetLoader = new HighlightingAssetLoader(browserFetch);
 
 function syntaxClass(role: SyntaxRole): string {
   switch (role) {
@@ -64,7 +50,7 @@ export function MarkdownCodeBlock({ infoString, source }: MarkdownCodeBlockProps
     let timeout: number | undefined;
     const frame = window.requestAnimationFrame(() => {
       timeout = window.setTimeout(() => {
-        void highlightFenceCode(assetLoader, language, source, controller.signal).then((ranges) => {
+        void highlightFenceCode(browserHighlightingAssetLoader, language, source, controller.signal).then((ranges) => {
           if (controller.signal.aborted || ranges === undefined) return;
           const selection = window.getSelection();
           const element = code.current;

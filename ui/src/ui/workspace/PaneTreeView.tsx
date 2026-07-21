@@ -200,6 +200,7 @@ function PaneLeaf({
           <VimEditorPane
             title={pane.content.title}
             buffer={pane.content.buffer}
+            syntax={{ kind: "markdown" }}
             isActive={isActive}
             focusVersion={focusVersion}
             onActivate={activate}

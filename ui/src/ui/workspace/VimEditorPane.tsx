@@ -3,6 +3,7 @@ import {
   useId,
   useLayoutEffect,
   useRef,
+  useState,
   type ChangeEvent,
   type ClipboardEvent,
   type CompositionEvent,
@@ -45,10 +46,16 @@ import {
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { vimEditorModeStatus } from "./VimEditorModeStatus.ts";
 import { VimEditorBlockSelectionMirror } from "./VimEditorBlockSelectionMirror.tsx";
+import { VimEditorHighlightLayer } from "./VimEditorHighlightLayer.tsx";
+
+type VimEditorSyntax =
+  | Readonly<{ kind: "markdown" }>
+  | Readonly<{ kind: "plain" }>;
 
 type VimEditorPaneProps = Readonly<{
   title: string;
   buffer: VimBuffer;
+  syntax: VimEditorSyntax;
   isActive: boolean;
   focusVersion: number;
   onBufferChange: (buffer: VimBuffer) => void;
@@ -63,6 +70,23 @@ type VimEditorPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
 }>;
+
+function editorTextareaClass(
+  syntax: VimEditorSyntax,
+  mode: VimBuffer["mode"]["kind"],
+  compositionActive: boolean,
+): string {
+  if (syntax.kind === "markdown") {
+    if (compositionActive) {
+      return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
+    }
+    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-ui-cursor outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
+  }
+  if (mode === "visual-block") {
+    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
+  }
+  return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
+}
 
 function commandEffectLabel(buffer: VimBuffer): string | undefined {
   switch (buffer.commandEffect.kind) {
@@ -156,6 +180,7 @@ function moveInsertCursorForMobile(
 export function VimEditorPane({
   title,
   buffer,
+  syntax,
   isActive,
   focusVersion,
   onBufferChange,
@@ -167,12 +192,16 @@ export function VimEditorPane({
   resolveMobileCtrlInput,
 }: VimEditorPaneProps): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const highlightLayerRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const composing = useRef(false);
+  const [compositionActive, setCompositionActive] = useState(false);
   const modeStatusId = useId();
   const modeStatus = vimEditorModeStatus(buffer);
   const commandEffect = commandEffectLabel(buffer);
   const bufferStatus = bufferStatusLabel(buffer);
+  const source = vimBufferText(buffer);
+  const textareaClass = editorTextareaClass(syntax, buffer.mode.kind, compositionActive);
 
   useEffect(() => {
     if (isActive) {
@@ -223,6 +252,13 @@ export function VimEditorPane({
       input.setSelectionRange(cursor, cursor);
     }
 
+    const highlightLayer = highlightLayerRef.current;
+
+    if (highlightLayer !== null) {
+      highlightLayer.scrollTop = input.scrollTop;
+      highlightLayer.scrollLeft = input.scrollLeft;
+    }
+
     const mirror = mirrorRef.current;
 
     if (mirror !== null) {
@@ -232,6 +268,13 @@ export function VimEditorPane({
   }, [buffer]);
 
   const handleScroll = (event: UIEvent<HTMLTextAreaElement>): void => {
+    const highlightLayer = highlightLayerRef.current;
+
+    if (highlightLayer !== null) {
+      highlightLayer.scrollTop = event.currentTarget.scrollTop;
+      highlightLayer.scrollLeft = event.currentTarget.scrollLeft;
+    }
+
     const mirror = mirrorRef.current;
 
     if (mirror === null) {
@@ -271,12 +314,14 @@ export function VimEditorPane({
 
   const handleCompositionStart = (): void => {
     composing.current = true;
+    setCompositionActive(true);
   };
 
   const handleCompositionEnd = (
     event: CompositionEvent<HTMLTextAreaElement>,
   ): void => {
     composing.current = false;
+    setCompositionActive(false);
 
     if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
       onBufferChange(
@@ -481,6 +526,9 @@ export function VimEditorPane({
           </span>
         </div>
         <div className="relative flex min-h-0 flex-1">
+          {syntax.kind === "markdown" ? (
+            <VimEditorHighlightLayer source={source} layerRef={highlightLayerRef} />
+          ) : null}
           {buffer.mode.kind === "visual-block" ? (
             <VimEditorBlockSelectionMirror
               buffer={buffer}
@@ -489,10 +537,8 @@ export function VimEditorPane({
           ) : null}
           <textarea
             ref={inputRef}
-            className={buffer.mode.kind === "visual-block"
-              ? "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"
-              : "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal text-text-primary outline-none focus:border-ui-focus"}
-            value={vimBufferText(buffer)}
+            className={textareaClass}
+            value={source}
             aria-readonly={buffer.capability.kind === "read-only"}
             aria-label={title + " editor text"}
             aria-describedby={modeStatusId}

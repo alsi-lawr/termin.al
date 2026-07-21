@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { HighlightingAssetLoader, type HighlightingFetch } from "../highlighting/HighlightingAssetLoader.ts";
 import { normalizedHighlightRanges, type HighlightRange } from "../highlighting/HighlightingTokens.ts";
 import { currentHighlightRanges, fenceLanguageKey, highlightFenceCode, type CompletedHighlight } from "../highlighting/FenceHighlighting.ts";
+import { currentMarkdownEditorRanges, highlightMarkdownEditorSource, type CompletedMarkdownEditorHighlight } from "../highlighting/MarkdownEditorHighlighting.ts";
 
 const publicRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 
@@ -129,4 +130,37 @@ test("uses the selected PHP and TypeScript parsers and highlights cold TSX", asy
   assert.equal(requests.some((request) => request.includes("php_only")), true);
   assert.equal(requests.some((request) => request.includes("typescript")), true);
   assert.equal(requests.some((request) => request.includes("source.tsx")), true);
+});
+
+test("highlights exact Markdown editor source with a non-static fence alias and rejects stale or failed work", async () => {
+  const requests: Array<string> = [];
+  const loader = new HighlightingAssetLoader(localFetch(requests));
+  const source = "# Query\n\n```ql title=example.ql\nfrom Function f\nselect f\n```";
+  const ranges = await highlightMarkdownEditorSource(loader, source, new AbortController().signal);
+
+  assert.ok(ranges !== undefined && ranges.length > 0);
+  assert.equal(rebuiltSource(source, ranges), source);
+  assert.ok(ranges.some((range) => source.slice(range.start, range.end) === "#"));
+  assert.ok(ranges.some((range) => range.start > source.indexOf("from Function")));
+  assert.equal(requests.some((request) => request.includes("text.md")), true);
+  assert.equal(requests.some((request) => request.includes("source.ql")), true);
+
+  const completed: CompletedMarkdownEditorHighlight = { source, ranges };
+  assert.deepEqual(currentMarkdownEditorRanges(completed, source), ranges);
+  assert.equal(currentMarkdownEditorRanges(completed, source + "\n"), undefined);
+
+  const fetchResource = localFetch([]);
+  const failedLoader = new HighlightingAssetLoader(async (input, init) => {
+    if (input.includes("source.ql")) {
+      return {
+        ok: false,
+        status: 503,
+        json: async (): Promise<unknown> => ({}),
+        text: async (): Promise<string> => "",
+        bytes: async (): Promise<Uint8Array> => new Uint8Array(),
+      };
+    }
+    return await fetchResource(input, init);
+  });
+  assert.equal(await highlightMarkdownEditorSource(failedLoader, source, new AbortController().signal), undefined);
 });

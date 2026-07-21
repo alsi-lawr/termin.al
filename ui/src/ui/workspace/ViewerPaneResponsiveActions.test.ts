@@ -122,6 +122,8 @@ test("renders complete vi manpages in the native read-only Vim editor", () => {
   assert.equal(markup.includes('aria-label="ls(1) editor text"'), true);
   assert.equal(markup.includes('aria-readonly="true"'), true);
   assert.equal(markup.includes("<textarea"), true);
+  assert.equal(markup.includes('data-editor-highlighting="markdown"'), false);
+  assert.equal(markup.includes("text-transparent"), false);
   assert.equal(markup.includes("manual line 1\n"), true);
   assert.equal(markup.includes("manual line 20\n"), true);
   assert.equal(markup.includes("manual line 21\n"), true);

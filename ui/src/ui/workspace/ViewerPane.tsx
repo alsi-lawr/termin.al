@@ -172,6 +172,7 @@ function ViManpager({
     <VimEditorPane
       title={title}
       buffer={buffer}
+      syntax={{ kind: "plain" }}
       isActive={isActive}
       focusVersion={focusVersion}
       onBufferChange={applyBuffer}

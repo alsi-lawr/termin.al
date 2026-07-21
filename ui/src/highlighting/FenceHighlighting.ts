@@ -1,4 +1,4 @@
-import { HighlightingAssetLoader } from "./HighlightingAssetLoader.ts";
+import { HighlightingAssetLoader, type HighlightingFetch } from "./HighlightingAssetLoader.ts";
 import { normalizedHighlightRanges, type HighlightCandidate, type HighlightRange } from "./HighlightingTokens.ts";
 
 export type CompletedHighlight = Readonly<{
@@ -6,6 +6,19 @@ export type CompletedHighlight = Readonly<{
   source: string;
   ranges: ReadonlyArray<HighlightRange>;
 }>;
+
+const browserFetch: HighlightingFetch = async (input, init) => {
+  const response = await fetch(input, { signal: init.signal, credentials: "same-origin" });
+  return {
+    ok: response.ok,
+    status: response.status,
+    json: async (): Promise<unknown> => await response.json(),
+    text: async (): Promise<string> => await response.text(),
+    bytes: async (): Promise<Uint8Array> => new Uint8Array(await response.arrayBuffer()),
+  };
+};
+
+export const browserHighlightingAssetLoader = new HighlightingAssetLoader(browserFetch);
 
 export function fenceLanguageKey(infoString: string | undefined): string | undefined {
   const key = infoString?.trim().split(/\s+/u)[0];
