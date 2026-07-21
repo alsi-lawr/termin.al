@@ -1,5 +1,6 @@
 import { createElement, type ReactElement, type ReactNode } from "react";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
+import { MarkdownCodeBlock } from "./MarkdownCodeBlock.tsx";
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -826,15 +827,7 @@ function blockElement(block: MarkdownBlock, index: number): ReactElement {
         ),
       );
     case "code":
-      return createElement(
-        "pre",
-        { className: "mt-3 overflow-x-auto rounded bg-surface-raised p-3 text-markup-raw" },
-        createElement(
-          "code",
-          { "data-language": block.language },
-          block.text,
-        ),
-      );
+      return createElement(MarkdownCodeBlock, { infoString: block.language, source: block.text });
     case "rule":
       return createElement("hr", { className: "mt-4 border-surface-border" });
     case "error":

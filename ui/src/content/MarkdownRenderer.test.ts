@@ -81,6 +81,8 @@ test("renders themed safe GFM blocks and inline content", () => {
   assert.match(markup, /unsafe image blocked/u);
   assert.match(markup, /text-markup-heading-1/u);
   assert.match(markup, /text-markup-link/u);
+  assert.match(markup, /<code data-language="ts">const answer = 42;<\/code>/u);
+  assert.doesNotMatch(markup, /text-syntax-/u);
   assert.doesNotMatch(markup, /<script/u);
   assert.doesNotMatch(markup, /javascript:/u);
   assert.doesNotMatch(markup, /data:text/u);

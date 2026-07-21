@@ -8,9 +8,9 @@ import {
   type HighlightingFetch,
 } from "./HighlightingAssetLoader.ts";
 import {
-  createTextMateRuntime,
-  createTreeSitterRuntime,
-} from "./HighlightingRuntime.ts";
+  textMateHighlightRanges,
+} from "./TextMateHighlighting.ts";
+import { treeSitterHighlightRanges } from "./TreeSitterHighlighting.ts";
 
 const publicRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "public");
 
@@ -69,8 +69,8 @@ test("routes both CodeQL aliases through one cached TextMate closure", async () 
   assert.equal(requests.filter((request) => request.endsWith(".wasm")).length, 1);
   assert.equal(requests.some((request) => request.includes("tree-sitter-ql")), false);
 
-  const runtime = await createTextMateRuntime(codeQl);
-  assert.ok(runtime.grammar.tokenizeLine("from Function f select f", null).tokens.length > 0);
+  const ranges = await textMateHighlightRanges(codeQl, "from Function f select f", signal);
+  assert.ok(ranges !== undefined && ranges.length > 0);
 });
 
 test("isolates caller aborts while sharing the CodeQL asset producers", async () => {
@@ -99,7 +99,7 @@ test("isolates caller aborts while sharing the CodeQL asset producers", async ()
   assert.equal(requests.filter((request) => request.endsWith(".wasm")).length, 1);
 });
 
-test("loads only the pinned TypeScript runtime closure and compiles both variants", async () => {
+test("loads only the pinned TypeScript closure and highlights its primary variant", async () => {
   const requests: Array<string> = [];
   const loader = new HighlightingAssetLoader(localFetch(requests));
   const loaded = await loader.load("ts", new AbortController().signal);
@@ -111,9 +111,8 @@ test("loads only the pinned TypeScript runtime closure and compiles both variant
   assert.equal(requests.some((request) => request.includes("tree-sitter-ql")), false);
   assert.equal(requests.some((request) => request.includes("grammars/")), false);
 
-  const runtime = await createTreeSitterRuntime(loaded);
-  assert.deepEqual(runtime.variants.map((variant) => variant.name), ["typescript", "tsx"]);
-  assert.ok(runtime.variants.every((variant) => variant.injections !== undefined));
+  const result = await treeSitterHighlightRanges(loaded, "const answer: number = 42;", new AbortController().signal);
+  assert.ok(result !== undefined && result.ranges.length > 0);
 });
 
 test("returns a typed failure and retries a failed known grammar asset", async () => {
