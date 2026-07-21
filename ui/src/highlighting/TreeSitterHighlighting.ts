@@ -51,44 +51,47 @@ export async function treeSitterHighlightRanges(
   const selected = await runtime(assets);
   signal.throwIfAborted();
   const parser = new Parser();
-  parser.setLanguage(selected.language);
-  const deadline = performance.now() + 50;
-  const tree = parser.parse(source, null, {
-    progressCallback: () => signal.aborted || performance.now() > deadline,
-  });
-  parser.delete();
-  if (tree === null || signal.aborted) {
-    tree?.delete();
-    signal.throwIfAborted();
-    return undefined;
-  }
   try {
-    const candidates: Array<HighlightCandidate> = [];
-    for (const [sequence, capture] of selected.highlights.captures(tree.rootNode, { matchLimit: 20_000 }).entries()) {
-      const role = syntaxRole(capture.name);
-      if (role === undefined) continue;
-      const configuredPriority = capture.setProperties?.priority;
-      const parsedPriority = configuredPriority === undefined || configuredPriority === null ? 100 : Number(configuredPriority);
-      candidates.push({ start: capture.node.startIndex, end: capture.node.endIndex, role, priority: Number.isFinite(parsedPriority) ? parsedPriority : 100, sequence });
+    parser.setLanguage(selected.language);
+    const deadline = performance.now() + 50;
+    const tree = parser.parse(source, null, {
+      progressCallback: () => signal.aborted || performance.now() > deadline,
+    });
+    if (tree === null || signal.aborted) {
+      tree?.delete();
+      signal.throwIfAborted();
+      return undefined;
     }
-    const ranges = normalizedHighlightRanges(source.length, candidates);
-    if (ranges === undefined) return undefined;
-    const injections: Array<Readonly<{ language: string; start: number; end: number }>> = [];
-    if (selected.injections !== undefined) {
-      for (const match of selected.injections.matches(tree.rootNode, { matchLimit: 256 })) {
-        const language = injectionLanguage(match.captures, match.setProperties?.["injection.language"]);
-        if (language === undefined) continue;
-        for (const capture of match.captures) {
-          if (capture.name !== "injection.content") continue;
-          const start = capture.node.startIndex;
-          const end = capture.node.endIndex;
-          if (start < end && end <= source.length) injections.push({ language, start, end });
-          if (injections.length > 64) return undefined;
+    try {
+      const candidates: Array<HighlightCandidate> = [];
+      for (const [sequence, capture] of selected.highlights.captures(tree.rootNode, { matchLimit: 20_000 }).entries()) {
+        const role = syntaxRole(capture.name);
+        if (role === undefined) continue;
+        const configuredPriority = capture.setProperties?.priority;
+        const parsedPriority = configuredPriority === undefined || configuredPriority === null ? 100 : Number(configuredPriority);
+        candidates.push({ start: capture.node.startIndex, end: capture.node.endIndex, role, priority: Number.isFinite(parsedPriority) ? parsedPriority : 100, sequence });
+      }
+      const ranges = normalizedHighlightRanges(source.length, candidates);
+      if (ranges === undefined) return undefined;
+      const injections: Array<Readonly<{ language: string; start: number; end: number }>> = [];
+      if (selected.injections !== undefined) {
+        for (const match of selected.injections.matches(tree.rootNode, { matchLimit: 256 })) {
+          const language = injectionLanguage(match.captures, match.setProperties?.["injection.language"]);
+          if (language === undefined) continue;
+          for (const capture of match.captures) {
+            if (capture.name !== "injection.content") continue;
+            const start = capture.node.startIndex;
+            const end = capture.node.endIndex;
+            if (start < end && end <= source.length) injections.push({ language, start, end });
+            if (injections.length > 64) return undefined;
+          }
         }
       }
+      return { ranges, injections };
+    } finally {
+      tree.delete();
     }
-    return { ranges, injections };
   } finally {
-    tree.delete();
+    parser.delete();
   }
 }
