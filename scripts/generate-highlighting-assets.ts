@@ -29,7 +29,7 @@ type TreeRouteSource = Readonly<{
   tag: string;
   commit: string;
   directory: string;
-  variants: ReadonlyArray<TreeVariantSource>;
+  variant: TreeVariantSource;
 }>;
 
 const linguistCommit = "1d7ac7ed569bd6edef5d0cfc73feea2573cb0e03";
@@ -45,29 +45,29 @@ const expectedTextMateRecords = 731;
 const expectedTreeRecords = 19;
 
 const treeRoutes: ReadonlyArray<TreeRouteSource> = [
-  { canonical: "C", repository: "tree-sitter/tree-sitter-c", tag: "v0.24.2", commit: "b780e47fc780ddc8da13afa35a3f4ed5c157823d", directory: "tree-sitter-c-b780e47fc780ddc8da13afa35a3f4ed5c157823d", variants: [{ name: "c", wasm: "tree-sitter-c.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "C#", repository: "tree-sitter/tree-sitter-c-sharp", tag: "v0.23.5", commit: "cac6d5fb595f5811a076336682d5d595ac1c9e85", directory: "tree-sitter-c-sharp-cac6d5fb595f5811a076336682d5d595ac1c9e85", variants: [{ name: "c_sharp", wasm: "tree-sitter-c_sharp.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "CSS", repository: "tree-sitter/tree-sitter-css", tag: "v0.25.0", commit: "dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f", directory: "tree-sitter-css-dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f", variants: [{ name: "css", wasm: "tree-sitter-css.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "EJS", repository: "tree-sitter/tree-sitter-embedded-template", tag: "v0.25.0", commit: "c70c1de07dedd532089c0c90835c8ed9fa694f5c", directory: "tree-sitter-embedded-template-c70c1de07dedd532089c0c90835c8ed9fa694f5c", variants: [{ name: "embedded_template", wasm: "tree-sitter-embedded_template.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections-ejs.scm"] }] },
-  { canonical: "Elixir", repository: "elixir-lang/tree-sitter-elixir", tag: "v0.3.5", commit: "e2d9e6e0e76b0c436fa48a0b8c32a031d0cbdf49", directory: "tree-sitter-elixir-e2d9e6e0e76b0c436fa48a0b8c32a031d0cbdf49", variants: [{ name: "elixir", wasm: "tree-sitter-elixir.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "Gleam", repository: "gleam-lang/tree-sitter-gleam", tag: "v1.1.0", commit: "dae1551a9911b24f41d876c23f2ab05ece0a9d4c", directory: "tree-sitter-gleam-dae1551a9911b24f41d876c23f2ab05ece0a9d4c", variants: [{ name: "gleam", wasm: "tree-sitter-gleam.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] }] },
-  { canonical: "Go", repository: "tree-sitter/tree-sitter-go", tag: "v0.25.0", commit: "1547678a9da59885853f5f5cc8a99cc203fa2e2c", directory: "tree-sitter-go-1547678a9da59885853f5f5cc8a99cc203fa2e2c", variants: [{ name: "go", wasm: "tree-sitter-go.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "HTML", repository: "tree-sitter/tree-sitter-html", tag: "v0.23.2", commit: "5a5ca8551a179998360b4a4ca2c0f366a35acc03", directory: "tree-sitter-html-5a5ca8551a179998360b4a4ca2c0f366a35acc03", variants: [{ name: "html", wasm: "tree-sitter-html.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] }] },
-  { canonical: "Java", repository: "tree-sitter/tree-sitter-java", tag: "v0.23.5", commit: "94703d5a6bed02b98e438d7cad1136c01a60ba2c", directory: "tree-sitter-java-94703d5a6bed02b98e438d7cad1136c01a60ba2c", variants: [{ name: "java", wasm: "tree-sitter-java.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "JavaScript", repository: "tree-sitter/tree-sitter-javascript", tag: "v0.25.0", commit: "44c892e0be055ac465d5eeddae6d3e194424e7de", directory: "tree-sitter-javascript-44c892e0be055ac465d5eeddae6d3e194424e7de", variants: [{ name: "javascript", wasm: "tree-sitter-javascript.wasm", highlights: ["queries/highlights.scm", "queries/highlights-jsx.scm", "queries/highlights-params.scm"], injections: [] }] },
-  { canonical: "Nix", repository: "nix-community/tree-sitter-nix", tag: "v0.3.0", commit: "ea1d87f7996be1329ef6555dcacfa63a69bd55c6", directory: "tree-sitter-nix-ea1d87f7996be1329ef6555dcacfa63a69bd55c6", variants: [{ name: "nix", wasm: "tree-sitter-nix.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "PHP", repository: "tree-sitter/tree-sitter-php", tag: "v0.24.2", commit: "5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", directory: "tree-sitter-php-5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", variants: [
-    { name: "php_only", wasm: "tree-sitter-php_only.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] },
-  ] },
-  { canonical: "Python", repository: "tree-sitter/tree-sitter-python", tag: "v0.25.0", commit: "293fdc02038ee2bf0e2e206711b69c90ac0d413f", directory: "tree-sitter-python-293fdc02038ee2bf0e2e206711b69c90ac0d413f", variants: [{ name: "python", wasm: "tree-sitter-python.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "Regular Expression", repository: "tree-sitter/tree-sitter-regex", tag: "v1.0.0", commit: "17a3293714312c691ef14217f60593a3d093381c", directory: "tree-sitter-regex-17a3293714312c691ef14217f60593a3d093381c", variants: [{ name: "regex", wasm: "tree-sitter-regex.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "Ruby", repository: "tree-sitter/tree-sitter-ruby", tag: "v0.23.1", commit: "71bd32fb7607035768799732addba884a37a6210", directory: "tree-sitter-ruby-71bd32fb7607035768799732addba884a37a6210", variants: [{ name: "ruby", wasm: "tree-sitter-ruby.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "Rust", repository: "tree-sitter/tree-sitter-rust", tag: "v0.24.2", commit: "77a3747266f4d621d0757825e6b11edcbf991ca5", directory: "tree-sitter-rust-77a3747266f4d621d0757825e6b11edcbf991ca5", variants: [{ name: "rust", wasm: "tree-sitter-rust.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] }] },
-  { canonical: "Swift", repository: "alex-pinkus/tree-sitter-swift", tag: "0.7.3", commit: "b8b22bffbb3441780e6471665bacfb263741c86a", directory: "tree-sitter-swift-b8b22bffbb3441780e6471665bacfb263741c86a", variants: [{ name: "swift", wasm: "tree-sitter-swift.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] }] },
-  { canonical: "TLA", repository: "tlaplus-community/tree-sitter-tlaplus", tag: "v1.2.4", commit: "c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", directory: "tree-sitter-tlaplus-c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", variants: [{ name: "tlaplus", wasm: "tree-sitter-tlaplus.wasm", highlights: ["queries/highlights.scm"], injections: [] }] },
-  { canonical: "TypeScript", repository: "tree-sitter/tree-sitter-typescript", tag: "v0.23.2", commit: "f975a621f4e7f532fe322e13c4f79495e0a7b2e7", directory: "tree-sitter-typescript-f975a621f4e7f532fe322e13c4f79495e0a7b2e7", variants: [
-    { name: "typescript", wasm: "tree-sitter-typescript.wasm", highlights: ["queries/highlights.scm", "@javascript/queries/highlights.scm"], injections: ["@javascript/queries/injections.scm"] },
-  ] },
+  { canonical: "C", repository: "tree-sitter/tree-sitter-c", tag: "v0.24.2", commit: "b780e47fc780ddc8da13afa35a3f4ed5c157823d", directory: "tree-sitter-c-b780e47fc780ddc8da13afa35a3f4ed5c157823d", variant: { name: "c", wasm: "tree-sitter-c.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "C#", repository: "tree-sitter/tree-sitter-c-sharp", tag: "v0.23.5", commit: "cac6d5fb595f5811a076336682d5d595ac1c9e85", directory: "tree-sitter-c-sharp-cac6d5fb595f5811a076336682d5d595ac1c9e85", variant: { name: "c_sharp", wasm: "tree-sitter-c_sharp.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "CSS", repository: "tree-sitter/tree-sitter-css", tag: "v0.25.0", commit: "dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f", directory: "tree-sitter-css-dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f", variant: { name: "css", wasm: "tree-sitter-css.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "EJS", repository: "tree-sitter/tree-sitter-embedded-template", tag: "v0.25.0", commit: "c70c1de07dedd532089c0c90835c8ed9fa694f5c", directory: "tree-sitter-embedded-template-c70c1de07dedd532089c0c90835c8ed9fa694f5c", variant: { name: "embedded_template", wasm: "tree-sitter-embedded_template.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections-ejs.scm"] } },
+  { canonical: "Elixir", repository: "elixir-lang/tree-sitter-elixir", tag: "v0.3.5", commit: "e2d9e6e0e76b0c436fa48a0b8c32a031d0cbdf49", directory: "tree-sitter-elixir-e2d9e6e0e76b0c436fa48a0b8c32a031d0cbdf49", variant: { name: "elixir", wasm: "tree-sitter-elixir.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "Gleam", repository: "gleam-lang/tree-sitter-gleam", tag: "v1.1.0", commit: "dae1551a9911b24f41d876c23f2ab05ece0a9d4c", directory: "tree-sitter-gleam-dae1551a9911b24f41d876c23f2ab05ece0a9d4c", variant: { name: "gleam", wasm: "tree-sitter-gleam.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] } },
+  { canonical: "Go", repository: "tree-sitter/tree-sitter-go", tag: "v0.25.0", commit: "1547678a9da59885853f5f5cc8a99cc203fa2e2c", directory: "tree-sitter-go-1547678a9da59885853f5f5cc8a99cc203fa2e2c", variant: { name: "go", wasm: "tree-sitter-go.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "HTML", repository: "tree-sitter/tree-sitter-html", tag: "v0.23.2", commit: "5a5ca8551a179998360b4a4ca2c0f366a35acc03", directory: "tree-sitter-html-5a5ca8551a179998360b4a4ca2c0f366a35acc03", variant: { name: "html", wasm: "tree-sitter-html.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] } },
+  { canonical: "Java", repository: "tree-sitter/tree-sitter-java", tag: "v0.23.5", commit: "94703d5a6bed02b98e438d7cad1136c01a60ba2c", directory: "tree-sitter-java-94703d5a6bed02b98e438d7cad1136c01a60ba2c", variant: { name: "java", wasm: "tree-sitter-java.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "JavaScript", repository: "tree-sitter/tree-sitter-javascript", tag: "v0.25.0", commit: "44c892e0be055ac465d5eeddae6d3e194424e7de", directory: "tree-sitter-javascript-44c892e0be055ac465d5eeddae6d3e194424e7de", variant: { name: "javascript", wasm: "tree-sitter-javascript.wasm", highlights: ["queries/highlights.scm", "queries/highlights-jsx.scm", "queries/highlights-params.scm"], injections: [] } },
+  { canonical: "Nix", repository: "nix-community/tree-sitter-nix", tag: "v0.3.0", commit: "ea1d87f7996be1329ef6555dcacfa63a69bd55c6", directory: "tree-sitter-nix-ea1d87f7996be1329ef6555dcacfa63a69bd55c6", variant: { name: "nix", wasm: "tree-sitter-nix.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "PHP", repository: "tree-sitter/tree-sitter-php", tag: "v0.24.2", commit: "5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", directory: "tree-sitter-php-5b5627faaa290d89eb3d01b9bf47c3bb9e797dea", variant: {
+    name: "php_only", wasm: "tree-sitter-php_only.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"],
+  } },
+  { canonical: "Python", repository: "tree-sitter/tree-sitter-python", tag: "v0.25.0", commit: "293fdc02038ee2bf0e2e206711b69c90ac0d413f", directory: "tree-sitter-python-293fdc02038ee2bf0e2e206711b69c90ac0d413f", variant: { name: "python", wasm: "tree-sitter-python.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "Regular Expression", repository: "tree-sitter/tree-sitter-regex", tag: "v1.0.0", commit: "17a3293714312c691ef14217f60593a3d093381c", directory: "tree-sitter-regex-17a3293714312c691ef14217f60593a3d093381c", variant: { name: "regex", wasm: "tree-sitter-regex.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "Ruby", repository: "tree-sitter/tree-sitter-ruby", tag: "v0.23.1", commit: "71bd32fb7607035768799732addba884a37a6210", directory: "tree-sitter-ruby-71bd32fb7607035768799732addba884a37a6210", variant: { name: "ruby", wasm: "tree-sitter-ruby.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "Rust", repository: "tree-sitter/tree-sitter-rust", tag: "v0.24.2", commit: "77a3747266f4d621d0757825e6b11edcbf991ca5", directory: "tree-sitter-rust-77a3747266f4d621d0757825e6b11edcbf991ca5", variant: { name: "rust", wasm: "tree-sitter-rust.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] } },
+  { canonical: "Swift", repository: "alex-pinkus/tree-sitter-swift", tag: "0.7.3", commit: "b8b22bffbb3441780e6471665bacfb263741c86a", directory: "tree-sitter-swift-b8b22bffbb3441780e6471665bacfb263741c86a", variant: { name: "swift", wasm: "tree-sitter-swift.wasm", highlights: ["queries/highlights.scm"], injections: ["queries/injections.scm"] } },
+  { canonical: "TLA", repository: "tlaplus-community/tree-sitter-tlaplus", tag: "v1.2.4", commit: "c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", directory: "tree-sitter-tlaplus-c10ad7e82aa4d77fcb5c4aaec193c9f2dfd3afcb", variant: { name: "tlaplus", wasm: "tree-sitter-tlaplus.wasm", highlights: ["queries/highlights.scm"], injections: [] } },
+  { canonical: "TypeScript", repository: "tree-sitter/tree-sitter-typescript", tag: "v0.23.2", commit: "f975a621f4e7f532fe322e13c4f79495e0a7b2e7", directory: "tree-sitter-typescript-f975a621f4e7f532fe322e13c4f79495e0a7b2e7", variant: {
+    name: "typescript", wasm: "tree-sitter-typescript.wasm", highlights: ["queries/highlights.scm", "@javascript/queries/highlights.scm"], injections: ["@javascript/queries/injections.scm"],
+  } },
 ];
 
 function objectValue(value: unknown, description: string): JsonObject {
@@ -243,7 +243,7 @@ async function generate(auditRoot: string, output: string, uiRoot: string): Prom
       languageEntries[canonical] = { kind: "plain", reason: canonical === excludedCanonical ? "excluded-unverifiable-source" : "upstream-no-grammar" };
       plainCount += 1;
     } else if (tree !== undefined) {
-      languageEntries[canonical] = { kind: "tree-sitter", scope: language.tmScope, variants: [] };
+      languageEntries[canonical] = { kind: "tree-sitter", scope: language.tmScope };
       treeCount += 1;
     } else {
       languageEntries[canonical] = { kind: "textmate", scope: language.tmScope, closure: [] };
@@ -326,34 +326,32 @@ async function generate(auditRoot: string, output: string, uiRoot: string): Prom
   const javascriptDirectory = treeRoutes.find((route) => route.canonical === "JavaScript")?.directory;
   if (javascriptDirectory === undefined) throw new Error("Missing JavaScript route source.");
   for (const route of treeRoutes) {
-    const variants: Array<unknown> = [];
     const sourceDirectory = join(treeSourceRoot, route.directory);
     const licensePath = (await readdir(sourceDirectory)).find((name) => /^LICENSE(?:\.|$)/iu.test(name));
     if (licensePath === undefined) throw new Error(`Missing licence for ${route.repository}.`);
     const routeLicensePath = join(sourceDirectory, licensePath);
-    for (const variant of route.variants) {
-      const wasmBytes = await Bun.file(join(treeBuildRoot, variant.wasm)).bytes();
-      const wasm = await writeAsset(output, assets, variant.name, "trees", "wasm", "tree-wasm", wasmBytes);
-      const queryBytes = async (paths: ReadonlyArray<string>): Promise<Uint8Array> => {
-        const texts: Array<string> = [];
-        for (const path of paths) {
-          const javascriptPath = path.startsWith("@javascript/");
-          const relativePath = javascriptPath ? path.slice("@javascript/".length) : path;
-          const directory = javascriptPath ? join(treeSourceRoot, javascriptDirectory) : sourceDirectory;
-          texts.push(await Bun.file(join(directory, relativePath)).text());
-        }
-        const normalized = texts.join("\n").replaceAll(/[ \t]+$/gmu, "").trimEnd();
-        return new TextEncoder().encode(`${normalized}\n`);
-      };
-      const highlights = await writeAsset(output, assets, `${variant.name}-highlights`, "trees", "scm", "query", await queryBytes(variant.highlights));
-      const injections = variant.injections.length === 0
-        ? undefined
-        : await writeAsset(output, assets, `${variant.name}-injections`, "trees", "scm", "query", await queryBytes(variant.injections));
-      variants.push({ name: variant.name, wasm, highlights, injections });
-    }
-    treeEntries[route.canonical] = { repository: route.repository, tag: route.tag, revision: route.commit, license: basename(routeLicensePath), variants };
+    const variant = route.variant;
+    const wasmBytes = await Bun.file(join(treeBuildRoot, variant.wasm)).bytes();
+    const wasm = await writeAsset(output, assets, variant.name, "trees", "wasm", "tree-wasm", wasmBytes);
+    const queryBytes = async (paths: ReadonlyArray<string>): Promise<Uint8Array> => {
+      const texts: Array<string> = [];
+      for (const path of paths) {
+        const javascriptPath = path.startsWith("@javascript/");
+        const relativePath = javascriptPath ? path.slice("@javascript/".length) : path;
+        const directory = javascriptPath ? join(treeSourceRoot, javascriptDirectory) : sourceDirectory;
+        texts.push(await Bun.file(join(directory, relativePath)).text());
+      }
+      const normalized = texts.join("\n").replaceAll(/[ \t]+$/gmu, "").trimEnd();
+      return new TextEncoder().encode(`${normalized}\n`);
+    };
+    const highlights = await writeAsset(output, assets, `${variant.name}-highlights`, "trees", "scm", "query", await queryBytes(variant.highlights));
+    const injections = variant.injections.length === 0
+      ? undefined
+      : await writeAsset(output, assets, `${variant.name}-injections`, "trees", "scm", "query", await queryBytes(variant.injections));
+    const generatedVariant = { name: variant.name, wasm, highlights, injections };
+    treeEntries[route.canonical] = { repository: route.repository, tag: route.tag, revision: route.commit, license: basename(routeLicensePath), variant: generatedVariant };
     const languageEntry = objectValue(languageEntries[route.canonical], route.canonical);
-    languageEntries[route.canonical] = { ...languageEntry, variants: objectValue(treeEntries[route.canonical], route.canonical).variants };
+    languageEntries[route.canonical] = { ...languageEntry, variant: generatedVariant };
   }
 
   const runtimeRoot = join(uiRoot, "node_modules");

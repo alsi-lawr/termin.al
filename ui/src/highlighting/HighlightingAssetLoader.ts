@@ -23,7 +23,7 @@ type TreeVariant = Readonly<{
 type TreeLanguage = Readonly<{
   kind: "tree-sitter";
   scope: string;
-  variants: ReadonlyArray<TreeVariant>;
+  variant: TreeVariant;
 }>;
 
 type ManifestLanguage = PlainLanguage | TextMateLanguage | TreeLanguage;
@@ -68,7 +68,7 @@ export type HighlightingAssets =
       canonical: string;
       scope: string;
       runtimeWasm: Uint8Array;
-      variants: ReadonlyArray<LoadedTreeVariant>;
+      variant: LoadedTreeVariant;
     }>
   | Readonly<{
       kind: "failed";
@@ -149,19 +149,16 @@ function manifestLanguage(value: unknown, canonical: string): ManifestLanguage {
     };
   }
   if (kind === "tree-sitter") {
-    if (!Array.isArray(record.variants)) throw new Error(`Expected ${canonical}.variants to be an array.`);
+    const variant = objectValue(record.variant, `${canonical}.variant`);
     return {
       kind,
       scope: stringValue(record.scope, `${canonical}.scope`),
-      variants: record.variants.map((value, index) => {
-        const variant = objectValue(value, `${canonical}.variants[${index}]`);
-        return {
-          name: stringValue(variant.name, `${canonical}.variants[${index}].name`),
-          wasm: stringValue(variant.wasm, `${canonical}.variants[${index}].wasm`),
-          highlights: stringValue(variant.highlights, `${canonical}.variants[${index}].highlights`),
-          injections: optionalString(variant.injections, `${canonical}.variants[${index}].injections`),
-        };
-      }),
+      variant: {
+        name: stringValue(variant.name, `${canonical}.variant.name`),
+        wasm: stringValue(variant.wasm, `${canonical}.variant.wasm`),
+        highlights: stringValue(variant.highlights, `${canonical}.variant.highlights`),
+        injections: optionalString(variant.injections, `${canonical}.variant.injections`),
+      },
     };
   }
   throw new Error(`Unknown highlighting route ${kind} for ${canonical}.`);
@@ -351,18 +348,18 @@ export class HighlightingAssetLoader {
           grammars,
         };
       }
-      const variants = await Promise.all(language.variants.map(async (variant): Promise<LoadedTreeVariant> => ({
-        name: variant.name,
-        wasm: await this.#bytes(manifest, variant.wasm, signal),
-        highlights: await this.#text(manifest, variant.highlights, signal),
-        injections: variant.injections === undefined ? undefined : await this.#text(manifest, variant.injections, signal),
-      })));
+      const variant: LoadedTreeVariant = {
+        name: language.variant.name,
+        wasm: await this.#bytes(manifest, language.variant.wasm, signal),
+        highlights: await this.#text(manifest, language.variant.highlights, signal),
+        injections: language.variant.injections === undefined ? undefined : await this.#text(manifest, language.variant.injections, signal),
+      };
       return {
         kind: "tree-sitter",
         canonical,
         scope: language.scope,
         runtimeWasm: await this.#bytes(manifest, manifest.treeRuntimeWasm, signal),
-        variants,
+        variant,
       };
     } catch (error: unknown) {
       if (signal.aborted) throw error;

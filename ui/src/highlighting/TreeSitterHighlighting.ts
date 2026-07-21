@@ -13,18 +13,16 @@ let treeSitterInitialization: Promise<void> | undefined;
 const runtimeLoads = new Map<string, Promise<VariantRuntime>>();
 
 async function runtime(assets: TreeAssets): Promise<VariantRuntime> {
-  const variant = assets.variants[0];
-  if (variant === undefined) throw new Error(`Tree-sitter route ${assets.scope} has no variant.`);
   const existing = runtimeLoads.get(assets.scope);
   if (existing !== undefined) return await existing;
   const producer = (async (): Promise<VariantRuntime> => {
     treeSitterInitialization ??= Parser.init({ wasmBinary: assets.runtimeWasm });
     await treeSitterInitialization;
-    const language = await Language.load(variant.wasm);
+    const language = await Language.load(assets.variant.wasm);
     return {
       language,
-      highlights: new Query(language, variant.highlights),
-      injections: variant.injections === undefined ? undefined : new Query(language, variant.injections),
+      highlights: new Query(language, assets.variant.highlights),
+      injections: assets.variant.injections === undefined ? undefined : new Query(language, assets.variant.injections),
     };
   })();
   runtimeLoads.set(assets.scope, producer);
