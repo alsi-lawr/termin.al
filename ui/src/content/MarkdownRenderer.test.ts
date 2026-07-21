@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createVirtualDocumentHandle } from "../domain/filesystem/VirtualFilesystem.ts";
 import { demoContentCorpus } from "./DemoContentCorpus.ts";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
+import { markdownFenceOpening } from "./MarkdownFence.ts";
 import {
   MarkdownRenderer,
   markdownSearchMatches,
@@ -226,6 +227,13 @@ test("finds parsed Markdown blocks for viewer search", () => {
 });
 
 test("uses GFM closing fences and keeps invalid closers in an unclosed block", () => {
+  assert.equal(markdownFenceOpening("```lang`bad"), undefined);
+  assert.deepEqual(markdownFenceOpening("~~~lang`valid"), {
+    marker: "~",
+    length: 3,
+    infoString: "lang`valid",
+  });
+
   const closed = render(
     {
       source: { path: "~/closed.md" },

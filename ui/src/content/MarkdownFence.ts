@@ -10,10 +10,13 @@ export function markdownFenceOpening(line: string): MarkdownFenceOpening | undef
   const match = openingPattern.exec(line);
   const run = match?.[1];
   if (run === undefined) return undefined;
+  const marker = run.startsWith("`") ? "`" : "~";
+  const suffix = match?.[2] ?? "";
+  if (marker === "`" && suffix.includes("`")) return undefined;
   return {
-    marker: run.startsWith("`") ? "`" : "~",
+    marker,
     length: run.length,
-    infoString: match?.[2]?.trim() ?? "",
+    infoString: suffix.trim(),
   };
 }
 
