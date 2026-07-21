@@ -10,7 +10,8 @@
   "scripts": {
     "dev": "bun --smol run vite --mode demo --port 5173 --strictPort",
     "dev:live": "bun --smol run vite --mode live --port 5173 --strictPort",
-    "build": "bun run manpages:check && bun run tsc -b && bun run vite build",
+    "build": "bun run manpages:check && bun run highlighting:check && bun run tsc -b && bun run vite build",
+    "highlighting:check": "bun ../scripts/generate-highlighting-assets.ts --check",
     "lint": "bun run oxlint .",
     "manpages:generate": "bun ../scripts/generate-manpages.ts",
     "manpages:check": "bun ../scripts/generate-manpages.ts --check",
@@ -21,7 +22,10 @@
     "@tailwindcss/vite": "4.3.2",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "tailwindcss": "4.3.2"
+    "tailwindcss": "4.3.2",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2",
+    "web-tree-sitter": "0.26.11"
   },
   "devDependencies": {
     "@types/node": "26.1.1",
