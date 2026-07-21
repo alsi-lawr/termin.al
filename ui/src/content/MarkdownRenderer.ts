@@ -1,6 +1,7 @@
 import { createElement, type ReactElement, type ReactNode } from "react";
 import type { MarkdownDocument } from "./MarkdownDocument.ts";
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock.tsx";
+import { isMarkdownFenceClosing, markdownFenceOpening } from "./MarkdownFence.ts";
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -67,7 +68,6 @@ const rawHtmlPattern = /^<\/?[A-Za-z][^>]*>/u;
 const autolinkPattern = /^<((?:https?:\/\/|mailto:)[^ >]+)>/u;
 const urlPattern = /^(?:https?:\/\/|www\.)[^\s<]+/u;
 const headingPattern = /^(#{1,6})\s+(.+?)\s*#*\s*$/u;
-const fencePattern = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
 const quotePattern = /^ {0,3}>\s?(.*)$/u;
 const listPattern = /^(\s*)([-+*]|\d+\.)\s+(.*)$/u;
 const thematicBreakPattern = /^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/u;
@@ -202,7 +202,7 @@ function isBlockStart(lines: ReadonlyArray<string>, index: number): boolean {
   const line = lineAt(lines, index);
 
   return (
-    fencePattern.test(line) ||
+    markdownFenceOpening(line) !== undefined ||
     headingPattern.test(line) ||
     quotePattern.test(line) ||
     listPattern.test(line) ||
@@ -237,43 +237,28 @@ function parseBlocks(markdown: string): ReadonlyArray<MarkdownBlock> {
       continue;
     }
 
-    const fence = fencePattern.exec(line);
+    const fence = markdownFenceOpening(line);
 
-    if (fence !== null) {
-      const marker = fence[1];
-      const language = fence[2]?.trim();
-
-      if (marker !== undefined) {
-        const codeLines: Array<string> = [];
-        let closingIndex = index + 1;
-
-        while (closingIndex < lines.length) {
-          const candidate = lineAt(lines, closingIndex);
-
-          if (candidate.trimStart().startsWith(marker)) {
-            break;
-          }
-
-          codeLines.push(candidate);
-          closingIndex += 1;
-        }
-
-        blocks.push({
-          kind: "code",
-          language: language === "" ? undefined : language,
-          text: codeLines.join("\n"),
-        });
-
-        if (closingIndex === lines.length) {
-          blocks.push({
-            kind: "error",
-            message: "Unclosed fenced code block rendered to the end of the document.",
-          });
-        }
-
-        index = closingIndex === lines.length ? closingIndex : closingIndex + 1;
-        continue;
+    if (fence !== undefined) {
+      const codeLines: Array<string> = [];
+      let closingIndex = index + 1;
+      while (closingIndex < lines.length) {
+        const candidate = lineAt(lines, closingIndex);
+        if (isMarkdownFenceClosing(candidate, fence)) break;
+        codeLines.push(candidate);
+        closingIndex += 1;
       }
+      blocks.push({
+        kind: "code",
+        language: fence.infoString === "" ? undefined : fence.infoString,
+        text: codeLines.join("\n"),
+      });
+      if (closingIndex === lines.length) blocks.push({
+        kind: "error",
+        message: "Unclosed fenced code block rendered to the end of the document.",
+      });
+      index = closingIndex === lines.length ? closingIndex : closingIndex + 1;
+      continue;
     }
 
     const heading = headingPattern.exec(line);

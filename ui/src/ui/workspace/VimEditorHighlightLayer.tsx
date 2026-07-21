@@ -1,43 +1,12 @@
-import { useEffect, useState, type ReactElement, type ReactNode, type RefObject } from "react";
+import { useEffect, useState, type ReactElement, type RefObject } from "react";
 import { browserHighlightingAssetLoader } from "../../highlighting/FenceHighlighting.ts";
 import { currentMarkdownEditorRanges, highlightMarkdownEditorSource, type CompletedMarkdownEditorHighlight } from "../../highlighting/MarkdownEditorHighlighting.ts";
-import type { HighlightRange, SyntaxRole } from "../../highlighting/HighlightingTokens.ts";
+import { SyntaxHighlightedText } from "../../highlighting/SyntaxHighlightedText.tsx";
 
 type VimEditorHighlightLayerProps = Readonly<{
   source: string;
   layerRef: RefObject<HTMLDivElement | null>;
 }>;
-
-function syntaxClass(role: SyntaxRole): string {
-  switch (role) {
-    case "attribute": return "text-syntax-attribute";
-    case "comment": return "text-syntax-comment";
-    case "function": return "text-syntax-function-name";
-    case "keyword": return "text-syntax-keyword";
-    case "literal": return "text-syntax-literal";
-    case "operator": return "text-syntax-operator";
-    case "property": return "text-syntax-property";
-    case "punctuation": return "text-syntax-punctuation";
-    case "regexp": return "text-syntax-regexp";
-    case "special": return "text-syntax-special";
-    case "string": return "text-syntax-string";
-    case "tag": return "text-syntax-tag";
-    case "type": return "text-syntax-type";
-  }
-}
-
-function highlightedNodes(source: string, ranges: ReadonlyArray<HighlightRange>): ReadonlyArray<ReactNode> {
-  const nodes: Array<ReactNode> = [];
-  let offset = 0;
-  for (const range of ranges) {
-    if (range.start < offset || range.end > source.length || range.start >= range.end) continue;
-    if (range.start > offset) nodes.push(source.slice(offset, range.start));
-    nodes.push(<span key={`${range.start}-${range.end}-${range.role}`} className={syntaxClass(range.role)}>{source.slice(range.start, range.end)}</span>);
-    offset = range.end;
-  }
-  if (offset < source.length) nodes.push(source.slice(offset));
-  return nodes;
-}
 
 export function VimEditorHighlightLayer({ source, layerRef }: VimEditorHighlightLayerProps): ReactElement {
   const [completed, setCompleted] = useState<CompletedMarkdownEditorHighlight | undefined>();
@@ -68,7 +37,7 @@ export function VimEditorHighlightLayer({ source, layerRef }: VimEditorHighlight
       aria-hidden="true"
       data-editor-highlighting="markdown"
     >
-      {visible === undefined ? source : highlightedNodes(source, visible)}
+      <SyntaxHighlightedText source={source} ranges={visible} />
     </div>
   );
 }

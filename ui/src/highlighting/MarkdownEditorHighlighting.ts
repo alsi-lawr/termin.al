@@ -1,6 +1,7 @@
 import { fenceLanguageKey, highlightFenceCode } from "./FenceHighlighting.ts";
 import type { HighlightingAssetLoader } from "./HighlightingAssetLoader.ts";
 import { maximumHighlightedCodeUnits, normalizedHighlightRanges, type HighlightCandidate, type HighlightRange } from "./HighlightingTokens.ts";
+import { isMarkdownFenceClosing, markdownFenceOpening } from "../content/MarkdownFence.ts";
 
 export type CompletedMarkdownEditorHighlight = Readonly<{
   source: string;
@@ -18,8 +19,6 @@ type FencedSource = Readonly<{
   start: number;
   end: number;
 }>;
-
-const fencePattern = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
 
 function sourceLines(source: string): ReadonlyArray<SourceLine> {
   const lines: Array<SourceLine> = [];
@@ -45,10 +44,8 @@ function fencedSources(source: string): ReadonlyArray<FencedSource> {
   while (lineIndex < lines.length) {
     const openingLine = lines[lineIndex];
     if (openingLine === undefined) break;
-    const opening = fencePattern.exec(source.slice(openingLine.start, openingLine.contentEnd));
-    const marker = opening?.[1];
-    const infoString = opening?.[2]?.trim();
-    if (marker === undefined) {
+    const opening = markdownFenceOpening(source.slice(openingLine.start, openingLine.contentEnd));
+    if (opening === undefined) {
       lineIndex += 1;
       continue;
     }
@@ -57,11 +54,11 @@ function fencedSources(source: string): ReadonlyArray<FencedSource> {
       const candidate = lines[closingIndex];
       if (candidate === undefined) break;
       const text = source.slice(candidate.start, candidate.contentEnd);
-      if (text.trimStart().startsWith(marker)) break;
+      if (isMarkdownFenceClosing(text, opening)) break;
       closingIndex += 1;
     }
     const closingLine = lines[closingIndex];
-    const language = fenceLanguageKey(infoString);
+    const language = fenceLanguageKey(opening.infoString);
     if (language !== undefined) {
       fences.push({
         language,
@@ -100,7 +97,7 @@ export async function highlightMarkdownEditorSource(
   }));
   let sequence = candidates.length;
   for (const highlighted of highlightedFences) {
-    if (highlighted.ranges === undefined) return undefined;
+    if (highlighted.ranges === undefined) continue;
     for (const range of highlighted.ranges) {
       candidates.push({
         start: highlighted.fence.start + range.start,

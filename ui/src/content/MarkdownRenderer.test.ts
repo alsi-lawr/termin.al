@@ -225,16 +225,29 @@ test("finds parsed Markdown blocks for viewer search", () => {
   assert.match(markup, /ring-ui-search/u);
 });
 
-test("reports an unclosed fenced block without dropping its text", () => {
-  const markup = render(
+test("uses GFM closing fences and keeps invalid closers in an unclosed block", () => {
+  const closed = render(
+    {
+      source: { path: "~/closed.md" },
+      text: "```ql\nselect valid\n  ````` \t\nOutside code",
+    },
+    undefined,
+  );
+  assert.match(closed, /<code data-language="ql">select valid<\/code>/u);
+  assert.match(closed, /Outside code/u);
+  assert.doesNotMatch(closed, /Unclosed fenced code block/u);
+
+  const unclosed = render(
     {
       source: { path: "~/broken.md" },
-      text: "```\nconst incomplete = true;",
+      text: "```ql\nselect incomplete\n    ```\n``` trailing text\n~~~\nstill code",
     },
     undefined,
   );
 
-  assert.match(markup, /const incomplete = true;/u);
-  assert.match(markup, /Unclosed fenced code block/u);
-  assert.match(markup, /role="alert"/u);
+  for (const expected of ["select incomplete", "    ```", "``` trailing text", "~~~", "still code"]) {
+    assert.match(unclosed, new RegExp(expected, "u"));
+  }
+  assert.match(unclosed, /Unclosed fenced code block/u);
+  assert.match(unclosed, /role="alert"/u);
 });
