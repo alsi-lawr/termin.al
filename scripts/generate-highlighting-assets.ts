@@ -245,7 +245,7 @@ async function generate(auditRoot: string, output: string, uiRoot: string): Prom
       languageEntries[canonical] = { kind: "plain", reason: canonical === excludedCanonical ? "excluded-unverifiable-source" : "upstream-no-grammar" };
       plainCount += 1;
     } else if (tree !== undefined) {
-      languageEntries[canonical] = { kind: "tree-sitter", scope: language.tmScope, repository: tree.repository, tag: tree.tag, revision: tree.commit, variants: [] };
+      languageEntries[canonical] = { kind: "tree-sitter", scope: language.tmScope, variants: [] };
       treeCount += 1;
     } else {
       languageEntries[canonical] = { kind: "textmate", scope: language.tmScope, closure: [] };

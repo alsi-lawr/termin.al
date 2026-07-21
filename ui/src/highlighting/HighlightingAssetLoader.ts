@@ -194,15 +194,14 @@ function normalizeFenceLanguage(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function errorValue(error: unknown, context: string): Error {
-  return error instanceof Error ? new Error(context, { cause: error }) : new Error(context);
-}
-
 export class HighlightingAssetLoader {
   readonly #basePath: string;
   readonly #fetch: HighlightingFetch;
   readonly #assetCache = new Map<string, Uint8Array | string>();
+  readonly #bytePromises = new Map<string, Promise<Uint8Array>>();
+  readonly #textPromises = new Map<string, Promise<string>>();
   #manifest: HighlightingManifest | undefined;
+  #manifestPromise: Promise<HighlightingManifest> | undefined;
 
   public constructor(fetchResource: HighlightingFetch, basePath = "/highlighting") {
     this.#fetch = fetchResource;
@@ -217,9 +216,19 @@ export class HighlightingAssetLoader {
 
   async #loadManifest(signal: AbortSignal): Promise<HighlightingManifest> {
     if (this.#manifest !== undefined) return this.#manifest;
-    const manifest = parseManifest(await (await this.#response("manifest.json", signal)).json());
-    this.#manifest = manifest;
-    return manifest;
+    signal.throwIfAborted();
+    const existing = this.#manifestPromise;
+    const producer = existing ?? (async (): Promise<HighlightingManifest> =>
+      parseManifest(await (await this.#response("manifest.json", signal)).json()))();
+    if (existing === undefined) this.#manifestPromise = producer;
+    try {
+      const manifest = await producer;
+      signal.throwIfAborted();
+      this.#manifest = manifest;
+      return manifest;
+    } finally {
+      if (this.#manifestPromise === producer) this.#manifestPromise = undefined;
+    }
   }
 
   async #bytes(manifest: HighlightingManifest, key: string, signal: AbortSignal): Promise<Uint8Array> {
@@ -227,9 +236,19 @@ export class HighlightingAssetLoader {
     if (cached instanceof Uint8Array) return cached;
     const asset = manifest.assets.get(key);
     if (asset === undefined) throw new Error(`Manifest asset ${key} is missing.`);
-    const bytes = await (await this.#response(asset.path, signal)).bytes();
-    this.#assetCache.set(key, bytes);
-    return bytes;
+    signal.throwIfAborted();
+    const existing = this.#bytePromises.get(key);
+    const producer = existing ?? (async (): Promise<Uint8Array> =>
+      (await this.#response(asset.path, signal)).bytes())();
+    if (existing === undefined) this.#bytePromises.set(key, producer);
+    try {
+      const bytes = await producer;
+      signal.throwIfAborted();
+      this.#assetCache.set(key, bytes);
+      return bytes;
+    } finally {
+      if (this.#bytePromises.get(key) === producer) this.#bytePromises.delete(key);
+    }
   }
 
   async #text(manifest: HighlightingManifest, key: string, signal: AbortSignal): Promise<string> {
@@ -237,9 +256,19 @@ export class HighlightingAssetLoader {
     if (typeof cached === "string") return cached;
     const asset = manifest.assets.get(key);
     if (asset === undefined) throw new Error(`Manifest asset ${key} is missing.`);
-    const text = await (await this.#response(asset.path, signal)).text();
-    this.#assetCache.set(key, text);
-    return text;
+    signal.throwIfAborted();
+    const existing = this.#textPromises.get(key);
+    const producer = existing ?? (async (): Promise<string> =>
+      (await this.#response(asset.path, signal)).text())();
+    if (existing === undefined) this.#textPromises.set(key, producer);
+    try {
+      const text = await producer;
+      signal.throwIfAborted();
+      this.#assetCache.set(key, text);
+      return text;
+    } finally {
+      if (this.#textPromises.get(key) === producer) this.#textPromises.delete(key);
+    }
   }
 
   public async load(fenceLanguage: string, signal: AbortSignal): Promise<HighlightingAssets> {
@@ -281,7 +310,12 @@ export class HighlightingAssetLoader {
       };
     } catch (error: unknown) {
       if (signal.aborted) throw error;
-      return { kind: "failed", canonical, error: errorValue(error, `Failed to load highlighting assets for ${canonical}.`) };
+      const context = `Failed to load highlighting assets for ${canonical}.`;
+      return {
+        kind: "failed",
+        canonical,
+        error: error instanceof Error ? new Error(context, { cause: error }) : new Error(context),
+      };
     }
   }
 }

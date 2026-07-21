@@ -49,19 +49,17 @@ function initializeTreeSitter(wasm: Uint8Array): Promise<void> {
   return treeSitterInitialization;
 }
 
-function grammarMap(assets: Extract<HighlightingAssets, Readonly<{ kind: "textmate" }>>): ReadonlyMap<string, IRawGrammar> {
-  const grammars = new Map<string, IRawGrammar>();
-  for (const grammar of assets.grammars) {
-    grammars.set(grammar.scope, parseRawGrammar(grammar.source, grammar.path));
-  }
-  return grammars;
-}
-
 export async function createTextMateRuntime(
   assets: Extract<HighlightingAssets, Readonly<{ kind: "textmate" }>>,
 ): Promise<TextMateHighlightingRuntime> {
   await initializeOniguruma(assets.onigWasm);
-  const grammars = grammarMap(assets);
+  const grammars = new Map<string, IRawGrammar>();
+  for (const grammarAsset of assets.grammars) {
+    grammars.set(
+      grammarAsset.scope,
+      parseRawGrammar(grammarAsset.source, grammarAsset.path),
+    );
+  }
   const registry = new Registry({
     onigLib: Promise.resolve({ createOnigScanner, createOnigString }),
     loadGrammar: (scopeName: string): Promise<IRawGrammar | null> => Promise.resolve(grammars.get(scopeName) ?? null),

@@ -49,14 +49,17 @@ test("routes both CodeQL aliases through one cached TextMate closure", async () 
   const loader = new HighlightingAssetLoader(localFetch(requests));
   const signal = new AbortController().signal;
 
-  const codeQl = await loader.load("codeql", signal);
-  const alias = await loader.load("ql", signal);
+  const [codeQl, alias] = await Promise.all([
+    loader.load("codeql", signal),
+    loader.load("ql", signal),
+  ]);
 
   assert.equal(codeQl.kind, "textmate");
   assert.equal(alias.kind, "textmate");
   if (codeQl.kind !== "textmate" || alias.kind !== "textmate") assert.fail("Expected CodeQL TextMate assets.");
   assert.equal(codeQl.scope, "source.ql");
   assert.deepEqual(codeQl.grammars.map((grammar) => grammar.scope), ["source.ql"]);
+  assert.equal(requests.filter((request) => request.endsWith("manifest.json")).length, 1);
   assert.equal(requests.filter((request) => request.includes("source.ql")).length, 1);
   assert.equal(requests.filter((request) => request.endsWith(".wasm")).length, 1);
   assert.equal(requests.some((request) => request.includes("tree-sitter-ql")), false);
