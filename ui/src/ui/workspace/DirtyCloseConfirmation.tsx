@@ -78,7 +78,7 @@ export function DirtyCloseConfirmation({
   const confirmRef = useRef<HTMLButtonElement | null>(null);
 
   useLayoutEffect(() => {
-    dialogRef.current?.focus();
+    cancelRef.current?.focus();
   }, []);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -144,7 +144,7 @@ export function DirtyCloseConfirmation({
           <button
             ref={cancelRef}
             type="button"
-            className="rounded border border-surface-border px-3 py-2 md:hidden"
+            className="rounded border border-surface-border px-3 py-2"
             onClick={onCancel}
           >
             Keep editing
@@ -152,7 +152,7 @@ export function DirtyCloseConfirmation({
           <button
             ref={confirmRef}
             type="button"
-            className="rounded border border-diagnostic-error px-3 py-2 text-diagnostic-error md:hidden"
+            className="rounded border border-diagnostic-error px-3 py-2 text-diagnostic-error"
             onClick={onConfirm}
           >
             Close pane

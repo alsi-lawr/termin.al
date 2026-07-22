@@ -382,6 +382,94 @@ async function exerciseConnectedCommandPaste(session: DevToolsSession): Promise<
   await waitForEditorPrompt(session, "/", "Consumed controls changed the search prompt.");
 }
 
+async function exerciseDirtyCloseModality(session: DevToolsSession): Promise<void> {
+  await reloadDemo(session);
+  await enterTerminalCommand(session, "pane split horizontal editor");
+  await waitFor(
+    session,
+    `document.querySelector('textarea[aria-label$=" editor text"]') !== null`,
+    "A writable editor did not open for the dirty-close scenario.",
+  );
+  const focused = await evaluate(session, `(() => {
+    const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+    if (!(editor instanceof HTMLTextAreaElement)) return false;
+    editor.focus();
+    return document.activeElement === editor;
+  })()`);
+  if (focused !== true) throw new Error("The writable editor could not be focused.");
+  await session.command("Input.insertText", { text: "dirty-editor" });
+  await waitFor(
+    session,
+    `document.querySelector('textarea[aria-label$=" editor text"]')?.value === "dirty-editor"`,
+    "The editor did not become dirty through public text input.",
+  );
+
+  await dispatchEditorKey(session, "b", true, false);
+  await dispatchEditorKey(session, "x", false, false);
+  await waitFor(
+    session,
+    `document.querySelector('[role="alertdialog"]') !== null`,
+    "Closing the dirty editor did not open the rendered confirmation dialog.",
+  );
+  await waitFor(
+    session,
+    `document.activeElement?.textContent?.trim() === "Keep editing"`,
+    "The dirty-close dialog did not initially focus Keep editing.",
+  );
+
+  await pressKey(session, "Tab");
+  await waitFor(
+    session,
+    `document.activeElement?.textContent?.trim() === "Close pane"`,
+    "Tab did not cycle focus to Close pane.",
+  );
+  await pressKey(session, "Tab");
+  await waitFor(
+    session,
+    `document.activeElement?.textContent?.trim() === "Keep editing"`,
+    "Tab escaped the dirty-close actions.",
+  );
+  await pressKey(session, "Tab", { modifiers: 8 });
+  await waitFor(
+    session,
+    `document.activeElement?.textContent?.trim() === "Close pane"`,
+    "Shift+Tab did not cycle focus to Close pane.",
+  );
+  await pressKey(session, "Tab", { modifiers: 8 });
+  await waitFor(
+    session,
+    `document.activeElement?.textContent?.trim() === "Keep editing"`,
+    "Shift+Tab escaped the dirty-close actions.",
+  );
+
+  const backgroundFocused = await evaluate(session, `(() => {
+    const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+    if (!(editor instanceof HTMLTextAreaElement)) return false;
+    editor.focus();
+    return document.activeElement === editor;
+  })()`);
+  if (backgroundFocused === true) throw new Error("The inert background editor accepted focus.");
+  await session.command("Input.insertText", { text: "blocked" });
+  if (await evaluate(session, `document.querySelector('textarea[aria-label$=" editor text"]')?.value === "dirty-editor"`) !== true) {
+    throw new Error("Background keyboard input changed the editor while the dialog was open.");
+  }
+
+  await pressKey(session, "Escape");
+  await waitFor(
+    session,
+    `document.querySelector('[role="alertdialog"]') === null`,
+    "Escape did not dismiss the dirty-close dialog through Keep editing.",
+  );
+  await waitFor(
+    session,
+    `(() => {
+      const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+      return editor instanceof HTMLTextAreaElement && document.activeElement === editor && editor.value === "dirty-editor";
+    })()`,
+    "Escape did not restore focus to the unchanged active editor.",
+  );
+}
+
 const baseUrl = new URL(process.env.TERMINAL_SMOKE_BASE_URL ?? "http://127.0.0.1:5089");
 const debugPort = Number.parseInt(process.env.TERMINAL_SMOKE_DEBUG_PORT ?? "9339", 10);
 const chrome = process.env.CHROME_BIN ?? "google-chrome";
@@ -452,6 +540,7 @@ try {
   await exerciseStrictModeRuntime(session);
   await exerciseConnectedPagerKeys(session);
   await exerciseConnectedCommandPaste(session);
+  await exerciseDirtyCloseModality(session);
 
   await session.command("Page.navigate", { url: new URL("/", baseUrl).href });
   await waitForApplication(session);
