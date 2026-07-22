@@ -3,7 +3,6 @@ import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
 import {
   createWorkspaceVirtualFilesystem,
-  replaceVirtualFilesystemOverlay,
   type VirtualFilesystem,
   type VirtualFilesystemOverlay,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
@@ -40,7 +39,7 @@ import {
 } from "./CommandHistoryStorage.ts";
 import {
   readVirtualFilesystemOverlay,
-  virtualFilesystemOverlayFromStoredValue,
+  replaceVirtualFilesystemFromStoredValue,
   virtualFilesystemStorageKey,
   writeVirtualFilesystemOverlay,
   type VirtualFilesystemStorageBackend,
@@ -142,6 +141,7 @@ export function usePaneWorkspace(
       hydratedFilesystem.overlay,
     )
   );
+  const [, setFilesystemRevision] = useState(0);
   const [historyStorage] = useState<CommandHistoryStorageBackend | undefined>(
     browserCommandHistoryStorage,
   );
@@ -228,15 +228,13 @@ export function usePaneWorkspace(
         return;
       }
 
-      const received = virtualFilesystemOverlayFromStoredValue(
+      const received = replaceVirtualFilesystemFromStoredValue(
         event.newValue,
         corpus.filesystem,
+        filesystem,
+        () => setFilesystemRevision((current) => current + 1),
       );
       reportFilesystemStorageFailure(received);
-
-      if (received.kind === "available") {
-        replaceVirtualFilesystemOverlay(filesystem, received.overlay);
-      }
     };
 
     window.addEventListener("storage", receiveStoredFilesystem);

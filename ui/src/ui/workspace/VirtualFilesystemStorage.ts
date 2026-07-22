@@ -1,6 +1,7 @@
 import {
   createWorkspaceVirtualFilesystem,
   normalizeVirtualPath,
+  replaceVirtualFilesystemOverlay,
   writeVirtualFile,
   type VirtualFilesystem,
   type VirtualFilesystemOverlay,
@@ -120,6 +121,22 @@ export function virtualFilesystemOverlayFromStoredValue(
   return overlay === undefined
     ? unavailable(empty)
     : { kind: "available", overlay };
+}
+
+export function replaceVirtualFilesystemFromStoredValue(
+  value: string | null,
+  corpus: VirtualFilesystem,
+  filesystem: VirtualFilesystem,
+  onReplacement: () => void,
+): VirtualFilesystemStorageResult {
+  const result = virtualFilesystemOverlayFromStoredValue(value, corpus);
+
+  if (result.kind === "available") {
+    replaceVirtualFilesystemOverlay(filesystem, result.overlay);
+    onReplacement();
+  }
+
+  return result;
 }
 
 export function readVirtualFilesystemOverlay(

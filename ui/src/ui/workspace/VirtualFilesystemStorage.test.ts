@@ -4,9 +4,17 @@ import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import {
   createWorkspaceVirtualFilesystem,
   replaceVirtualFilesystemOverlay,
+  virtualHomeDirectory,
   writableVirtualFileText,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
+  createShellId,
+  createShellSessionId,
+} from "../../domain/terminal/Shell.ts";
+import { createCompletionRequest } from "../../domain/terminal/Completion.ts";
+import { createVirtualFilesystemPathCompletionProvider } from "../../application/commands/Completion.ts";
+import {
+  replaceVirtualFilesystemFromStoredValue,
   virtualFilesystemOverlayFromStoredValue,
   virtualFilesystemStorageKey,
   writeVirtualFilesystemOverlay,
@@ -65,6 +73,40 @@ test("validates, persists, and replaces one whole virtual filesystem record", ()
     assert.fail("Expected one replacement file.");
   }
   assert.equal(writableVirtualFileText(filesystem, replacementPath), "new");
+});
+
+test("notifies an existing completion consumer after stored overlay replacement", async () => {
+  const filesystem = createWorkspaceVirtualFilesystem(demoContentCorpus.filesystem);
+  const completion = createVirtualFilesystemPathCompletionProvider({
+    filesystem,
+    currentDirectory: virtualHomeDirectory(),
+  });
+  const request = createCompletionRequest(
+    createShellId("storage-consumer"),
+    createShellSessionId("storage-consumer"),
+    "cat replacement",
+    15,
+  );
+  const signal = new AbortController().signal;
+  assert.deepEqual(await completion.complete(request, signal), []);
+
+  let replacementRevision = 0;
+  const replacement = replaceVirtualFilesystemFromStoredValue(
+    '{"version":1,"files":[{"path":"~/replacement.txt","text":"new"}]}',
+    demoContentCorpus.filesystem,
+    filesystem,
+    () => {
+      replacementRevision += 1;
+    },
+  );
+
+  assert.equal(replacement.kind, "available");
+  assert.equal(replacementRevision, 1);
+  assert.deepEqual(await completion.complete(request, signal), [{
+    kind: "path",
+    value: "replacement.txt",
+    label: "File",
+  }]);
 });
 
 test("keeps memory functional when storage data or the backend is unavailable", () => {
