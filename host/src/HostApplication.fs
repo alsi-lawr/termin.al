@@ -87,7 +87,13 @@ module HostApplication =
             now
             Auth.randomBytes
 
-        Cv.configureServices builder.Services builder.Configuration allowLocalHttpStatsCookie now Auth.randomBytes
+        Cv.configureServices
+            builder.Services
+            builder.Configuration
+            allowLocalHttpStatsCookie
+            now
+            Auth.randomBytes
+            Auth.keyRingAvailable
 
         let application = builder.Build()
 
@@ -140,6 +146,7 @@ module HostApplication =
             (builder.Environment.IsDevelopment())
             now
             Auth.randomBytes
+            Auth.keyRingAvailable
 
         let application = builder.Build()
 

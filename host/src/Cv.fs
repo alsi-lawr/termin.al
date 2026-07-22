@@ -401,24 +401,21 @@ module Cv =
                 task {
                     context.Response.Headers.CacheControl <- "no-store"
                     let state = runtime context
-                    let session = Auth.currentSession context
 
-                    let authorized =
-                        match session, state.ViewerHash with
-                        | Auth.Owner _, _ -> true
-                        | _, Some configured -> hasCvAccess session configured.Fingerprint
-                        | _, None -> false
+                    match state.KeyRingReady, state.ViewerHash with
+                    | false, _
+                    | _, None -> return genericProblem StatusCodes.Status503ServiceUnavailable
+                    | true, Some configured ->
+                        let! session = Auth.resolveSession context
 
-                    if not authorized then
-                        match state.ViewerHash with
-                        | None -> return genericProblem StatusCodes.Status503ServiceUnavailable
-                        | Some _ -> return genericProblem StatusCodes.Status403Forbidden
-                    else
-                        let! content = readCv ()
+                        if not (hasCvAccess session configured.Fingerprint) then
+                            return genericProblem StatusCodes.Status403Forbidden
+                        else
+                            let! content = readCv ()
 
-                        match content with
-                        | Some markdown -> return Results.Text(markdown, "text/markdown", Encoding.UTF8)
-                        | None -> return genericProblem StatusCodes.Status503ServiceUnavailable
+                            match content with
+                            | Some markdown -> return Results.Text(markdown, "text/markdown", Encoding.UTF8)
+                            | None -> return genericProblem StatusCodes.Status503ServiceUnavailable
                 })
         )
         |> ignore
@@ -429,6 +426,7 @@ module Cv =
         (allowLocalHttpCookie: bool)
         (now: unit -> DateTimeOffset)
         (randomBytes: int -> byte array)
+        (keyRingAvailable: unit -> bool)
         =
         let viewerHash =
             match configuration[viewerHashConfigurationName] with
@@ -437,7 +435,7 @@ module Cv =
 
         services.AddSingleton<Runtime>(
             { ViewerHash = viewerHash
-              KeyRingReady = Auth.keyRingAvailable () || allowLocalHttpCookie
+              KeyRingReady = keyRingAvailable () || allowLocalHttpCookie
               AllowLocalHttpCookie = allowLocalHttpCookie
               Now = now
               RandomBytes = randomBytes

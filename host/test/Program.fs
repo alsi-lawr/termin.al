@@ -15,6 +15,44 @@ open Microsoft.Extensions.Hosting
 open Termin.Al.Host
 
 module Program =
+    type private GitHubHandler(now: unit -> DateTimeOffset, expiredAccess: bool) =
+        inherit HttpMessageHandler()
+
+        let mutable refreshAttempts = 0
+
+        member _.RefreshAttempts = refreshAttempts
+
+        override _.SendAsync(request, _) =
+            let response =
+                if request.RequestUri.AbsoluteUri = "https://github.com/login/oauth/access_token" then
+                    let body = request.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+                    if body.Contains("grant_type=refresh_token", StringComparison.Ordinal) then
+                        refreshAttempts <- refreshAttempts + 1
+                        new HttpResponseMessage(HttpStatusCode.Unauthorized)
+                    else
+                        let expiresIn = if expiredAccess then -60 else 3600
+                        let accessToken = String('a', 48)
+                        let refreshToken = String('r', 48)
+
+                        let json =
+                            $"""{{"access_token":"{accessToken}","refresh_token":"{refreshToken}","expires_in":{expiresIn},"refresh_token_expires_in":7200}}"""
+
+                        new HttpResponseMessage(
+                            HttpStatusCode.OK,
+                            Content = new StringContent(json, Encoding.UTF8, "application/json")
+                        )
+                elif request.RequestUri.AbsoluteUri = "https://api.github.com/user" then
+                    new HttpResponseMessage(
+                        HttpStatusCode.OK,
+                        Content =
+                            new StringContent("{\"id\":17,\"login\":\"owner\"}", Encoding.UTF8, "application/json")
+                    )
+                else
+                    new HttpResponseMessage(HttpStatusCode.NotFound)
+
+            Task.FromResult(response)
+
     let private withRunningHost (application: WebApplication) (action: HttpClient -> unit) =
         application.Urls.Add("http://127.0.0.1:0")
 
@@ -28,7 +66,8 @@ module Program =
                 failwith "The test host did not publish a server address."
 
             let address = addresses.Addresses |> Seq.exactlyOne
-            use client = new HttpClient()
+            use handler = new HttpClientHandler(AllowAutoRedirect = false, UseCookies = true)
+            use client = new HttpClient(handler)
             client.BaseAddress <- Uri(address)
             action client
         finally
@@ -273,6 +312,121 @@ module Program =
         if Cv.verifyViewerKey "invalid" wrongKey then
             failwith "An invalid configured CV hash must fail closed."
 
+    let private authenticationApplication viewerHash cvKeyRingReady expiredAccess now =
+        let arguments =
+            [ "--GitHub:App:ClientId=" + String('c', 24)
+              "--GitHub:App:ClientSecret=" + String('s', 32)
+              "--GitHub:App:CallbackUrl=http://127.0.0.1/api/auth/github/callback"
+              "--GitHub:OwnerId=17"
+              "--Application:PublicOrigin=http://127.0.0.1" ]
+            |> fun configured ->
+                match viewerHash with
+                | Some value -> ("--Cv:ViewerKeyHash=" + value) :: configured
+                | None -> configured
+            |> List.toArray
+
+        let builder = WebApplication.CreateBuilder(WebApplicationOptions(Args = arguments))
+        let githubHandler = new GitHubHandler(now, expiredAccess)
+        let githubClient = new HttpClient(githubHandler, true)
+
+        Auth.configureServices builder.Services builder.Configuration true githubClient now Auth.randomBytes
+
+        Cv.configureServices builder.Services builder.Configuration false now Auth.randomBytes (fun () ->
+            cvKeyRingReady)
+
+        let application = builder.Build()
+
+        application.Lifetime.ApplicationStopping.Register(Action(githubClient.Dispose))
+        |> ignore
+
+        Auth.mapEndpoints application
+        Cv.mapEndpoints application
+        application, githubHandler
+
+    let private establishOwnerSession (client: HttpClient) =
+        use start = client.GetAsync("/api/auth/github/start").GetAwaiter().GetResult()
+
+        if start.StatusCode <> HttpStatusCode.Redirect then
+            failwithf "Expected GitHub authentication start redirect, but received %O." start.StatusCode
+
+        let state =
+            start.Headers.Location.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries)
+            |> Seq.map (fun pair -> pair.Split('=', 2))
+            |> Seq.find (fun pair -> pair[0] = "state")
+            |> fun pair -> Uri.UnescapeDataString(pair[1])
+
+        use callback =
+            client.GetAsync($"/api/auth/github/callback?code=accepted&state={Uri.EscapeDataString(state)}")
+            |> fun pending -> pending.GetAwaiter().GetResult()
+
+        if callback.StatusCode <> HttpStatusCode.OK then
+            failwithf "Expected owner callback success, but received %O." callback.StatusCode
+
+    let private assertGenericCvFailure (response: HttpResponseMessage) expectedStatus =
+        if response.StatusCode <> expectedStatus then
+            failwithf "Expected CV response %O, but received %O." expectedStatus response.StatusCode
+
+        if
+            isNull response.Headers.CacheControl
+            || not response.Headers.CacheControl.NoStore
+        then
+            failwith "Denied CV responses must not be cached."
+
+        let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+        if not (body.Contains("CV access failed.", StringComparison.Ordinal)) then
+            failwith "Denied CV responses must remain generic."
+
+        if body.Contains("private CV", StringComparison.OrdinalIgnoreCase) then
+            failwith "Denied CV responses must not contain CV bytes."
+
+    let private runOwnerCvFailClosedChecks () =
+        let now () =
+            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+
+        let viewerHash = (Cv.generateViewerKey ()).CanonicalHash
+
+        authenticationApplication None true false now
+        |> fst
+        |> fun application ->
+            withRunningHost application (fun client ->
+                establishOwnerSession client
+                use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+                assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
+
+        authenticationApplication (Some viewerHash) false false now
+        |> fst
+        |> fun application ->
+            withRunningHost application (fun client ->
+                establishOwnerSession client
+                use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+                assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
+
+        let application, githubHandler =
+            authenticationApplication (Some viewerHash) true true now
+
+        withRunningHost application (fun client ->
+            establishOwnerSession client
+            use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+            assertGenericCvFailure response HttpStatusCode.Forbidden
+
+            if githubHandler.RefreshAttempts <> 1 then
+                failwith "Expired owner CV access must attempt one token refresh."
+
+            let replacementCookie =
+                response.Headers.GetValues("Set-Cookie")
+                |> Seq.tryFind (fun value -> value.StartsWith(Auth.SessionCookieName + "=", StringComparison.Ordinal))
+
+            if replacementCookie.IsNone then
+                failwith "Failed owner refresh must emit the demoted replacement session."
+
+            use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
+            let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            use sessionDocument = JsonDocument.Parse(sessionBody)
+
+            if sessionDocument.RootElement.GetProperty("kind").GetString() <> "github-viewer" then
+                failwith "Failed owner refresh must atomically demote the browser to GitHub viewer.")
+
     let private runFreshCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (freshContentClient ())
         |> fun application ->
@@ -348,6 +502,7 @@ module Program =
             runHostContractChecks ()
             runAuthenticationContractChecks ()
             runCvCryptographyChecks ()
+            runOwnerCvFailClosedChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             0

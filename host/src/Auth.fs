@@ -568,6 +568,9 @@ module Auth =
             | _ -> return session
         }
 
+    let resolveSession (context: HttpContext) =
+        readSession context |> refreshOwner context
+
     let private responseForSession (csrf: string) (session: Session) =
         match session with
         | Anonymous -> AnonymousResponse csrf
@@ -629,7 +632,7 @@ module Auth =
                     if isNull tokens.RequestToken then
                         return genericProblem StatusCodes.Status503ServiceUnavailable
                     else
-                        let! session = readSession context |> refreshOwner context
+                        let! session = resolveSession context
                         return responseForSession tokens.RequestToken session |> sessionJson
                 })
         )
