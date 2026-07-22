@@ -130,6 +130,44 @@ export interface DocumentRequest {
     id: string;
 }
 /**
+ * @generated from protobuf message terminal.v1.DocumentBase
+ */
+export interface DocumentBase {
+    /**
+     * @generated from protobuf field: string default_branch = 1
+     */
+    defaultBranch: string;
+    /**
+     * @generated from protobuf field: string head_sha = 2
+     */
+    headSha: string;
+    /**
+     * @generated from protobuf field: string blob_sha = 3
+     */
+    blobSha: string;
+    /**
+     * @generated from protobuf field: string repository_path = 4
+     */
+    repositoryPath: string;
+    /**
+     * @generated from protobuf field: string virtual_path = 5
+     */
+    virtualPath: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.RepositoryBaseResponse
+ */
+export interface RepositoryBaseResponse {
+    /**
+     * @generated from protobuf field: string default_branch = 1
+     */
+    defaultBranch: string;
+    /**
+     * @generated from protobuf field: string head_sha = 2
+     */
+    headSha: string;
+}
+/**
  * @generated from protobuf message terminal.v1.DocumentResponse
  */
 export interface DocumentResponse {
@@ -177,6 +215,10 @@ export interface DocumentResponse {
      * @generated from protobuf field: terminal.v1.CacheMetadata cache = 11
      */
     cache?: CacheMetadata;
+    /**
+     * @generated from protobuf field: terminal.v1.DocumentBase base = 12
+     */
+    base?: DocumentBase;
 }
 /**
  * @generated from protobuf message terminal.v1.Project
@@ -882,6 +924,140 @@ class DocumentRequest$Type extends MessageType<DocumentRequest> {
  */
 export const DocumentRequest = new DocumentRequest$Type();
 // @generated message type with reflection information, may provide speed optimized methods
+class DocumentBase$Type extends MessageType<DocumentBase> {
+    constructor() {
+        super("terminal.v1.DocumentBase", [
+            { no: 1, name: "default_branch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "head_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "blob_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "repository_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "virtual_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DocumentBase>): DocumentBase {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.defaultBranch = "";
+        message.headSha = "";
+        message.blobSha = "";
+        message.repositoryPath = "";
+        message.virtualPath = "";
+        if (value !== undefined)
+            reflectionMergePartial<DocumentBase>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DocumentBase): DocumentBase {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string default_branch */ 1:
+                    message.defaultBranch = reader.string();
+                    break;
+                case /* string head_sha */ 2:
+                    message.headSha = reader.string();
+                    break;
+                case /* string blob_sha */ 3:
+                    message.blobSha = reader.string();
+                    break;
+                case /* string repository_path */ 4:
+                    message.repositoryPath = reader.string();
+                    break;
+                case /* string virtual_path */ 5:
+                    message.virtualPath = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DocumentBase, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string default_branch = 1; */
+        if (message.defaultBranch !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.defaultBranch);
+        /* string head_sha = 2; */
+        if (message.headSha !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.headSha);
+        /* string blob_sha = 3; */
+        if (message.blobSha !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.blobSha);
+        /* string repository_path = 4; */
+        if (message.repositoryPath !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.repositoryPath);
+        /* string virtual_path = 5; */
+        if (message.virtualPath !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.virtualPath);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.DocumentBase
+ */
+export const DocumentBase = new DocumentBase$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RepositoryBaseResponse$Type extends MessageType<RepositoryBaseResponse> {
+    constructor() {
+        super("terminal.v1.RepositoryBaseResponse", [
+            { no: 1, name: "default_branch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "head_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RepositoryBaseResponse>): RepositoryBaseResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.defaultBranch = "";
+        message.headSha = "";
+        if (value !== undefined)
+            reflectionMergePartial<RepositoryBaseResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RepositoryBaseResponse): RepositoryBaseResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string default_branch */ 1:
+                    message.defaultBranch = reader.string();
+                    break;
+                case /* string head_sha */ 2:
+                    message.headSha = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RepositoryBaseResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string default_branch = 1; */
+        if (message.defaultBranch !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.defaultBranch);
+        /* string head_sha = 2; */
+        if (message.headSha !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.headSha);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.RepositoryBaseResponse
+ */
+export const RepositoryBaseResponse = new RepositoryBaseResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
 class DocumentResponse$Type extends MessageType<DocumentResponse> {
     constructor() {
         super("terminal.v1.DocumentResponse", [
@@ -895,7 +1071,8 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
             { no: 8, name: "tags", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "source", kind: "message", T: () => ContentSource },
-            { no: 11, name: "cache", kind: "message", T: () => CacheMetadata }
+            { no: 11, name: "cache", kind: "message", T: () => CacheMetadata },
+            { no: 12, name: "base", kind: "message", T: () => DocumentBase }
         ]);
     }
     create(value?: PartialMessage<DocumentResponse>): DocumentResponse {
@@ -951,6 +1128,9 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
                 case /* terminal.v1.CacheMetadata cache */ 11:
                     message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
                     break;
+                case /* terminal.v1.DocumentBase base */ 12:
+                    message.base = DocumentBase.internalBinaryRead(reader, reader.uint32(), options, message.base);
+                    break;
                 default:
                     let u = options.readUnknownField;
                     if (u === "throw")
@@ -996,6 +1176,9 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
         /* terminal.v1.CacheMetadata cache = 11; */
         if (message.cache)
             CacheMetadata.internalBinaryWrite(message.cache, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.DocumentBase base = 12; */
+        if (message.base)
+            DocumentBase.internalBinaryWrite(message.base, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1839,6 +2022,7 @@ export const SessionApi = new ServiceType("terminal.v1.SessionApi", [
  * @generated ServiceType for protobuf service terminal.v1.ContentApi
  */
 export const ContentApi = new ServiceType("terminal.v1.ContentApi", [
+    { name: "ReadRepositoryBase", options: {}, I: EmptyRequest, O: RepositoryBaseResponse },
     { name: "ReadCatalog", options: {}, I: EmptyRequest, O: CatalogResponse },
     { name: "ReadDocument", options: {}, I: DocumentRequest, O: DocumentResponse },
     { name: "ReadProjects", options: {}, I: EmptyRequest, O: ProjectsResponse },

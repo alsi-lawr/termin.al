@@ -632,6 +632,8 @@ module GitHubContentClientTests =
             failwith "Different cache keys must retain independent parallel upstream requests."
 
     let private testPublicationMetadata () =
+        let headSha = String('a', 40)
+        let blobSha = String('b', 40)
         let catalogPath =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
@@ -651,6 +653,11 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
                 | path when path = catalogPath -> response HttpStatusCode.OK manifest None
                 | path when path = publicationPath -> response HttpStatusCode.OK markdown None
+                | "/repos/example-owner/content/git/ref/heads/main" ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
+                | path when path = $"/repos/example-owner/content/contents/blog/validated-metadata.md?ref={headSha}" ->
+                    let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
+                    response HttpStatusCode.OK $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}" None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -666,6 +673,16 @@ module GitHubContentClientTests =
         let document =
             contentClient.GetDocument(documentId, CancellationToken.None).GetAwaiter().GetResult()
             |> expectOk
+
+        let repositoryBase =
+            contentClient.GetRepositoryBase(CancellationToken.None).GetAwaiter().GetResult()
+            |> expectOk
+
+        if
+            ContentDomain.ContentRevision.value repositoryBase.DefaultBranch <> "main"
+            || ContentDomain.ContentRevision.value repositoryBase.Head <> headSha
+        then
+            failwith "The authoring repository base must use the real default branch and current head."
 
         let updatedAt =
             document
@@ -692,6 +709,12 @@ module GitHubContentClientTests =
                 || tags <> [ "fsharp"; "content" ]
             then
                 failwith "The live supplier must preserve validated publication metadata and update time."
+
+            match ContentDomain.ContentDocument.baseRevisions document with
+            | Some(head, blob) when
+                ContentDomain.ContentRevision.value head = headSha
+                && ContentDomain.ContentRevision.value blob = blobSha -> ()
+            | _ -> failwith "Publication reads must carry the current head and existing blob SHA."
 
     let private testPublicationFrontMatterContract () =
         let path =

@@ -316,6 +316,7 @@ module Program =
         let catalog = catalogWithCacheState cacheState
 
         { new ContentClient with
+            member _.GetRepositoryBase _ = Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
 
             member _.GetDocument(_, _) =
@@ -360,6 +361,7 @@ module Program =
             |> requireValid
 
         { new ContentClient with
+            member _.GetRepositoryBase _ = Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
             member _.GetDocument(_, _) =
                 Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))

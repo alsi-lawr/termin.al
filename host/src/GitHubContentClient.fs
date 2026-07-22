@@ -161,6 +161,7 @@ module GitHubContentClient =
     let private rawMediaType = "application/vnd.github.raw+json"
     let private maximumPaginationPages = 3
     let private maximumPayloadCacheEntries = 512
+    let private maximumGitHubPayloadBytes = ContentDomain.DocumentByteLimit * 2
 
     let private mapFetchFailure failure =
         match failure with
@@ -491,7 +492,7 @@ module GitHubContentClient =
                     | _, None, _ ->
                         let! body = response.Content.ReadAsStringAsync(timeout.Token)
 
-                        if Encoding.UTF8.GetByteCount(body) > ContentDomain.DocumentByteLimit then
+                        if Encoding.UTF8.GetByteCount(body) > maximumGitHubPayloadBytes then
                             match cached with
                             | Some value -> return stale now value Unavailable
                             | None -> return Error Unavailable
@@ -882,6 +883,7 @@ module GitHubContentClient =
             (virtualPath: ContentDomain.VirtualPath)
             (updatedAt: ContentDomain.Timestamp)
             (payload: GitHubPayload)
+            (baseRevisions: (ContentDomain.ContentRevision * ContentDomain.ContentRevision) option)
             (markdown: string)
             =
             match documentUrl repository documentPath, cacheMetadata payload with
@@ -891,6 +893,7 @@ module GitHubContentClient =
                     virtualPath
                     updatedAt
                     (repositorySource repository documentPath url)
+                    baseRevisions
                     metadata
                     markdown
                 |> Result.mapError mapValidationFailure
@@ -1802,6 +1805,31 @@ module GitHubContentClient =
             }
 
         { new ContentClient with
+            member _.GetRepositoryBase cancellationToken =
+                task {
+                    let! repository =
+                        getRepository (GitHubContentConfiguration.contentRepository configuration) cancellationToken
+
+                    match repository with
+                    | Error problem -> return Error problem
+                    | Ok value ->
+                        let! head = getDefaultBranchHead value cancellationToken
+                        match head with
+                        | Error problem -> return Error problem
+                        | Ok headSha ->
+                            match
+                                ContentDomain.ContentRevision.tryCreate
+                                    "repository.head_sha"
+                                    (ContentDomain.CommitSha.value headSha)
+                            with
+                            | Error failure -> return Error(mapValidationFailure failure)
+                            | Ok revision ->
+                                let repositoryBase: ContentDomain.RepositoryBase =
+                                    { DefaultBranch = value.RepositoryDefaultBranch
+                                      Head = revision }
+                                return Ok repositoryBase
+                }
+
             member _.GetCatalog cancellationToken =
                 task {
                     let! input = getCatalogInput cancellationToken
@@ -1828,49 +1856,99 @@ module GitHubContentClient =
                                         "The requested document identifier is not in the catalog."
                                 )
                         | Some locator ->
-                            let! payload =
-                                readFile input.CatalogRepository locator.ManifestDocumentPath cancellationToken
+                            let repositoryPath = ContentDomain.RepositoryPath.value locator.ManifestDocumentPath
+                            let isPublication =
+                                repositoryPath.StartsWith("blog/", StringComparison.Ordinal)
+                                || repositoryPath.StartsWith("notes/", StringComparison.Ordinal)
 
-                            match payload with
-                            | Ok documentPayload ->
-                                return
-                                    buildDocument
-                                        input.CatalogRepository
-                                        documentId
-                                        locator.ManifestDocumentPath
-                                        locator.ManifestVirtualPath
-                                        locator.ManifestUpdatedAt
-                                        documentPayload
-                                        documentPayload.PayloadBody
-                            | Error Missing when ContentDomain.ContentId.value documentId = "about" ->
-                                let! profile = getProfileReadme cancellationToken
+                            if isPublication then
+                                let! head = getDefaultBranchHead input.CatalogRepository cancellationToken
 
-                                match profile with
+                                match head with
                                 | Error problem -> return Error problem
-                                | Ok None ->
-                                    return
-                                        Error(
-                                            ContentDomain.Problem.create
-                                                ContentDomain.NotFound
-                                                "The requested document was not found."
-                                        )
-                                | Ok(Some(profileRepository, profileBody, profilePayload)) ->
-                                    match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
-                                    | Error failure -> return Error(mapValidationFailure failure)
-                                    | Ok profilePath ->
-                                        let profileMarkdown =
-                                            String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
+                                | Ok headSha ->
+                                    let fullName = repositoryName input.CatalogRepository.RepositoryFullName
+                                    let revision = Uri.EscapeDataString(ContentDomain.CommitSha.value headSha)
+                                    let! payload =
+                                        getJson
+                                            (apiUri $"repos/{fullName}/contents/{encodeRepositoryPath locator.ManifestDocumentPath}?ref={revision}")
+                                            cancellationToken
 
-                                        return
-                                            buildDocument
-                                                profileRepository
-                                                documentId
-                                                profilePath
-                                                locator.ManifestVirtualPath
-                                                locator.ManifestUpdatedAt
-                                                profilePayload
-                                                profileMarkdown
-                            | Error failure -> return Error(mapFetchFailure failure)
+                                    match payload with
+                                    | Error failure -> return Error(mapFetchFailure failure)
+                                    | Ok response ->
+                                        let parsed =
+                                            parseJson response.PayloadBody (fun root ->
+                                                match requiredString "sha" root, requiredString "encoding" root, requiredString "content" root with
+                                                | Ok blob, Ok "base64", Ok encoded ->
+                                                    try
+                                                        Ok(blob, Encoding.UTF8.GetString(Convert.FromBase64String(encoded.Replace("\n", "", StringComparison.Ordinal))))
+                                                    with :? FormatException -> Error "Document content must be valid base64."
+                                                | Ok _, Ok _, Ok _ -> Error "Document content encoding must be base64."
+                                                | Error message, _, _
+                                                | _, Error message, _
+                                                | _, _, Error message -> Error message)
+
+                                        match parsed with
+                                        | Error _ -> return Error(invalidProblem ())
+                                        | Ok(blobValue, markdown) ->
+                                            match
+                                                ContentDomain.ContentRevision.tryCreate
+                                                    "document.head_sha"
+                                                    (ContentDomain.CommitSha.value headSha),
+                                                ContentDomain.ContentRevision.tryCreate "document.blob_sha" blobValue
+                                            with
+                                            | Error _, _
+                                            | _, Error _ -> return Error(invalidProblem ())
+                                            | Ok documentHead, Ok blobSha ->
+                                                return
+                                                    buildDocument
+                                                        input.CatalogRepository
+                                                        documentId
+                                                        locator.ManifestDocumentPath
+                                                        locator.ManifestVirtualPath
+                                                        locator.ManifestUpdatedAt
+                                                        response
+                                                        (Some(documentHead, blobSha))
+                                                        markdown
+                            else
+                                let! payload = readFile input.CatalogRepository locator.ManifestDocumentPath cancellationToken
+
+                                match payload with
+                                | Ok documentPayload ->
+                                    return
+                                        buildDocument
+                                            input.CatalogRepository
+                                            documentId
+                                            locator.ManifestDocumentPath
+                                            locator.ManifestVirtualPath
+                                            locator.ManifestUpdatedAt
+                                            documentPayload
+                                            None
+                                            documentPayload.PayloadBody
+                                | Error Missing when ContentDomain.ContentId.value documentId = "about" ->
+                                    let! profile = getProfileReadme cancellationToken
+
+                                    match profile with
+                                    | Error problem -> return Error problem
+                                    | Ok None ->
+                                        return Error(ContentDomain.Problem.create ContentDomain.NotFound "The requested document was not found.")
+                                    | Ok(Some(profileRepository, profileBody, profilePayload)) ->
+                                        match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
+                                        | Error failure -> return Error(mapValidationFailure failure)
+                                        | Ok profilePath ->
+                                            let profileMarkdown = String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
+                                            return
+                                                buildDocument
+                                                    profileRepository
+                                                    documentId
+                                                    profilePath
+                                                    locator.ManifestVirtualPath
+                                                    locator.ManifestUpdatedAt
+                                                    profilePayload
+                                                    None
+                                                    profileMarkdown
+                                | Error failure -> return Error(mapFetchFailure failure)
                 }
 
             member _.GetProjects cancellationToken = getProjectsFromGitHub cancellationToken

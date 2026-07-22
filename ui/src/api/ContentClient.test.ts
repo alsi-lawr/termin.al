@@ -11,11 +11,13 @@ import {
   Commit,
   ContentSource,
   DocumentKind,
+  DocumentBase,
   DocumentResponse,
   NowResponse,
   Project,
   ProjectsResponse,
   Release,
+  RepositoryBaseResponse,
 } from "../generated/browser/browser.ts";
 import {
   resolveVirtualPath,
@@ -68,6 +70,8 @@ function generatedClient(calls: Array<Readonly<{ method: string; meta: RpcMetada
   };
 
   return {
+    readRepositoryBase: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
+      call("repository-base", RepositoryBaseResponse.create({ defaultBranch: "main", headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), options),
     readCatalog: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
       call("catalog", catalogResponse(), options),
     readProjects: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
@@ -125,6 +129,13 @@ function generatedClient(calls: Array<Readonly<{ method: string; meta: RpcMetada
           path: publication ? "blog/validated-metadata.md" : "content/about.md",
         }),
         cache,
+        base: publication ? DocumentBase.create({
+          defaultBranch: "main",
+          headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          blobSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          repositoryPath: "blog/validated-metadata.md",
+          virtualPath: "~/blog/validated-metadata.md",
+        }) : undefined,
       }), options);
     },
   };
@@ -144,6 +155,13 @@ test("loads every content slice through one narrow generated client", async () =
   assert.deepEqual(calls.map((entry) => entry.method), ["catalog", "projects", "now", "changelog"]);
   assert.equal(calls.every((entry) => entry.abort === controller.signal), true);
   assert.equal(calls.every((entry) => entry.meta["X-CSRF-TOKEN"] === "catalog-antiforgery-token"), true);
+  if (result.corpus.repositoryBase.kind !== "available") assert.fail("Expected live repository base supplier.");
+  const repositoryBase = await result.corpus.repositoryBase.read(controller.signal);
+  assert.deepEqual(repositoryBase.kind === "available" ? repositoryBase.value : repositoryBase, {
+    defaultBranch: "main",
+    headSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  });
+  assert.equal(calls.at(-1)?.method, "repository-base");
 
   const publication = resolveVirtualPath(result.corpus.filesystem, virtualHomeDirectory(), "blog/validated-metadata.md");
   if (publication.kind !== "found" || publication.node.kind !== "file") assert.fail("Expected publication.");

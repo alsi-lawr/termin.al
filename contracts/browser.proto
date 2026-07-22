@@ -77,6 +77,19 @@ enum DocumentKind {
 
 message DocumentRequest { string id = 1; }
 
+message DocumentBase {
+  string default_branch = 1;
+  string head_sha = 2;
+  string blob_sha = 3;
+  string repository_path = 4;
+  string virtual_path = 5;
+}
+
+message RepositoryBaseResponse {
+  string default_branch = 1;
+  string head_sha = 2;
+}
+
 message DocumentResponse {
   DocumentKind kind = 1;
   string id = 2;
@@ -89,6 +102,7 @@ message DocumentResponse {
   string body = 9;
   ContentSource source = 10;
   CacheMetadata cache = 11;
+  DocumentBase base = 12;
 }
 
 message Project {
@@ -142,6 +156,7 @@ message ChangelogResponse {
 }
 
 service ContentApi {
+  rpc ReadRepositoryBase(EmptyRequest) returns (RepositoryBaseResponse);
   rpc ReadCatalog(EmptyRequest) returns (CatalogResponse);
   rpc ReadDocument(DocumentRequest) returns (DocumentResponse);
   rpc ReadProjects(EmptyRequest) returns (ProjectsResponse);

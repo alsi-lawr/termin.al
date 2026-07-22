@@ -34,6 +34,10 @@ import type { VimSessionBinding } from "./VimSessionState.ts";
 import type { AuthenticationController } from "../../auth/Authentication.ts";
 import type { ViewerContent, ViewerOpenDisposition } from "../../content/ViewerContent.ts";
 import { submitCvSecret } from "../../application/commands/AuthenticationCommands.ts";
+import type { AuthoringService } from "../../authoring/AuthoringService.ts";
+import { publicationBodyFromSource, validatePublicationSource } from "../../authoring/PublicationDraft.ts";
+import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
+import { vimBufferText, type VimBuffer, type VimCommandEffect } from "../../domain/vim/VimBuffer.ts";
 
 type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
@@ -64,6 +68,7 @@ type PaneTreeViewProps = Readonly<{
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
+  authoring: AuthoringService | undefined;
   onAcceptedContentOpen: (contentId: ContentId) => void;
   authentication: AuthenticationController;
   promptIdentity: string;
@@ -144,6 +149,7 @@ function PaneLeaf({
   documents,
   projectReadmes,
   readStats,
+  authoring,
   onAcceptedContentOpen,
   authentication,
   promptIdentity,
@@ -190,6 +196,7 @@ function PaneLeaf({
             documents={documents}
             projectReadmes={projectReadmes}
             readStats={readStats}
+            authoring={authoring}
             onAcceptedContentOpen={onAcceptedContentOpen}
             authentication={authentication}
             promptIdentity={promptIdentity}
@@ -222,6 +229,25 @@ function PaneLeaf({
           />
         </div>
       );
+    case "authoring-preview":
+      return (
+        <div className={paneClass}>
+          <ViewerPane
+            viewer={pane.content.viewer}
+            isActive={isActive}
+            focusVersion={focusVersion}
+            onActivate={activate}
+            onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
+            onAcceptedContentOpen={onAcceptedContentOpen}
+            onClose={() => { onOperation({ kind: "close" }); }}
+          />
+        </div>
+      );
     case "editor":
       return (
         <div className={paneClass}>
@@ -248,6 +274,82 @@ function PaneLeaf({
           />
         </div>
       );
+    case "authoring-editor": {
+      const content = pane.content;
+      const handleEffect = async (effect: VimCommandEffect, buffer: VimBuffer): Promise<void> => {
+        if (authoring === undefined) return;
+        const source = vimBufferText(buffer);
+        const update = (draft: typeof content.draft, savedSource: string, message: string): void => {
+          onOperation({ kind: "update-authoring-editor", paneId: pane.id, draft, savedSource, buffer, message });
+        };
+        if (effect.kind === "quit") {
+          if (source === content.savedSource) onOperation({ kind: "close" });
+          else update(content.draft, content.savedSource, "No write since last change; use :q! to discard.");
+          return;
+        }
+        if (effect.kind === "force-quit") {
+          let result: Awaited<ReturnType<AuthoringService["discard"]>>;
+          try {
+            result = await authoring.discard(content.draft);
+          } catch {
+            update(content.draft, content.savedSource, "Draft storage is unavailable; this buffer was not discarded.");
+            return;
+          }
+          if (result.kind === "discarded") onOperation({ kind: "confirm-close" });
+          else update(content.draft, content.savedSource, "A newer draft revision exists; this buffer was not discarded.");
+          return;
+        }
+        if (effect.kind === "preview") {
+          const parsed = validatePublicationSource(source);
+          if (parsed.kind === "invalid") { update(content.draft, content.savedSource, parsed.message); return; }
+          onOperation({
+            kind: "open-authoring-preview",
+            paneId: pane.id,
+            repositoryPath: content.draft.repositoryPath,
+            viewer: createDocumentViewerContent({
+              title: `${content.draft.virtualPath} preview`,
+              presentation: "inline",
+              document: { text: publicationBodyFromSource(source), source: { path: content.draft.virtualPath } },
+              statsIdentity: { kind: "uncounted" },
+            }),
+          });
+          return;
+        }
+        if (effect.kind !== "write" && effect.kind !== "write-quit") return;
+        let result: Awaited<ReturnType<AuthoringService["save"]>>;
+        try {
+          result = await authoring.save(content.draft, source);
+        } catch {
+          update(content.draft, content.savedSource, "Draft storage is unavailable; this buffer was not saved.");
+          return;
+        }
+        if (result.kind === "invalid") { update(content.draft, content.savedSource, result.message); return; }
+        if (result.kind === "stale") { update(content.draft, content.savedSource, "A newer draft revision exists; this buffer was not saved."); return; }
+        update(result.draft, source, `Draft revision ${result.draft.recordRevision} saved.`);
+        if (effect.kind === "write-quit") onOperation({ kind: "confirm-close" });
+      };
+      return (
+        <div className={paneClass}>
+          <VimEditorPane
+            title={pane.content.title}
+            buffer={pane.content.buffer}
+            syntax={{ kind: "markdown" }}
+            isActive={isActive}
+            focusVersion={focusVersion}
+            onActivate={activate}
+            externalMessage={pane.content.message}
+            onCommandEffect={(effect, buffer) => { void handleEffect(effect, buffer); }}
+            onBufferChange={(buffer) => { onOperation({ kind: "replace-editor-buffer", paneId: pane.id, buffer }); }}
+            onPaneKeyInput={onPaneKeyInput}
+            mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
+            onToggleMobileCtrl={onToggleMobileCtrl}
+            onConsumeMobileCtrl={onConsumeMobileCtrl}
+            resolveMobileCtrlInput={resolveMobileCtrlInput}
+          />
+        </div>
+      );
+    }
   }
 }
 
@@ -273,6 +375,7 @@ export function PaneTreeView({
   documents,
   projectReadmes,
   readStats,
+  authoring,
   onAcceptedContentOpen,
   authentication,
   promptIdentity,
@@ -301,6 +404,7 @@ export function PaneTreeView({
         documents={documents}
         projectReadmes={projectReadmes}
         readStats={readStats}
+        authoring={authoring}
         onAcceptedContentOpen={onAcceptedContentOpen}
         authentication={authentication}
         promptIdentity={promptIdentity}
@@ -357,6 +461,7 @@ export function PaneTreeView({
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}
+          authoring={authoring}
           onAcceptedContentOpen={onAcceptedContentOpen}
           authentication={authentication}
           promptIdentity={promptIdentity}
@@ -393,6 +498,7 @@ export function PaneTreeView({
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}
+          authoring={authoring}
           onAcceptedContentOpen={onAcceptedContentOpen}
           authentication={authentication}
           promptIdentity={promptIdentity}

@@ -361,6 +361,10 @@ module ContentDomain =
               Revision = revision
               Url = url }
 
+    type RepositoryBase =
+        { DefaultBranch: ContentRevision
+          Head: ContentRevision }
+
     type CacheState =
         | Fresh
         | Stale
@@ -702,6 +706,7 @@ module ContentDomain =
               Metadata: ContentDocumentMetadata
               Body: MarkdownBody
               Source: ContentSource
+              Base: (ContentRevision * ContentRevision) option
               Cache: CacheMetadata }
 
     [<RequireQualifiedAccess>]
@@ -733,15 +738,27 @@ module ContentDomain =
             (path: VirtualPath)
             (updatedAt: Timestamp)
             (source: ContentSource)
+            (baseRevisions: (ContentRevision * ContentRevision) option)
             (cache: CacheMetadata)
             (markdown: string)
             : ValidationResult<ContentDocument> =
             FrontMatter.tryParse source.Path markdown
             |> Result.bind (fun frontMatter ->
-                if not (metadataMatchesPath path frontMatter.Metadata) then
+                let recursivePublicationPathMatches =
+                    match frontMatter.Metadata with
+                    | ContentDocumentMetadata.Page -> true
+                    | ContentDocumentMetadata.Publication _ ->
+                        VirtualPath.value path = "~/" + RepositoryPath.value source.Path
+
+                if not (metadataMatchesPath path frontMatter.Metadata) || not recursivePublicationPathMatches then
                     invalid
                         "document.path"
                         "Document repository and virtual paths must identify the same kind and slug."
+                elif (match frontMatter.Metadata, baseRevisions with
+                      | ContentDocumentMetadata.Publication _, None -> true
+                      | ContentDocumentMetadata.Page, Some _ -> true
+                      | _ -> false) then
+                    invalid "document.base" "Publication documents require head and blob SHAs; pages must not carry them."
                 else
                     Ok
                         { Id = id
@@ -751,6 +768,7 @@ module ContentDomain =
                           Metadata = frontMatter.Metadata
                           Body = frontMatter.Body
                           Source = source
+                          Base = baseRevisions
                           Cache = cache })
 
         let id document = document.Id
@@ -760,6 +778,7 @@ module ContentDomain =
         let metadata document = document.Metadata
         let body document = document.Body
         let source document = document.Source
+        let baseRevisions document = document.Base
         let cache document = document.Cache
 
     type Project =

@@ -124,6 +124,8 @@ export type VimCommandEffect =
   | Readonly<{ kind: "write" }>
   | Readonly<{ kind: "quit" }>
   | Readonly<{ kind: "force-quit" }>
+  | Readonly<{ kind: "write-quit" }>
+  | Readonly<{ kind: "preview" }>
   | Readonly<{
       kind: "show-history";
       history: "command" | "search";
@@ -215,6 +217,8 @@ export type VimNormalKeyMatch =
 
 export type VimParsedCommand =
   | Readonly<{ kind: "write" }>
+  | Readonly<{ kind: "write-quit" }>
+  | Readonly<{ kind: "preview" }>
   | Readonly<{ kind: "quit" }>
   | Readonly<{ kind: "force-quit" }>
   | Readonly<{
@@ -3301,6 +3305,10 @@ export function parseVimCommand(source: string): VimCommandParseResult {
       return { kind: "recognized", command: { kind: "quit" } };
     case "q!":
       return { kind: "recognized", command: { kind: "force-quit" } };
+    case "wq":
+      return { kind: "recognized", command: { kind: "write-quit" } };
+    case "preview":
+      return { kind: "recognized", command: { kind: "preview" } };
     case "history":
     case "history cmd":
       return {

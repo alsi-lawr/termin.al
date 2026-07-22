@@ -92,12 +92,12 @@
       "name": "edit",
       "section": 1,
       "usage": "edit <path>",
-      "summary": "Edit published content.",
+      "summary": "Open or recover a publication draft.",
       "sourcePath": "man/edit.1",
       "artifactPath": "ui/src/generated/manpages/edit.txt",
-      "byteCount": 994,
-      "lineCount": 34,
-      "sha256": "6fde595b60b40469ceee01962c072aaf16e095d08f5a7a011da095c9913c2faf"
+      "byteCount": 1787,
+      "lineCount": 42,
+      "sha256": "46937e56f84a215f4f3ba0e11fb5093052339097a5e6f61042a94f03a917ad05"
     },
     {
       "name": "find",

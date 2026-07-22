@@ -1,8 +1,11 @@
 import {
   createEmptyVimBuffer,
+  createVimBuffer,
   isVimBufferDirty,
+  vimBufferText,
   type VimBuffer,
 } from "../vim/VimBuffer.ts";
+import type { PublicationDraft } from "../../authoring/PublicationDraft.ts";
 import {
   createPlaceholderViewerContent,
   type ViewerContent,
@@ -36,6 +39,19 @@ export type PaneContent =
       kind: "editor";
       title: string;
       buffer: VimBuffer;
+    }>
+  | Readonly<{
+      kind: "authoring-editor";
+      title: string;
+      draft: PublicationDraft;
+      savedSource: string;
+      buffer: VimBuffer;
+      message: string | undefined;
+    }>
+  | Readonly<{
+      kind: "authoring-preview";
+      repositoryPath: string;
+      viewer: ViewerContent;
     }>;
 
 export type Pane = Readonly<{
@@ -142,6 +158,20 @@ export type PaneOperation =
       kind: "replace-editor-buffer";
       paneId: PaneId;
       buffer: VimBuffer;
+    }>
+  | Readonly<{
+      kind: "update-authoring-editor";
+      paneId: PaneId;
+      draft: PublicationDraft;
+      savedSource: string;
+      buffer: VimBuffer;
+      message: string | undefined;
+    }>
+  | Readonly<{
+      kind: "open-authoring-preview";
+      paneId: PaneId;
+      repositoryPath: string;
+      viewer: ViewerContent;
     }>;
 
 export type PaneOperationRejection =
@@ -712,8 +742,8 @@ function closeActivePane(
 
   if (
     !confirmed &&
-    active.content.kind === "editor" &&
-    isVimBufferDirty(active.content.buffer)
+    ((active.content.kind === "editor" && isVimBufferDirty(active.content.buffer)) ||
+      (active.content.kind === "authoring-editor" && vimBufferText(active.content.buffer) !== active.content.savedSource))
   ) {
     return { kind: "confirmation-required", pane: active };
   }
@@ -788,6 +818,17 @@ export function createEditorPaneContent(title: string): PaneContent {
     kind: "editor",
     title,
     buffer: createEmptyVimBuffer(),
+  };
+}
+
+export function createAuthoringEditorPaneContent(draft: PublicationDraft): PaneContent {
+  return {
+    kind: "authoring-editor",
+    title: draft.virtualPath,
+    draft,
+    savedSource: draft.source,
+    buffer: createVimBuffer({ text: draft.source, mode: { kind: "normal" } }),
+    message: undefined,
   };
 }
 
@@ -1038,7 +1079,7 @@ export function applyPaneOperation(
         return { kind: "rejected", reason: "target-pane-unavailable" };
       }
 
-      if (pane.content.kind !== "editor") {
+      if (pane.content.kind !== "editor" && pane.content.kind !== "authoring-editor") {
         return { kind: "rejected", reason: "pane-is-not-editor" };
       }
 
@@ -1055,6 +1096,44 @@ export function applyPaneOperation(
           }),
         },
       };
+    }
+    case "update-authoring-editor": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      return {
+        kind: "applied",
+        workspace: {
+          ...workspace,
+          tree: replacePane(workspace.tree, pane.id, {
+            ...pane,
+            content: { ...pane.content, draft: operation.draft, savedSource: operation.savedSource, buffer: operation.buffer, message: operation.message },
+          }),
+        },
+      };
+    }
+    case "open-authoring-preview": {
+      const existing = paneLeaves(workspace.tree).find(
+        (candidate) => candidate.content.kind === "authoring-preview" && candidate.content.repositoryPath === operation.repositoryPath,
+      );
+      if (existing !== undefined) {
+        return {
+          kind: "applied",
+          workspace: {
+            ...setActivePane(workspace, existing.id),
+            tree: replacePane(workspace.tree, existing.id, {
+              ...existing,
+              content: { kind: "authoring-preview", repositoryPath: operation.repositoryPath, viewer: operation.viewer },
+            }),
+          },
+        };
+      }
+      return applyPaneOperation(workspace, {
+        kind: "split",
+        paneId: operation.paneId,
+        orientation: "vertical",
+        content: { kind: "authoring-preview", repositoryPath: operation.repositoryPath, viewer: operation.viewer },
+      });
     }
   }
 }

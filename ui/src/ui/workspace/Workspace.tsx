@@ -30,7 +30,12 @@ export function Workspace({
   authentication,
 }: WorkspaceProps): ReactElement {
   const stats = useWorkspaceStats(statsClient, applicationMode);
-  const controller = usePaneWorkspace(corpus, stats.recordAcceptedOpen);
+  const controller = usePaneWorkspace(
+    corpus,
+    stats.recordAcceptedOpen,
+    applicationMode,
+    authentication.controller,
+  );
   const dropCvContent = controller.dropCvContent;
   const theme = useTheme();
   const panes = paneLeaves(controller.workspace.tree);
@@ -80,6 +85,7 @@ export function Workspace({
             documents={corpus.documents}
             projectReadmes={corpus.projectReadmes}
             readStats={stats.readStats}
+            authoring={controller.authoring}
             onAcceptedContentOpen={stats.recordAcceptedOpen}
             authentication={authentication.controller}
             promptIdentity={authenticationPromptIdentity(authentication.state)}

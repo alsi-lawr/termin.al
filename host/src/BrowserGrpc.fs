@@ -90,6 +90,17 @@ module private BrowserGrpcWire =
         response.Source <- value |> ContentDomain.ContentDocument.source |> source
         response.Cache <- value |> ContentDomain.ContentDocument.cache |> cache
 
+        match value |> ContentDomain.ContentDocument.baseRevisions with
+        | None -> ()
+        | Some(headSha, blobSha) ->
+            let source = value |> ContentDomain.ContentDocument.source
+            response.Base <- DocumentBase()
+            response.Base.DefaultBranch <- source.Revision |> ContentDomain.ContentRevision.value
+            response.Base.HeadSha <- headSha |> ContentDomain.ContentRevision.value
+            response.Base.BlobSha <- blobSha |> ContentDomain.ContentRevision.value
+            response.Base.RepositoryPath <- source.Path |> ContentDomain.RepositoryPath.value
+            response.Base.VirtualPath <- value |> ContentDomain.ContentDocument.path |> ContentDomain.VirtualPath.value
+
         match value |> ContentDomain.ContentDocument.metadata with
         | ContentDomain.ContentDocumentMetadata.Page -> response.Kind <- DocumentKind.Page
         | ContentDomain.ContentDocumentMetadata.Publication metadata ->
@@ -231,6 +242,16 @@ type SessionGrpcService() =
 
 type ContentGrpcService(contentClient: ContentClient) =
     inherit ContentApi.ContentApiBase()
+
+    override _.ReadRepositoryBase(_: EmptyRequest, context: ServerCallContext) =
+        task {
+            match! contentClient.GetRepositoryBase context.CancellationToken with
+            | Error problem -> return raise (BrowserGrpcWire.contentError problem)
+            | Ok value ->
+                return RepositoryBaseResponse(
+                    DefaultBranch = ContentDomain.ContentRevision.value value.DefaultBranch,
+                    HeadSha = ContentDomain.ContentRevision.value value.Head)
+        }
 
     override _.ReadCatalog(_: EmptyRequest, context: ServerCallContext) =
         task {

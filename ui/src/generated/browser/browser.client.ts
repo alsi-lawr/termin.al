@@ -13,6 +13,7 @@ import type { ProjectsResponse } from "./browser";
 import type { DocumentResponse } from "./browser";
 import type { DocumentRequest } from "./browser";
 import type { CatalogResponse } from "./browser";
+import type { RepositoryBaseResponse } from "./browser";
 import type { RpcTransport } from "@protobuf-ts/runtime-rpc";
 import type { ServiceInfo } from "@protobuf-ts/runtime-rpc";
 import { SessionApi } from "./browser";
@@ -65,6 +66,10 @@ export class SessionApiClient implements ISessionApiClient, ServiceInfo {
  */
 export interface IContentApiClient {
     /**
+     * @generated from protobuf rpc: ReadRepositoryBase
+     */
+    readRepositoryBase(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, RepositoryBaseResponse>;
+    /**
      * @generated from protobuf rpc: ReadCatalog
      */
     readCatalog(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, CatalogResponse>;
@@ -97,38 +102,45 @@ export class ContentApiClient implements IContentApiClient, ServiceInfo {
         this._transport = transport;
     }
     /**
+     * @generated from protobuf rpc: ReadRepositoryBase
+     */
+    readRepositoryBase(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, RepositoryBaseResponse> {
+        const method = this.methods[0], opt = this._transport.mergeOptions(options);
+        return stackIntercept<EmptyRequest, RepositoryBaseResponse>("unary", this._transport, method, opt, input);
+    }
+    /**
      * @generated from protobuf rpc: ReadCatalog
      */
     readCatalog(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, CatalogResponse> {
-        const method = this.methods[0], opt = this._transport.mergeOptions(options);
+        const method = this.methods[1], opt = this._transport.mergeOptions(options);
         return stackIntercept<EmptyRequest, CatalogResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ReadDocument
      */
     readDocument(input: DocumentRequest, options?: RpcOptions): UnaryCall<DocumentRequest, DocumentResponse> {
-        const method = this.methods[1], opt = this._transport.mergeOptions(options);
+        const method = this.methods[2], opt = this._transport.mergeOptions(options);
         return stackIntercept<DocumentRequest, DocumentResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ReadProjects
      */
     readProjects(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, ProjectsResponse> {
-        const method = this.methods[2], opt = this._transport.mergeOptions(options);
+        const method = this.methods[3], opt = this._transport.mergeOptions(options);
         return stackIntercept<EmptyRequest, ProjectsResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ReadNow
      */
     readNow(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, NowResponse> {
-        const method = this.methods[3], opt = this._transport.mergeOptions(options);
+        const method = this.methods[4], opt = this._transport.mergeOptions(options);
         return stackIntercept<EmptyRequest, NowResponse>("unary", this._transport, method, opt, input);
     }
     /**
      * @generated from protobuf rpc: ReadChangelog
      */
     readChangelog(input: EmptyRequest, options?: RpcOptions): UnaryCall<EmptyRequest, ChangelogResponse> {
-        const method = this.methods[4], opt = this._transport.mergeOptions(options);
+        const method = this.methods[5], opt = this._transport.mergeOptions(options);
         return stackIntercept<EmptyRequest, ChangelogResponse>("unary", this._transport, method, opt, input);
     }
 }

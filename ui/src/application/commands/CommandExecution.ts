@@ -554,6 +554,7 @@ function reachesInteractionBoundary(outcome: CommandOutcome): boolean {
   return outcome.kind === "succeeded" && outcome.effects.some(
     (effect) =>
       effect.kind === "open-viewer" ||
+      effect.kind === "open-authoring-editor" ||
       effect.kind === "request-secret-prompt",
   );
 }

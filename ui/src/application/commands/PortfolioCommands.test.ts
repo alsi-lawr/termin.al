@@ -476,7 +476,8 @@ test("bounds recursive publication loading at the existing traversal limit", asy
           title: handle,
           summary: `Summary for ${handle}`,
           updatedAt: createVirtualTimestamp(timestamp),
-          tags: [],
+              tags: [],
+              repositorySource: { kind: "public-only" },
         },
       });
     },
@@ -680,13 +681,13 @@ test("keeps theme changes usable when browser persistence fails", async () => {
   }]);
 });
 
-test("provides discoverable public navigation and the remaining unavailable editor diagnostic", async () => {
+test("provides public navigation and rejects authoring in the demo registry", async () => {
   const registry = createRegistry();
   const about = succeeded(await execute("about", registry));
   const projects = succeeded(await execute("projects", registry));
   const invalidOpen = await execute("open --split diagonal about.md", registry);
   const stats = succeeded(await execute("stats", registry));
-  const unavailable = await execute("edit about.md", registry);
+  const demoRejected = await execute("edit about.md", registry);
 
   const aboutEffect = about.effects[0];
   const projectsEffect = projects.effects[0];
@@ -703,7 +704,7 @@ test("provides discoverable public navigation and the remaining unavailable edit
   assert.equal(projectsEffect.viewer.kind, "collection");
   assert.equal(invalidOpen.kind, "failed");
   assert.equal(stats.outputs[0]?.kind, "text");
-  assert.equal(unavailable.kind, "failed");
+  assert.equal(demoRejected.kind, "failed");
 });
 
 test("reads changing statistics through the stable command dependency", async () => {

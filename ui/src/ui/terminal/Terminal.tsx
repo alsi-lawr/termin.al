@@ -62,6 +62,7 @@ import { generatedManpageCorpus } from "../../content/ManpageCorpusVite.ts";
 import type { VimSessionBinding } from "../workspace/VimSessionState.ts";
 import type { AuthenticationController } from "../../auth/Authentication.ts";
 import { createAuthenticationCommandDefinitions } from "../../application/commands/AuthenticationCommands.ts";
+import type { AuthoringService } from "../../authoring/AuthoringService.ts";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
@@ -94,6 +95,7 @@ type TerminalProps = Readonly<{
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
+  authoring: AuthoringService | undefined;
   onAcceptedContentOpen: (contentId: ContentId) => void;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
   authentication: AuthenticationController;
@@ -124,6 +126,7 @@ export function Terminal({
   documents,
   projectReadmes,
   readStats,
+  authoring,
   onAcceptedContentOpen,
   secretPromptSubmissionHandler,
   authentication,
@@ -163,6 +166,7 @@ export function Terminal({
           projectReadmes,
           themes: themeController,
           readStats,
+          authoring,
         }),
         ...createAuthenticationCommandDefinitions(authentication),
         createPaneCommandDefinition(paneId, paneCommandHandler),

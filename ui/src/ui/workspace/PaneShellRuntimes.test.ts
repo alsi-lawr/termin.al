@@ -44,6 +44,7 @@ import {
   readCommandHistory,
   writeCommandHistory,
 } from "./CommandHistoryStorage.ts";
+import { minimalPublicationSource, validatePublicationSource, type PublicationDraft } from "../../authoring/PublicationDraft.ts";
 
 function applied(result: PaneOperationResult): PaneWorkspace {
   if (result.kind !== "applied") {
@@ -562,6 +563,60 @@ function viewerCommandOutcome(
     ],
   };
 }
+
+function authoringDraft(): PublicationDraft {
+  const source = minimalPublicationSource("example");
+  const parsed = validatePublicationSource(source);
+  if (parsed.kind === "invalid") assert.fail(parsed.message);
+  return {
+    schemaVersion: 1,
+    recordRevision: 1,
+    kind: "note",
+    repositoryPath: "notes/runtime/example.md",
+    virtualPath: "~/notes/runtime/example.md",
+    frontMatter: parsed.value,
+    source,
+    base: { kind: "new", defaultBranch: "main", headSha: "a".repeat(40) },
+    dirty: true,
+    unpublished: true,
+    stagedAssets: [],
+  };
+}
+
+test("opens one authoring editor per repository path and focuses it on repeat", () => {
+  let workspace = createPaneWorkspace({ initialContent: createShellPaneContent() });
+  const shellId = workspace.activePaneId;
+  let runtimes = createPaneShellRuntimes({ workspace, currentDirectory: virtualHomeDirectory(), commandHistory: [] });
+  const settleEdit = (): void => {
+    runtimes = insert(runtimes, shellId, "edit notes/runtime/example.md");
+    runtimes = reducePaneShellRuntime({
+      runtimes,
+      paneId: shellId,
+      action: { kind: "prompt.submit", submission: { kind: "command", persistence: { kind: "persistent" } } },
+    });
+    const running = stateFor(runtimes, shellId);
+    if (running.lifecycle.kind !== "running") assert.fail("Expected edit to be running.");
+    const applied = applyPaneShellAction({
+      workspace,
+      runtimes,
+      paneId: shellId,
+      action: {
+        kind: "command.settled",
+        commandId: running.lifecycle.command.id,
+        outcome: { kind: "succeeded", events: [{ kind: "effect", effect: { kind: "open-authoring-editor", draft: authoringDraft() } }] },
+      },
+    });
+    workspace = applied.workspace;
+    runtimes = applied.runtimes;
+  };
+  settleEdit();
+  assert.equal(paneLeaves(workspace.tree).filter((pane) => pane.content.kind === "authoring-editor").length, 1);
+  workspace = applied(applyPaneOperation(workspace, { kind: "focus-pane", paneId: shellId }));
+  settleEdit();
+  const editors = paneLeaves(workspace.tree).filter((pane) => pane.content.kind === "authoring-editor");
+  assert.equal(editors.length, 1);
+  assert.equal(workspace.activePaneId, editors[0]?.id);
+});
 
 function contentId(value: string): ContentId {
   const validation = ContentId.tryCreate(value, "pane runtime test content");

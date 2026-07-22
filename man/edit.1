@@ -1,30 +1,28 @@
 .\" termin.al-name: edit
 .\" termin.al-usage: edit <path>
-.\" termin.al-summary: Edit published content.
+.\" termin.al-summary: Open or recover a publication draft.
 .TH EDIT 1 "" "termin.al" "termin.al Manual"
 .ftr B R
 .ftr I R
 .ftr BI R
 .SH NAME
-edit \- Edit published content.
+edit \- Open or recover a publication draft.
 .SH SYNOPSIS
 .nf
 edit <path>
 .fi
 .SH DESCRIPTION
-Identifies the published-content editing command name, but editing is unavailable in the current browser demo. No path is resolved and no editor or viewer is opened.
+Opens an owner-only editor for a traversal-free recursive blog or notes Markdown path. Existing publications are reconstructed with strict key/value front matter; a missing path opens a minimal slug-derived document. A saved IndexedDB draft is recovered before upstream content is read, and an already-open path is focused instead of duplicated.
+.SH EDITOR COMMANDS
+:w validates and saves the current source using optimistic draft revision control. :q closes only when the buffer matches the last saved source. :wq saves and closes. :q! discards only the current stored revision and refuses to remove a newer cross-tab revision. :preview opens or updates one uncounted Markdown split without publishing.
 .SH FAILURES
-Every invocation returns the stable command-rejected diagnostic:
-.PP
-Published-content editing is unavailable until authoring work is implemented.
-.PP
-The same outcome is returned for a missing, valid or extra path argument.
+Authoring requires the live owner session and browser IndexedDB. Demo mode rejects every invocation. Invalid roots, traversal, noncanonical slugs, invalid front matter, unavailable repository bases and stale saves are rejected without mutating repository content or discarding the buffer.
 .SH NOTES
-No virtual document, browser storage or pane state is modified. The public corpus is read-only; this manual does not promise an authoring workflow or compatibility surface.
+Drafts contain publication source, base branch/head/blob references, revision state and staged-asset metadata. Authentication, session and CV values are never stored. Publication and repository writes are outside this command.
 .SH EXAMPLES
 .nf
-$ edit notes/sample-note.md
-$ edit ~/about.md
+$ edit notes/runtime/files/sample-note.md
+$ edit ~/blog/engineering/interfaces/example.md
 .fi
 .SH SEE ALSO
 open(1), less(1), login(1)

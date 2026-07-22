@@ -39,6 +39,7 @@ import type {
   CommandGroup,
   CommandInvocation,
 } from "./CommandRegistry.ts";
+import type { AuthoringService } from "../../authoring/AuthoringService.ts";
 
 export type CreatePortfolioCommandDefinitionsOptions = Readonly<{
   filesystem: VirtualFilesystem;
@@ -46,6 +47,7 @@ export type CreatePortfolioCommandDefinitionsOptions = Readonly<{
   projectReadmes: ReadonlyArray<ProjectReadme>;
   themes: ThemeController;
   readStats: PortfolioStatsReader;
+  authoring?: AuthoringService;
 }>;
 
 export type PortfolioStatsReader = () => string;
@@ -681,24 +683,25 @@ function createOpenCommand(
   };
 }
 
-function createUnavailableCommand(
-  name: "edit",
-  summary: string,
-  usage: string,
-  example: string,
-  message: string,
-): CommandDefinition {
+function createEditCommand(authoring: AuthoringService | undefined): CommandDefinition {
   return {
     metadata: {
       group: "application",
-      name,
+      name: "edit",
       aliases: [],
-      summary,
-      usage,
-      examples: [example],
+      summary: "Open or recover a publication draft.",
+      usage: "edit <path>",
+      examples: ["edit notes/sample-note.md"],
     },
     pipeline: "effects",
-    execute: async () => rejectedOutcome(name, message),
+    execute: async (invocation, context) => {
+      if (invocation.arguments.length !== 1) return rejectedOutcome("edit", "Usage: edit <path>");
+      if (authoring === undefined) return rejectedOutcome("edit", "Authoring is unavailable in demo mode.");
+      const opened = await authoring.open(invocation.arguments[0] ?? "", context.currentDirectory, context.signal);
+      if (opened.kind === "cancelled") return cancelledOutcome();
+      if (opened.kind === "rejected") return rejectedOutcome("edit", opened.message);
+      return succeededOutcome([], [{ kind: "open-authoring-editor", draft: opened.draft }]);
+    },
   };
 }
 
@@ -910,19 +913,14 @@ export function createPortfolioCommandDefinitions({
   projectReadmes,
   themes,
   readStats,
+  authoring,
 }: CreatePortfolioCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   return [
     createHelpCommand(),
     createOpenCommand(filesystem, documents, projectReadmes),
     createThemeCommand(themes),
     createStatsCommand(readStats),
-    createUnavailableCommand(
-      "edit",
-      "Edit published content.",
-      "edit <path>",
-      "edit notes/sample-note.md",
-      "Published-content editing is unavailable until authoring work is implemented.",
-    ),
+    createEditCommand(authoring),
     createNavigationCommand("about", "~/about.md", filesystem, documents, projectReadmes),
     createNavigationCommand("skills", "~/skills.md", filesystem, documents, projectReadmes),
     createNavigationCommand("tools", "~/tools.md", filesystem, documents, projectReadmes),

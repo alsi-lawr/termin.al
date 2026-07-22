@@ -90,6 +90,7 @@ function createDemoDocumentSupplier(
           summary: document.summary,
           updatedAt: createVirtualTimestamp(document.updatedAt),
           tags: document.tags,
+          repositorySource: { kind: "public-only" },
         },
       });
     },
@@ -322,4 +323,5 @@ export const demoContentCorpus: ContentCorpus = {
   filesystem: createVirtualFilesystem(catalog),
   documents: createDemoDocumentSupplier(documents),
   projectReadmes,
+  repositoryBase: { kind: "unavailable" },
 };

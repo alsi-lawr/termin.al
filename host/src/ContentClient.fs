@@ -4,6 +4,7 @@ open System.Threading
 open System.Threading.Tasks
 
 type ContentClient =
+    abstract GetRepositoryBase: CancellationToken -> Task<Result<ContentDomain.RepositoryBase, ContentDomain.Problem>>
     abstract GetCatalog: CancellationToken -> Task<Result<ContentDomain.Catalog, ContentDomain.Problem>>
 
     abstract GetDocument:
@@ -18,6 +19,8 @@ type ContentClient =
 module ContentClient =
     let configurationInvalid () : ContentClient =
         { new ContentClient with
+            member _.GetRepositoryBase _ =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.ConfigurationInvalid "GitHub content configuration is required."))
             member _.GetCatalog _ =
                 Task.FromResult(
                     Error(

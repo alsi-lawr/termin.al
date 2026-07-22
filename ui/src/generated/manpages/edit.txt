@@ -1,32 +1,40 @@
 EDIT(1)                         termin.al Manual                         EDIT(1)
 
 NAME
-     edit - Edit published content.
+     edit - Open or recover a publication draft.
 
 SYNOPSIS
      edit <path>
 
 DESCRIPTION
-     Identifies  the  published-content editing command name, but editing is un‐
-     available in the current browser demo. No path is resolved and no editor or
-     viewer is opened.
+     Opens  an  owner-only  editor  for a traversal-free recursive blog or notes
+     Markdown  path.  Existing  publications  are  reconstructed   with   strict
+     key/value  front  matter; a missing path opens a minimal slug-derived docu‐
+     ment. A saved IndexedDB draft is recovered before upstream content is read,
+     and an already-open path is focused instead of duplicated.
+
+EDITOR COMMANDS
+     :w validates and saves the current source using optimistic  draft  revision
+     control.  :q closes only when the buffer matches the last saved source. :wq
+     saves and closes. :q! discards only the current stored revision and refuses
+     to remove a newer cross-tab revision. :preview opens  or  updates  one  un‐
+     counted Markdown split without publishing.
 
 FAILURES
-     Every invocation returns the stable command-rejected diagnostic:
-
-     Published-content editing is unavailable until  authoring  work  is  imple‐
-     mented.
-
-     The same outcome is returned for a missing, valid or extra path argument.
+     Authoring  requires the live owner session and browser IndexedDB. Demo mode
+     rejects every invocation. Invalid roots, traversal, noncanonical slugs, in‐
+     valid front matter, unavailable repository bases and stale  saves  are  re‐
+     jected without mutating repository content or discarding the buffer.
 
 NOTES
-     No  virtual document, browser storage or pane state is modified. The public
-     corpus is read-only; this manual does not promise an authoring workflow  or
-     compatibility surface.
+     Drafts  contain publication source, base branch/head/blob references, revi‐
+     sion state and staged-asset metadata. Authentication, session and CV values
+     are never stored. Publication and repository writes are outside  this  com‐
+     mand.
 
 EXAMPLES
-     $ edit notes/sample-note.md
-     $ edit ~/about.md
+     $ edit notes/runtime/files/sample-note.md
+     $ edit ~/blog/engineering/interfaces/example.md
 
 SEE ALSO
      open(1), less(1), login(1)

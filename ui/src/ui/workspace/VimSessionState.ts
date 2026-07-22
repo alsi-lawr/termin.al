@@ -142,6 +142,10 @@ export function vimCommandEffectMessage(
       return { kind: "message", message: { text: "Quit requested" } };
     case "force-quit":
       return { kind: "message", message: { text: "Force quit requested" } };
+    case "write-quit":
+      return { kind: "message", message: { text: "Write and quit requested" } };
+    case "preview":
+      return { kind: "message", message: { text: "Preview requested" } };
     case "unrecognized-command":
       return { kind: "message", message: { text: "Unknown command" } };
   }
@@ -220,6 +224,8 @@ export function vimSessionListing(
     case "write":
     case "quit":
     case "force-quit":
+    case "write-quit":
+    case "preview":
     case "unrecognized-command":
       return emptyVimSessionListing;
   }

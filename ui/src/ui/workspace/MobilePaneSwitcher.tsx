@@ -13,8 +13,10 @@ function paneLabel(pane: Pane, number: number): string {
     case "shell":
       return "Pane " + number + ": shell";
     case "viewer":
+    case "authoring-preview":
       return "Pane " + number + ": " + viewerTitle(pane.content.viewer) + " viewer";
     case "editor":
+    case "authoring-editor":
       return "Pane " + number + ": " + pane.content.title + " editor";
   }
 }

@@ -26,6 +26,7 @@ import {
   vimBufferText,
   vimCommandPreview,
   type VimBuffer,
+  type VimCommandEffect,
 } from "../../domain/vim/VimBuffer.ts";
 import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
 import { vimLineStartOffset } from "../../domain/vim/VimMotion.ts";
@@ -80,6 +81,8 @@ type VimEditorPaneProps = Readonly<{
   isActive: boolean;
   focusVersion: number;
   onBufferChange: (buffer: VimBuffer) => void;
+  onCommandEffect?: (effect: VimCommandEffect, buffer: VimBuffer) => void;
+  externalMessage?: string;
   onActivate: () => void;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
@@ -168,6 +171,8 @@ export function VimEditorPane({
   isActive,
   focusVersion,
   onBufferChange,
+  onCommandEffect,
+  externalMessage,
   onActivate,
   onPaneKeyInput,
   mobileCtrlPressed,
@@ -301,6 +306,7 @@ export function VimEditorPane({
       setListing(vimSessionListing(nextSession, next.commandEffect));
       vimSession.onStateChange(nextSession);
       onBufferChange(next);
+      if (next.commandEffect.kind !== "none") onCommandEffect?.(next.commandEffect, next);
       return;
     }
 
@@ -621,6 +627,9 @@ export function VimEditorPane({
           <div className="mt-2 text-text-muted" role="status" aria-live="polite">
             {bufferStatus.message.text}
           </div>
+        )}
+        {externalMessage === undefined ? null : (
+          <div className="mt-2 text-text-muted" role="status" aria-live="polite">{externalMessage}</div>
         )}
       </div>
       <MobilePaneControls

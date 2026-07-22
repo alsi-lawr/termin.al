@@ -227,6 +227,16 @@ export type VirtualDocumentClassification =
       summary: string;
       updatedAt: VirtualTimestamp;
       tags: ReadonlyArray<string>;
+      repositorySource:
+        | Readonly<{ kind: "public-only" }>
+        | Readonly<{
+            kind: "authoring-base";
+            repositoryPath: string;
+            virtualPath: string;
+            defaultBranch: string;
+            headSha: string;
+            blobSha: string;
+          }>;
     }>;
 
 export type VirtualDocumentReadResult =

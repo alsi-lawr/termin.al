@@ -29,6 +29,7 @@ import type {
   ViewerContent,
   ViewerOpenDisposition,
 } from "../../content/ViewerContent.ts";
+import type { PublicationDraft } from "../../authoring/PublicationDraft.ts";
 
 declare const shellIdBrand: unique symbol;
 declare const shellSessionIdBrand: unique symbol;
@@ -153,6 +154,10 @@ export type CommandEffect =
       kind: "open-viewer";
       viewer: ViewerContent;
       disposition: ViewerOpenDisposition;
+    }>
+  | Readonly<{
+      kind: "open-authoring-editor";
+      draft: PublicationDraft;
     }>
   | Readonly<{
       kind: "request-secret-prompt";

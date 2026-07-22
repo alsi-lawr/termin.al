@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
+import type { ApplicationMode } from "../../ApplicationComposition.ts";
+import type { AuthenticationController } from "../../auth/Authentication.ts";
+import { AuthoringService } from "../../authoring/AuthoringService.ts";
+import { IndexedDbDraftStore } from "../../authoring/DraftStore.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
 import {
   isCvViewerContent,
@@ -112,6 +116,7 @@ export type PaneWorkspaceController = Readonly<{
     disposition: ViewerOpenDisposition,
   ) => void;
   dropCvContent: () => void;
+  authoring: AuthoringService | undefined;
 }>;
 function browserCommandHistoryStorage(): CommandHistoryStorageBackend | undefined {
   try {
@@ -141,8 +146,18 @@ function clearsCommandHistory(action: ShellAction): boolean {
 export function usePaneWorkspace(
   corpus: ContentCorpus,
   onAcceptedContentOpen: (contentId: ContentId) => void,
+  applicationMode: ApplicationMode,
+  authentication: AuthenticationController,
 ): PaneWorkspaceController {
   const currentDirectory = corpus.filesystem.root.path;
+  const [authoring] = useState<AuthoringService | undefined>(() => {
+    if (applicationMode === "demo") return undefined;
+    try {
+      return new AuthoringService(corpus, authentication, new IndexedDbDraftStore(window.indexedDB));
+    } catch {
+      return undefined;
+    }
+  });
   const [filesystemStorage] = useState<VirtualFilesystemStorageBackend | undefined>(
     browserVirtualFilesystemStorage,
   );
@@ -543,5 +558,6 @@ export function usePaneWorkspace(
     dismissClose,
     openProtectedViewer,
     dropCvContent,
+    authoring,
   };
 }

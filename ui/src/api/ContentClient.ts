@@ -21,6 +21,7 @@ import {
   type NowResponse,
   type Project as GrpcProject,
   type ProjectsResponse,
+  type RepositoryBaseResponse,
   type Release as GrpcRelease,
 } from "../generated/browser/browser.ts";
 import { ContentApiClient } from "../generated/browser/browser.client.ts";
@@ -43,6 +44,12 @@ export type ContentCorpus = Readonly<{
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
+  repositoryBase:
+    | Readonly<{
+        kind: "available";
+        read: (signal: AbortSignal) => Promise<ContentEndpointResult<Readonly<{ defaultBranch: string; headSha: string }>>>;
+      }>
+    | Readonly<{ kind: "unavailable" }>;
 }>;
 
 export type ContentCorpusLoadResult =
@@ -125,6 +132,13 @@ type ContentDocument =
       summary: string;
       updatedAt: string;
       tags: ReadonlyArray<string>;
+      base: Readonly<{
+        defaultBranch: string;
+        headSha: string;
+        blobSha: string;
+        repositoryPath: string;
+        virtualPath: string;
+      }>;
     }>;
 
 type DerivedDocument = Readonly<{
@@ -135,6 +149,10 @@ type DerivedDocument = Readonly<{
 }>;
 
 type ContentRpcClient = Readonly<{
+  readRepositoryBase: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<RepositoryBaseResponse> }>;
   readCatalog: (
     request: Readonly<Record<string, never>>,
     options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
@@ -257,6 +275,7 @@ function mapDocument(value: DocumentResponse): ContentDocument {
         summary: value.summary,
         updatedAt: value.updatedAt,
         tags: value.tags,
+        base: value.base!,
       };
     case DocumentKind.UNSPECIFIED:
     default:
@@ -446,6 +465,17 @@ export class GrpcContentClient implements ContentClient {
     };
   }
 
+  private async repositoryBase(signal: AbortSignal): Promise<ContentEndpointResult<Readonly<{ defaultBranch: string; headSha: string }>>> {
+    try {
+      const response = await this.client.readRepositoryBase({}, { meta: this.context.metadata(), abort: signal }).response;
+      return { kind: "available", value: response };
+    } catch (error: unknown) {
+      return signal.aborted || isAbortError(error)
+        ? { kind: "cancelled" }
+        : { kind: "failed", message: "The content API could not be reached." };
+    }
+  }
+
   private async projects(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentProjects>> {
@@ -581,7 +611,12 @@ export class GrpcContentClient implements ContentClient {
     const virtual = virtualCatalog(catalog.value, derived, projectReadmes);
     const filesystem = createVirtualFilesystem(virtual.catalog);
     const documents = this.documentSupplier(virtual.documentsByHandle);
-    const corpus = { filesystem, documents, projectReadmes };
+    const corpus = {
+      filesystem,
+      documents,
+      projectReadmes,
+      repositoryBase: { kind: "available", read: (readSignal: AbortSignal) => this.repositoryBase(readSignal) },
+    } as const;
 
     if (virtual.catalog.entries.length === 1) {
       return { kind: "empty" };
@@ -643,6 +678,14 @@ export class GrpcContentClient implements ContentClient {
                 summary: result.value.summary,
                 updatedAt: createVirtualTimestamp(result.value.updatedAt),
                 tags: result.value.tags,
+                repositorySource: {
+                  kind: "authoring-base",
+                  repositoryPath: result.value.base.repositoryPath,
+                  virtualPath: result.value.base.virtualPath,
+                  defaultBranch: result.value.base.defaultBranch,
+                  headSha: result.value.base.headSha,
+                  blobSha: result.value.base.blobSha,
+                },
               },
             };
           }

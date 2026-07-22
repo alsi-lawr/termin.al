@@ -92,6 +92,7 @@ module StatsTests =
             |> requireValid
 
         { new ContentClient with
+            member _.GetRepositoryBase _ = Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
             member _.GetProjects _ = Task.FromResult(Ok projects)
 

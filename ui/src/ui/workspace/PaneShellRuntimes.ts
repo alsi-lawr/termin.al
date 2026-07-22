@@ -19,6 +19,7 @@ import {
 import {
   applyPaneOperation,
   createViewerPaneContent,
+  createAuthoringEditorPaneContent,
   paneLeaves,
   type PaneId,
   type PaneWorkspace,
@@ -443,6 +444,26 @@ export function applyPaneShellAction({
     }
 
     const effect = event.effect;
+
+    if (effect.kind === "open-authoring-editor") {
+      const existing = paneLeaves(nextWorkspace.tree).find(
+        (candidate) => candidate.content.kind === "authoring-editor" &&
+          candidate.content.draft.repositoryPath === effect.draft.repositoryPath,
+      );
+      if (existing !== undefined) {
+        const focused = applyPaneOperation(nextWorkspace, { kind: "focus-pane", paneId: existing.id });
+        if (focused.kind === "applied") nextWorkspace = focused.workspace;
+        continue;
+      }
+      const split = applyPaneOperation(nextWorkspace, {
+        kind: "split",
+        paneId,
+        orientation: "vertical",
+        content: createAuthoringEditorPaneContent(effect.draft),
+      });
+      if (split.kind === "applied") nextWorkspace = split.workspace;
+      continue;
+    }
 
     if (effect.kind === "open-theme-selector") {
       nextRuntimes = showPaneThemeSelector(
