@@ -70,7 +70,7 @@ test("parses counts once and preserves the desired column for vertical motions",
   assert.deepEqual(restored.cursor, { line: 2, column: 4 });
   assert.deepEqual(counted.cursor, { line: 3, column: 2 });
   assert.deepEqual(boundary.cursor, counted.cursor);
-  assert.deepEqual(boundary.status, { kind: "invalid-input", source: "j" });
+  assert.deepEqual(boundary.status, { kind: "none" });
 
   const firstNonblank = press(start, "+");
   const resetGoal = press(press(positioned, "+"), "-");

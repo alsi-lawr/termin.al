@@ -1075,6 +1075,15 @@ function handleOperator(buffer: VimBuffer, operator: VimOperator): VimBuffer {
   );
 }
 
+function isBoundaryTolerantVerticalMotion(request: VimMotionRequest): boolean {
+  if (request.kind !== "motion") return false;
+
+  return request.motion === "line-next" ||
+    request.motion === "line-previous" ||
+    request.motion === "line-next-first-nonblank" ||
+    request.motion === "line-previous-first-nonblank";
+}
+
 function executeMotion(
   buffer: VimBuffer,
   request: VimMotionRequest,
@@ -1091,6 +1100,13 @@ function executeMotion(
   });
 
   if (resolution.kind === "invalid") {
+    if (
+      context.kind !== "operator" &&
+      isBoundaryTolerantVerticalMotion(request)
+    ) {
+      return resetPending(buffer);
+    }
+
     return invalidInput(buffer, source);
   }
 
