@@ -373,11 +373,11 @@ async function exerciseConnectedCommandPaste(session: DevToolsSession): Promise<
     await waitForEditorPrompt(session, "/", "A paste keydown changed the search prompt.");
   }
 
-  if (await dispatchEditorKey(session, "b", true, false)) {
-    throw new Error("The rendered editor did not consume the pane prefix.");
-  }
   if (await dispatchEditorKey(session, "c", true, false)) {
     throw new Error("The rendered editor did not consume an unrelated modified control.");
+  }
+  if (await dispatchEditorKey(session, "b", true, false)) {
+    throw new Error("The rendered editor did not consume the pane prefix.");
   }
   await waitForEditorPrompt(session, "/", "Consumed controls changed the search prompt.");
 }
@@ -508,9 +508,14 @@ try {
       const url = stringProperty(property(parameters, "request"), "url");
       if (requestId === undefined || url === undefined) return;
       const sameOrigin = new URL(url).origin === baseUrl.origin;
-      void session?.command(sameOrigin ? "Fetch.continueRequest" : "Fetch.failRequest", sameOrigin
-        ? { requestId }
-        : { requestId, errorReason: "BlockedByClient" });
+      const pausedRequest = session?.command(
+        sameOrigin ? "Fetch.continueRequest" : "Fetch.failRequest",
+        sameOrigin ? { requestId } : { requestId, errorReason: "BlockedByClient" },
+      );
+      void pausedRequest?.catch((error: unknown) => {
+        if (error instanceof Error && error.message === "Invalid InterceptionId.") return;
+        throw error;
+      });
     }
   });
   await session.command("Network.enable");
