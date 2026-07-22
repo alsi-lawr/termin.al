@@ -769,6 +769,40 @@ test("substitutes current lines and whole buffers through one undoable Vim edit"
   assert.equal(isVimBufferDirty(undone), false);
 });
 
+test("highlights substitution matches while the command is still being written", () => {
+  const start = createVimBuffer({
+    text: "cat cat\ncat",
+    mode: VimMode.Normal,
+  });
+  const currentPattern = appendVimCommandInput(press(start, ":"), "s/c");
+  const wholePattern = appendVimCommandInput(press(start, ":"), "%s/c");
+  const currentReplacement = appendVimCommandInput(
+    press(start, ":"),
+    "s/c/replacement",
+  );
+  const invalidPattern = appendVimCommandInput(press(start, ":"), "s/[");
+
+  assert.deepEqual(vimCommandPreview(currentPattern), {
+    source: "cat cat\ncat",
+    ranges: [{ start: 0, end: 1, role: "matched" }],
+  });
+  assert.deepEqual(vimCommandPreview(wholePattern), {
+    source: "cat cat\ncat",
+    ranges: [
+      { start: 0, end: 1, role: "matched" },
+      { start: 8, end: 9, role: "matched" },
+    ],
+  });
+  assert.deepEqual(vimCommandPreview(currentReplacement), {
+    source: "cat cat\ncat",
+    ranges: [{ start: 0, end: 1, role: "matched" }],
+  });
+  assert.deepEqual(vimCommandPreview(invalidPattern), {
+    source: "cat cat\ncat",
+    ranges: [],
+  });
+});
+
 test("previews complete substitutions in place without editing until submission", () => {
   const start = press(
     createVimBuffer({ text: "😀 cat cat\nCAT cat\nlast", mode: VimMode.Normal }),
@@ -821,7 +855,10 @@ test("previews complete substitutions in place without editing until submission"
   });
   assert.equal(vimCommandPreview(unchanged).ranges.every((range) => range.role === "matched"), true);
   assert.equal(vimCommandPreview(shrunk).source, "😀 x x\nx x\nlast");
-  assert.deepEqual(vimCommandPreview(incomplete), { source: vimBufferText(start), ranges: [] });
+  assert.deepEqual(vimCommandPreview(incomplete), {
+    source: vimBufferText(start),
+    ranges: [{ start: 15, end: 18, role: "matched" }],
+  });
   assert.deepEqual(vimCommandPreview(invalid), { source: vimBufferText(start), ranges: [] });
   assert.deepEqual(vimCommandPreview(readonly), { source: "cat", ranges: [] });
   assert.deepEqual(vimCommandPreview(zeroWidth), {

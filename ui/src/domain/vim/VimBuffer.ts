@@ -2913,6 +2913,64 @@ type VimSubstitutionCommandParseResult =
   | Readonly<{ kind: "invalid"; message: string }>
   | Readonly<{ kind: "parsed"; command: VimSubstitutionCommand }>;
 
+function nextSubstitutionDelimiter(
+  source: string,
+  startOffset: number,
+  delimiter: string,
+): number | undefined {
+  for (let offset = startOffset; offset < source.length; offset += 1) {
+    const character = source[offset];
+    const next = source[offset + 1];
+
+    if (character === delimiter) {
+      return offset;
+    }
+
+    if (character === "\\" && (next === delimiter || next === "\\")) {
+      offset += 1;
+    }
+  }
+
+  return undefined;
+}
+
+function substitutionPatternPreviewSource(source: string): string | undefined {
+  if (source.includes("\n") || source.includes("\r")) {
+    return undefined;
+  }
+
+  const substitutionOffset = source.startsWith("%s") ? 1 : 0;
+  const substitution = source.slice(substitutionOffset);
+
+  if (!substitution.startsWith("s")) {
+    return undefined;
+  }
+
+  const delimiter = substitution[1];
+
+  if (delimiter === undefined || delimiter === "\\") {
+    return undefined;
+  }
+
+  const patternEnd = nextSubstitutionDelimiter(substitution, 2, delimiter);
+
+  if (patternEnd === undefined) {
+    return substitution.length > 2
+      ? source + delimiter + "&" + delimiter
+      : undefined;
+  }
+
+  const replacementEnd = nextSubstitutionDelimiter(
+    substitution,
+    patternEnd + 1,
+    delimiter,
+  );
+
+  return replacementEnd === undefined
+    ? source.slice(0, substitutionOffset + patternEnd + 1) + "&" + delimiter
+    : undefined;
+}
+
 function parseVimSubstitutionCommand(
   buffer: VimBuffer,
   source: string,
@@ -2939,6 +2997,22 @@ function parseVimSubstitutionCommand(
           substitution: substitution.substitution,
         },
       };
+}
+
+function parseVimSubstitutionPreviewCommand(
+  buffer: VimBuffer,
+  source: string,
+): VimSubstitutionCommandParseResult {
+  const parsed = parseVimSubstitutionCommand(buffer, source);
+
+  if (parsed.kind === "parsed") {
+    return parsed;
+  }
+
+  const previewSource = substitutionPatternPreviewSource(source);
+  return previewSource === undefined
+    ? parsed
+    : parseVimSubstitutionCommand(buffer, previewSource);
 }
 
 type VimSubstitutionEvaluation = Readonly<{
@@ -3192,7 +3266,7 @@ export function vimCommandPreview(buffer: VimBuffer): VimCommandPreview {
     return { source, ranges: [] };
   }
 
-  const parsed = parseVimSubstitutionCommand(buffer, buffer.mode.input);
+  const parsed = parseVimSubstitutionPreviewCommand(buffer, buffer.mode.input);
 
   if (parsed.kind !== "parsed") {
     return { source, ranges: [] };
