@@ -492,6 +492,19 @@ test("retains undo, redo, paste, and bounded history behavior", () => {
   assert.equal(vimBufferText(pasted), "bcd");
   assert.equal(vimBufferText(undone), "cd");
   assert.equal(vimBufferText(redone), "bcd");
+  assert.equal(undone.mode.kind, "normal");
+  assert.equal(redone.mode.kind, "normal");
+
+  const plainR = press(undone, "r");
+  assert.equal(vimBufferText(plainR), "cd");
+  assert.equal(plainR.redoStack.length, undone.redoStack.length);
+
+  const emptyUndo = press(start, "u");
+  const emptyRedo = pressControl(start, "r");
+  assert.equal(vimBufferText(emptyUndo), "abcd");
+  assert.equal(vimBufferText(emptyRedo), "abcd");
+  assert.equal(emptyUndo.mode.kind, "normal");
+  assert.equal(emptyRedo.mode.kind, "normal");
 
   let edited = createVimBuffer({ text: "x".repeat(101), mode: VimMode.Normal });
 
@@ -888,6 +901,10 @@ test("keyboard mapping exposes finite parser input and accepted control aliases"
     kind: "recognized",
     key: { kind: "motion", motion: "line-start" },
   });
+  assert.deepEqual(normalVimKeyFromKeyboard("Insert", false, false), {
+    kind: "recognized",
+    key: { kind: "insert-key" },
+  });
   assert.deepEqual(normalVimKeyFromKeyboard("n", true, false), {
     kind: "recognized",
     key: { kind: "motion", motion: "line-next" },
@@ -897,6 +914,59 @@ test("keyboard mapping exposes finite parser input and accepted control aliases"
   });
   assert.deepEqual(normalVimKeyFromKeyboard("x", false, true), {
     kind: "unrecognized",
+  });
+});
+
+test("physical Insert enters writable Normal and Visual modes without abandoning prompts", () => {
+  const normal = press(
+    createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal }),
+    "l",
+  );
+  const visualModes = [
+    press(normal, "v"),
+    press(normal, "V"),
+    pressControl(normal, "v"),
+  ];
+  const insert = applyNormalVimKey(normal, mappedKey("Insert"));
+
+  assert.equal(insert.mode.kind, "insert");
+  assert.deepEqual(insert.cursor, normal.cursor);
+  assert.deepEqual(insert.selection, { kind: "none" });
+  assert.equal(vimBufferText(insert), vimBufferText(normal));
+  assert.equal(applyNormalVimKey(insert, mappedKey("Insert")), insert);
+  assert.equal(applyNormalVimKey(insert, mappedKey("Escape")).mode.kind, "normal");
+
+  for (const visual of visualModes) {
+    const entered = applyNormalVimKey(visual, mappedKey("Insert"));
+    assert.equal(entered.mode.kind, "insert");
+    assert.deepEqual(entered.cursor, visual.cursor);
+    assert.deepEqual(entered.selection, { kind: "none" });
+    assert.equal(vimBufferText(entered), vimBufferText(visual));
+  }
+
+  const command = press(normal, ":");
+  const search = press(normal, "/");
+  assert.equal(applyNormalVimKey(command, mappedKey("Insert")), command);
+  assert.equal(applyNormalVimKey(search, mappedKey("Insert")), search);
+
+  const readOnly = createVimBuffer({
+    text: "alpha",
+    mode: VimMode.Normal,
+    capability: VimCapability.ReadOnly,
+  });
+  const rejected = applyNormalVimKey(readOnly, mappedKey("Insert"));
+  const rejectedVisual = applyNormalVimKey(
+    press(readOnly, "v"),
+    mappedKey("Insert"),
+  );
+  assert.equal(rejected.mode.kind, "normal");
+  assert.equal(vimBufferText(rejected), "alpha");
+  assert.deepEqual(rejected.status, { kind: "read-only", source: "Insert" });
+  assert.equal(rejectedVisual.mode.kind, "visual-character");
+  assert.equal(vimBufferText(rejectedVisual), "alpha");
+  assert.deepEqual(rejectedVisual.status, {
+    kind: "read-only",
+    source: "Insert",
   });
 });
 
@@ -1749,8 +1819,12 @@ test("replicates block change and keeps deletion plus insertion in one undo step
   assert.equal(inserted.undoStack.length, 1);
   assert.deepEqual(escaped.cursor, { line: 0, column: 1 });
   assert.equal(vimBufferText(undone), "abcd\nx\nabcdef");
+  assert.deepEqual(undone.cursor, selected.cursor);
   assert.deepEqual(undone.register, { kind: "empty" });
+  assert.equal(undone.mode.kind, "normal");
   assert.equal(vimBufferText(redone), "aZd\nxZ\naZdef");
+  assert.deepEqual(redone.cursor, escaped.cursor);
+  assert.equal(redone.mode.kind, "normal");
 
   const lateColumn = press(
     pressControl(

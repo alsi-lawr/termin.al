@@ -194,6 +194,7 @@ export type VimNormalKey =
   | Readonly<{ kind: "insert-after" }>
   | Readonly<{ kind: "insert-line-start" }>
   | Readonly<{ kind: "insert-line-end" }>
+  | Readonly<{ kind: "insert-key" }>
   | Readonly<{ kind: "escape" }>;
 
 export type VimNormalKeyMatch =
@@ -1366,6 +1367,12 @@ function undo(buffer: VimBuffer): VimBuffer {
   return {
     ...buffer,
     ...previous,
+    ...createTextState(
+      previous.lines,
+      previous.cursor,
+      VimMode.Normal,
+      { kind: "none" },
+    ),
     undoStack: buffer.undoStack.slice(0, -1),
     redoStack: [snapshot(buffer), ...buffer.redoStack].slice(
       0,
@@ -1388,6 +1395,12 @@ function redo(buffer: VimBuffer): VimBuffer {
   return {
     ...buffer,
     ...next,
+    ...createTextState(
+      next.lines,
+      next.cursor,
+      VimMode.Normal,
+      { kind: "none" },
+    ),
     undoStack: [...buffer.undoStack, snapshot(buffer)].slice(
       -vimHistoryCapacity,
     ),
@@ -2458,6 +2471,8 @@ function normalKeyCapabilityClassification(
       return literalCapabilityClassification(buffer, "I");
     case "insert-line-end":
       return literalCapabilityClassification(buffer, "A");
+    case "insert-key":
+      return { kind: "text-mutation", source: "Insert" };
     case "literal":
       return literalCapabilityClassification(buffer, key.value);
     case "motion":
@@ -2771,6 +2786,8 @@ export function applyNormalVimKey(
       return applyLiteral(buffer, "I");
     case "insert-line-end":
       return applyLiteral(buffer, "A");
+    case "insert-key":
+      return enterInsertMode(buffer, buffer.cursor);
     case "literal":
       return applyLiteral(buffer, key.value);
   }
@@ -3141,6 +3158,8 @@ export function normalVimKeyFromKeyboard(
       };
     case "Escape":
       return { kind: "recognized", key: { kind: "escape" } };
+    case "Insert":
+      return { kind: "recognized", key: { kind: "insert-key" } };
     default:
       return Array.from(key).length === 1
         ? { kind: "recognized", key: { kind: "literal", value: key } }

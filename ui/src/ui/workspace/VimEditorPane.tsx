@@ -44,7 +44,10 @@ import {
   type MobilePaneControl,
 } from "./MobilePaneControls";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
-import { vimEditorModeStatus } from "./VimEditorModeStatus.ts";
+import {
+  vimEditorModeStatus,
+  vimEditorStatusLine,
+} from "./VimEditorModeStatus.ts";
 import { VimEditorBlockSelectionMirror } from "./VimEditorBlockSelectionMirror.tsx";
 import { VimEditorHighlightLayer } from "./VimEditorHighlightLayer.tsx";
 
@@ -198,6 +201,7 @@ export function VimEditorPane({
   const [compositionActive, setCompositionActive] = useState(false);
   const modeStatusId = useId();
   const modeStatus = vimEditorModeStatus(buffer);
+  const statusLine = vimEditorStatusLine(buffer, title);
   const commandEffect = commandEffectLabel(buffer);
   const bufferStatus = bufferStatusLabel(buffer);
   const source = vimBufferText(buffer);
@@ -514,17 +518,14 @@ export function VimEditorPane({
       onFocus={onActivate}
     >
       <div className="flex min-h-0 flex-1 flex-col p-4">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <h2 className="font-semibold text-ui-accent">{title}</h2>
-          <span
-            id={modeStatusId}
-            className="text-text-muted"
-            role="status"
-            aria-live="polite"
-          >
-            {modeStatus}
-          </span>
-        </div>
+        <span
+          id={modeStatusId}
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+        >
+          {modeStatus}
+        </span>
         <div className="relative flex min-h-0 flex-1">
           {syntax.kind === "markdown" ? (
             <VimEditorHighlightLayer source={source} layerRef={highlightLayerRef} />
@@ -555,6 +556,17 @@ export function VimEditorPane({
             onScroll={handleScroll}
             onFocus={onActivate}
           />
+        </div>
+        <div className="mt-2 flex min-w-0 shrink-0 items-center bg-surface-raised text-xs text-text-muted">
+          <span className="shrink-0 whitespace-nowrap bg-ui-accent px-2 py-1 font-semibold text-text-on-accent">
+            {statusLine.mode}
+          </span>
+          <span className="min-w-0 flex-1 truncate px-2" title={statusLine.title}>
+            {statusLine.title}
+          </span>
+          <span className="shrink-0 whitespace-nowrap px-2">
+            {statusLine.position} {statusLine.progress}
+          </span>
         </div>
         {buffer.mode.kind === "command" || buffer.mode.kind === "search" ? (
           <div className="mt-2 text-text-bright" role="status" aria-live="polite">

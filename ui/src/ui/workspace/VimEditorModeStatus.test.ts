@@ -3,9 +3,14 @@ import test from "node:test";
 import {
   applyNormalVimKey,
   createVimBuffer,
+  insertVimText,
+  VimCapability,
   VimMode,
 } from "../../domain/vim/VimBuffer.ts";
-import { vimEditorModeStatus } from "./VimEditorModeStatus.ts";
+import {
+  vimEditorModeStatus,
+  vimEditorStatusLine,
+} from "./VimEditorModeStatus.ts";
 
 test("labels every Vim mode and announces visual logical bounds", () => {
   const normal = createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal });
@@ -38,4 +43,46 @@ test("labels every Vim mode and announces visual logical bounds", () => {
       "SEARCH",
     ],
   );
+});
+
+test("projects the shared Vim statusline", () => {
+  const normal = createVimBuffer({ text: "alpha\nbeta", mode: VimMode.Normal });
+  const lastLine = applyNormalVimKey(normal, {
+    kind: "motion",
+    motion: "document-end",
+  });
+  const dirty = insertVimText(
+    createVimBuffer({ text: "alpha", mode: VimMode.Insert }),
+    "!",
+  );
+  const readOnly = createVimBuffer({
+    text: "alpha",
+    mode: VimMode.Normal,
+    capability: VimCapability.ReadOnly,
+  });
+
+  assert.deepEqual(vimEditorStatusLine(normal, "notes.md"), {
+    mode: "NORMAL",
+    title: "notes.md",
+    position: "1:1",
+    progress: "0%",
+  });
+  assert.deepEqual(vimEditorStatusLine(lastLine, "notes.md"), {
+    mode: "NORMAL",
+    title: "notes.md",
+    position: "2:1",
+    progress: "100%",
+  });
+  assert.deepEqual(vimEditorStatusLine(dirty, "notes.md"), {
+    mode: "INSERT",
+    title: "notes.md [+]",
+    position: "1:2",
+    progress: "100%",
+  });
+  assert.deepEqual(vimEditorStatusLine(readOnly, "man vi"), {
+    mode: "NORMAL",
+    title: "man vi [RO]",
+    position: "1:1",
+    progress: "100%",
+  });
 });

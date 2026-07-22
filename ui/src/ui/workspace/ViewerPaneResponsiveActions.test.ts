@@ -132,17 +132,21 @@ test("renders complete vi manpages in the native read-only Vim editor", () => {
   assert.equal(markup.includes("bg-surface-highlight"), false);
   assert.equal(markup.includes('aria-label="Less prompt"'), false);
   assert.equal(markup.includes(">NORMAL</span>"), true);
-  assert.equal(markup.includes(">ls(1)</h2>"), true);
+  assert.equal(markup.includes(">ls(1) [RO]</span>"), true);
+  assert.equal(markup.includes(">1:1 0%</span>"), true);
+  assert.equal(markup.includes(">ls(1)</h2>"), false);
   assert.equal(markup.includes("Line 1/25"), false);
   assert.equal(markup.includes(">Return</button>"), false);
 
   const editorPosition = markup.indexOf('aria-label="ls(1) editor text"');
+  const statusPosition = markup.indexOf(">ls(1) [RO]</span>");
   const mobileControlsPosition = markup.indexOf(
     'aria-label="Mobile terminal controls"',
   );
 
   assert.equal(markup.includes('aria-label="Viewer navigation status"'), false);
   assert.notEqual(editorPosition, -1);
+  assert.equal(statusPosition > editorPosition, true);
   assert.equal(mobileControlsPosition > editorPosition, true);
 });
 

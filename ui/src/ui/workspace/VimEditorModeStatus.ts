@@ -1,5 +1,42 @@
-import type { VimBuffer } from "../../domain/vim/VimBuffer.ts";
+import {
+  isVimBufferDirty,
+  type VimBuffer,
+  type VimMode,
+} from "../../domain/vim/VimBuffer.ts";
 import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
+
+type VimEditorStatusLine = Readonly<{
+  mode:
+    | "NORMAL"
+    | "INSERT"
+    | "VISUAL"
+    | "VISUAL LINE"
+    | "VISUAL BLOCK"
+    | "COMMAND"
+    | "SEARCH";
+  title: string;
+  position: string;
+  progress: string;
+}>;
+
+function modeLabel(mode: VimMode): VimEditorStatusLine["mode"] {
+  switch (mode.kind) {
+    case "normal":
+      return "NORMAL";
+    case "insert":
+      return "INSERT";
+    case "visual-character":
+      return "VISUAL";
+    case "visual-line":
+      return "VISUAL LINE";
+    case "visual-block":
+      return "VISUAL BLOCK";
+    case "command":
+      return "COMMAND";
+    case "search":
+      return "SEARCH";
+  }
+}
 
 function visualBounds(buffer: VimBuffer): string {
   const range = vimVisualRange(buffer.lines, buffer.selection);
@@ -26,20 +63,42 @@ function visualBounds(buffer: VimBuffer): string {
 }
 
 export function vimEditorModeStatus(buffer: VimBuffer): string {
+  const label = modeLabel(buffer.mode);
+
   switch (buffer.mode.kind) {
-    case "normal":
-      return "NORMAL";
-    case "insert":
-      return "INSERT";
     case "visual-character":
-      return "VISUAL" + visualBounds(buffer);
+      return label + visualBounds(buffer);
     case "visual-line":
-      return "VISUAL LINE" + visualBounds(buffer);
+      return label + visualBounds(buffer);
     case "visual-block":
-      return "VISUAL BLOCK" + visualBounds(buffer);
+      return label + visualBounds(buffer);
+    case "normal":
+    case "insert":
     case "command":
-      return "COMMAND";
     case "search":
-      return "SEARCH";
+      return label;
   }
+}
+
+export function vimEditorStatusLine(
+  buffer: VimBuffer,
+  title: string,
+): VimEditorStatusLine {
+  const marker = (() => {
+    if (buffer.capability.kind === "read-only") {
+      return " [RO]";
+    }
+
+    return isVimBufferDirty(buffer) ? " [+]" : "";
+  })();
+  const progress = buffer.lines.length === 1
+    ? 100
+    : Math.round(buffer.cursor.line / (buffer.lines.length - 1) * 100);
+
+  return {
+    mode: modeLabel(buffer.mode),
+    title: title + marker,
+    position: `${buffer.cursor.line + 1}:${buffer.cursor.column + 1}`,
+    progress: `${progress}%`,
+  };
 }
