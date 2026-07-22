@@ -13,6 +13,13 @@ export type TextSubstitutionResult = Readonly<{
   text: string;
   matched: boolean;
   firstChangedOffset: number | undefined;
+  ranges: ReadonlyArray<TextSubstitutionRange>;
+}>;
+
+type TextSubstitutionRange = Readonly<{
+  start: number;
+  end: number;
+  role: "matched" | "replaced";
 }>;
 
 type DelimitedText = Readonly<{ text: string; nextOffset: number }>;
@@ -137,13 +144,27 @@ export function applyTextSubstitution(
   const flags = substitution.ignoreCase ? "giu" : "gu";
   const expression = new RegExp(substitution.pattern, flags);
   const output: string[] = [];
+  const ranges: Array<TextSubstitutionRange> = [];
   let copiedOffset = 0;
+  let outputOffset = 0;
   let firstChangedOffset: number | undefined;
   let match = expression.exec(text);
 
   while (match !== null) {
     const replacement = replacementText(substitution.replacement, match);
-    output.push(text.slice(copiedOffset, match.index), replacement);
+    const prefix = text.slice(copiedOffset, match.index);
+    output.push(prefix, replacement);
+    outputOffset += prefix.length;
+
+    if (replacement.length > 0) {
+      ranges.push({
+        start: outputOffset,
+        end: outputOffset + replacement.length,
+        role: replacement === match[0] ? "matched" : "replaced",
+      });
+    }
+
+    outputOffset += replacement.length;
     copiedOffset = match.index + match[0].length;
     firstChangedOffset ??= replacement === match[0] ? undefined : match.index;
 
@@ -164,5 +185,6 @@ export function applyTextSubstitution(
     text: matched ? output.join("") + text.slice(copiedOffset) : text,
     matched,
     firstChangedOffset,
+    ranges,
   };
 }

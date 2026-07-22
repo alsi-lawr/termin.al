@@ -1427,6 +1427,17 @@ type VimSearchMatch = Readonly<{
   end: number;
 }>;
 
+export type VimCommandPreviewRange = Readonly<{
+  start: number;
+  end: number;
+  role: "search" | "current-search" | "matched" | "replaced";
+}>;
+
+export type VimCommandPreview = Readonly<{
+  source: string;
+  ranges: ReadonlyArray<VimCommandPreviewRange>;
+}>;
+
 type VimSearchMatches =
   | Readonly<{ kind: "matches"; values: ReadonlyArray<VimSearchMatch> }>
   | Readonly<{ kind: "invalid" }>;
@@ -1474,6 +1485,33 @@ function searchMatchFrom(
   }
 
   return matches.findLast((match) => match.start < cursorOffset) ?? matches.at(-1);
+}
+
+function searchMatchForContext(
+  matches: ReadonlyArray<VimSearchMatch>,
+  cursorOffset: number,
+  direction: VimSearchDirection,
+  count: number,
+): VimSearchMatch | undefined {
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  const stepCount = ((count - 1) % matches.length) + 1;
+  let target: VimSearchMatch | undefined;
+  let offset = cursorOffset;
+
+  for (let iteration = 0; iteration < stepCount; iteration += 1) {
+    target = searchMatchFrom(matches, offset, direction);
+
+    if (target === undefined) {
+      return undefined;
+    }
+
+    offset = target.start;
+  }
+
+  return target;
 }
 
 function searchFailure(
@@ -1578,19 +1616,13 @@ function moveToSearchMatch(
     return searchFailure(buffer, buffer.search.query, "no-search-match", context);
   }
 
-  const stepCount = ((context.count - 1) % matches.values.length) + 1;
-  let cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
-  let target: VimSearchMatch | undefined;
-
-  for (let iteration = 0; iteration < stepCount; iteration += 1) {
-    target = searchMatchFrom(matches.values, cursorOffset, direction);
-
-    if (target === undefined) {
-      return searchFailure(buffer, buffer.search.query, "no-search-match", context);
-    }
-
-    cursorOffset = target.start;
-  }
+  const cursorOffset = textOffsetForPosition(buffer.lines, buffer.cursor);
+  const target = searchMatchForContext(
+    matches.values,
+    cursorOffset,
+    direction,
+    context.count,
+  );
 
   return target === undefined
     ? searchFailure(buffer, buffer.search.query, "no-search-match", context)
@@ -2864,6 +2896,86 @@ type VimSubstitutionCommand = Readonly<{
   substitution: TextSubstitution;
 }>;
 
+type VimSubstitutionCommandParseResult =
+  | Readonly<{ kind: "unrecognized" }>
+  | Readonly<{ kind: "invalid"; message: string }>
+  | Readonly<{ kind: "parsed"; command: VimSubstitutionCommand }>;
+
+function parseVimSubstitutionCommand(
+  buffer: VimBuffer,
+  source: string,
+): VimSubstitutionCommandParseResult {
+  if (!source.startsWith("s") && !source.startsWith("%s")) {
+    return { kind: "unrecognized" };
+  }
+
+  const previousPattern = buffer.search.kind === "active"
+    ? buffer.search.query
+    : undefined;
+  const wholeBuffer = source.startsWith("%s");
+  const substitution = parseTextSubstitution(
+    wholeBuffer ? source.slice(1) : source,
+    previousPattern,
+  );
+
+  return substitution.kind === "invalid"
+    ? substitution
+    : {
+        kind: "parsed",
+        command: {
+          range: wholeBuffer ? "whole-buffer" : "current-line",
+          substitution: substitution.substitution,
+        },
+      };
+}
+
+type VimSubstitutionEvaluation = Readonly<{
+  lines: ReadonlyArray<string>;
+  matched: boolean;
+  firstChanged: VimPosition | undefined;
+  ranges: ReadonlyArray<VimCommandPreviewRange>;
+}>;
+
+function evaluateVimSubstitution(
+  buffer: VimBuffer,
+  command: VimSubstitutionCommand,
+): VimSubstitutionEvaluation {
+  const lines = [...buffer.lines];
+  const startLine = command.range === "whole-buffer" ? 0 : buffer.cursor.line;
+  const endLine = command.range === "whole-buffer"
+    ? buffer.lines.length - 1
+    : buffer.cursor.line;
+  const ranges: Array<VimCommandPreviewRange> = [];
+  let lineOffset = lineStartOffset(buffer.lines, startLine);
+  let matched = false;
+  let firstChanged: VimPosition | undefined;
+
+  for (let lineIndex = startLine; lineIndex <= endLine; lineIndex += 1) {
+    const line = lines[lineIndex];
+
+    if (line === undefined) {
+      continue;
+    }
+
+    const result = applyTextSubstitution(line, command.substitution);
+    matched = matched || result.matched;
+    lines[lineIndex] = result.text;
+    ranges.push(...result.ranges.map((range) => ({
+      start: lineOffset + range.start,
+      end: lineOffset + range.end,
+      role: range.role,
+    })));
+
+    if (firstChanged === undefined && result.firstChangedOffset !== undefined) {
+      firstChanged = { line: lineIndex, column: result.firstChangedOffset };
+    }
+
+    lineOffset += result.text.length + 1;
+  }
+
+  return { lines, matched, firstChanged, ranges };
+}
+
 function finishVimSubstitution(
   buffer: VimBuffer,
   status: VimStatus,
@@ -2885,29 +2997,11 @@ function executeVimSubstitution(
   buffer: VimBuffer,
   command: VimSubstitutionCommand,
 ): VimBuffer {
-  const lines = [...buffer.lines];
   const startLine = command.range === "whole-buffer" ? 0 : buffer.cursor.line;
   const endLine = command.range === "whole-buffer"
     ? buffer.lines.length - 1
     : buffer.cursor.line;
-  let matched = false;
-  let firstChanged: VimPosition | undefined;
-
-  for (let lineIndex = startLine; lineIndex <= endLine; lineIndex += 1) {
-    const line = lines[lineIndex];
-
-    if (line === undefined) {
-      continue;
-    }
-
-    const result = applyTextSubstitution(line, command.substitution);
-    matched = matched || result.matched;
-    lines[lineIndex] = result.text;
-
-    if (firstChanged === undefined && result.firstChangedOffset !== undefined) {
-      firstChanged = { line: lineIndex, column: result.firstChangedOffset };
-    }
-  }
+  const evaluation = evaluateVimSubstitution(buffer, command);
 
   const search: VimSearch = {
     kind: "active",
@@ -2915,7 +3009,7 @@ function executeVimSubstitution(
     direction: buffer.search.kind === "active" ? buffer.search.direction : "forward",
   };
 
-  if (!matched) {
+  if (!evaluation.matched) {
     return finishVimSubstitution(
       buffer,
       { kind: "no-substitution-match", pattern: command.substitution.pattern },
@@ -2923,16 +3017,21 @@ function executeVimSubstitution(
     );
   }
 
-  if (firstChanged === undefined) {
+  if (evaluation.firstChanged === undefined) {
     return finishVimSubstitution(buffer, { kind: "none" }, search);
   }
 
-  const next = createTextState(lines, firstChanged, VimMode.Normal, { kind: "none" });
+  const next = createTextState(
+    evaluation.lines,
+    evaluation.firstChanged,
+    VimMode.Normal,
+    { kind: "none" },
+  );
   const committed = commitEdit(
     { ...buffer, mode: VimMode.Normal, selection: { kind: "none" } },
     next,
     buffer.register,
-    lineEditIntervals(buffer, lines, startLine, endLine),
+    lineEditIntervals(buffer, evaluation.lines, startLine, endLine),
   );
 
   return {
@@ -2950,25 +3049,18 @@ function submitVimSubstitution(
   buffer: VimBuffer,
   source: string,
 ): VimSubstitutionSubmission {
-  if (!source.startsWith("s") && !source.startsWith("%s")) {
+  const parsed = parseVimSubstitutionCommand(buffer, source);
+
+  if (parsed.kind === "unrecognized") {
     return { kind: "unrecognized" };
   }
 
-  const previousPattern = buffer.search.kind === "active"
-    ? buffer.search.query
-    : undefined;
-  const wholeBuffer = source.startsWith("%s");
-  const substitution = parseTextSubstitution(
-    wholeBuffer ? source.slice(1) : source,
-    previousPattern,
-  );
-
-  if (substitution.kind === "invalid") {
+  if (parsed.kind === "invalid") {
     return {
       kind: "handled",
       buffer: finishVimSubstitution(
         buffer,
-        { kind: "invalid-substitution", message: substitution.message },
+        { kind: "invalid-substitution", message: parsed.message },
         buffer.search,
       ),
     };
@@ -2990,13 +3082,55 @@ function submitVimSubstitution(
     };
   }
 
-  return {
-    kind: "handled",
-    buffer: executeVimSubstitution(buffer, {
-      range: wholeBuffer ? "whole-buffer" : "current-line",
-      substitution: substitution.substitution,
-    }),
-  };
+  return { kind: "handled", buffer: executeVimSubstitution(buffer, parsed.command) };
+}
+
+export function vimCommandPreview(buffer: VimBuffer): VimCommandPreview {
+  const source = vimBufferText(buffer);
+
+  if (buffer.mode.kind === "search") {
+    if (buffer.mode.input.length === 0) {
+      return { source, ranges: [] };
+    }
+
+    const matches = searchMatches(source, buffer.mode.input);
+
+    if (matches.kind === "invalid" || matches.values.length === 0) {
+      return { source, ranges: [] };
+    }
+
+    const current = searchMatchForContext(
+      matches.values,
+      vimBufferCursorOffset(buffer),
+      buffer.mode.direction,
+      buffer.mode.context.count,
+    );
+
+    return {
+      source,
+      ranges: matches.values.flatMap((match) => match.start === match.end
+        ? []
+        : [{
+            ...match,
+            role: match === current ? "current-search" : "search",
+          }]),
+    };
+  }
+
+  if (buffer.mode.kind !== "command" || buffer.capability.kind === "read-only") {
+    return { source, ranges: [] };
+  }
+
+  const parsed = parseVimSubstitutionCommand(buffer, buffer.mode.input);
+
+  if (parsed.kind !== "parsed") {
+    return { source, ranges: [] };
+  }
+
+  const evaluation = evaluateVimSubstitution(buffer, parsed.command);
+  return evaluation.matched
+    ? { source: joinLines(evaluation.lines), ranges: evaluation.ranges }
+    : { source, ranges: [] };
 }
 
 export function parseVimCommand(source: string): VimCommandParseResult {

@@ -16,6 +16,7 @@ import {
   submitVimCommand,
   vimBufferCursorOffset,
   vimBufferText,
+  vimCommandPreview,
   type VimBuffer,
   type VimNormalKey,
   type VimRegister,
@@ -686,6 +687,52 @@ test("reports invalid and unmatched regular expressions without moving or mutati
   assert.equal(isVimBufferDirty(missed), false);
 });
 
+test("previews all search matches and the directional current match without changing buffer state", () => {
+  const start = press(
+    createVimBuffer({ text: "one 😀 one\none", mode: VimMode.Normal }),
+    "l",
+  );
+  const forward = appendVimCommandInput(press(start, "/"), "one");
+  const backward = appendVimCommandInput(press(start, "?"), "one");
+  const wrappedForward = appendVimCommandInput(
+    press(press(start, "G", "$"), "/"),
+    "one",
+  );
+  const invalid = appendVimCommandInput(press(start, "/"), "[");
+  const missed = appendVimCommandInput(press(start, "/"), "two");
+  const incomplete = press(start, "/");
+  const zeroWidth = appendVimCommandInput(press(start, "/"), "(?=😀)");
+
+  assert.deepEqual(vimCommandPreview(forward), {
+    source: "one 😀 one\none",
+    ranges: [
+      { start: 0, end: 3, role: "search" },
+      { start: 7, end: 10, role: "current-search" },
+      { start: 11, end: 14, role: "search" },
+    ],
+  });
+  assert.deepEqual(vimCommandPreview(backward), {
+    source: "one 😀 one\none",
+    ranges: [
+      { start: 0, end: 3, role: "current-search" },
+      { start: 7, end: 10, role: "search" },
+      { start: 11, end: 14, role: "search" },
+    ],
+  });
+  assert.equal(vimCommandPreview(wrappedForward).ranges[0]?.role, "current-search");
+  assert.deepEqual(vimCommandPreview(invalid).ranges, []);
+  assert.deepEqual(vimCommandPreview(missed).ranges, []);
+  assert.deepEqual(vimCommandPreview(incomplete).ranges, []);
+  assert.deepEqual(vimCommandPreview(zeroWidth).ranges, []);
+  assert.equal(vimBufferText(forward), vimBufferText(start));
+  assert.deepEqual(forward.cursor, start.cursor);
+  assert.deepEqual(forward.search, start.search);
+  assert.deepEqual(forward.undoStack, start.undoStack);
+  assert.deepEqual(forward.redoStack, start.redoStack);
+  assert.equal(isVimBufferDirty(forward), false);
+  assert.deepEqual(press(forward, "Escape"), start);
+});
+
 test("substitutes current lines and whole buffers through one undoable Vim edit", () => {
   const start = createVimBuffer({
     text: "😀 cat cat\nCAT cat\nlast",
@@ -716,6 +763,79 @@ test("substitutes current lines and whole buffers through one undoable Vim edit"
   assert.equal(vimBufferText(redone), vimBufferText(whole));
   assert.equal(redone.mode.kind, "normal");
   assert.equal(isVimBufferDirty(undone), false);
+});
+
+test("previews complete substitutions in place without editing until submission", () => {
+  const start = press(
+    createVimBuffer({ text: "😀 cat cat\nCAT cat\nlast", mode: VimMode.Normal }),
+    "j",
+  );
+  const current = appendVimCommandInput(
+    press(start, ":"),
+    String.raw`s#(CAT) (cat)#<&|\1|\&\##i`,
+  );
+  const whole = appendVimCommandInput(
+    press(start, ":"),
+    String.raw`%s/cat/doggy/gi`,
+  );
+  const unchanged = appendVimCommandInput(
+    press(start, ":"),
+    String.raw`%s/cat/&/gi`,
+  );
+  const shrunk = appendVimCommandInput(
+    press(start, ":"),
+    String.raw`%s/cat/x/gi`,
+  );
+  const incomplete = appendVimCommandInput(press(start, ":"), "s/cat/dog");
+  const invalid = appendVimCommandInput(press(start, ":"), "s/[//");
+  const readonlyStart = createVimBuffer({
+    text: "cat",
+    mode: VimMode.Normal,
+    capability: VimCapability.ReadOnly,
+  });
+  const readonly = appendVimCommandInput(
+    press(readonlyStart, ":"),
+    "s/cat/dog/",
+  );
+  const zeroWidth = appendVimCommandInput(
+    press(createVimBuffer({ text: "😀x", mode: VimMode.Normal }), ":"),
+    String.raw`s/(?=x)/-/g`,
+  );
+
+  assert.deepEqual(vimCommandPreview(current), {
+    source: "😀 cat cat\n<CAT cat|CAT|&#\nlast",
+    ranges: [{ start: 11, end: 26, role: "replaced" }],
+  });
+  assert.deepEqual(vimCommandPreview(whole), {
+    source: "😀 doggy doggy\ndoggy doggy\nlast",
+    ranges: [
+      { start: 3, end: 8, role: "replaced" },
+      { start: 9, end: 14, role: "replaced" },
+      { start: 15, end: 20, role: "replaced" },
+      { start: 21, end: 26, role: "replaced" },
+    ],
+  });
+  assert.equal(vimCommandPreview(unchanged).ranges.every((range) => range.role === "matched"), true);
+  assert.equal(vimCommandPreview(shrunk).source, "😀 x x\nx x\nlast");
+  assert.deepEqual(vimCommandPreview(incomplete), { source: vimBufferText(start), ranges: [] });
+  assert.deepEqual(vimCommandPreview(invalid), { source: vimBufferText(start), ranges: [] });
+  assert.deepEqual(vimCommandPreview(readonly), { source: "cat", ranges: [] });
+  assert.deepEqual(vimCommandPreview(zeroWidth), {
+    source: "😀-x",
+    ranges: [{ start: 2, end: 3, role: "replaced" }],
+  });
+  assert.equal(vimBufferText(whole), vimBufferText(start));
+  assert.deepEqual(whole.cursor, start.cursor);
+  assert.deepEqual(whole.search, start.search);
+  assert.deepEqual(whole.undoStack, start.undoStack);
+  assert.deepEqual(whole.redoStack, start.redoStack);
+  assert.equal(isVimBufferDirty(whole), false);
+  assert.deepEqual(press(whole, "Escape"), start);
+
+  const committed = submitVimCommand(whole);
+  assert.equal(vimBufferText(committed), "😀 doggy doggy\ndoggy doggy\nlast");
+  assert.equal(committed.undoStack.length, 1);
+  assert.equal(vimBufferText(press(committed, "u")), vimBufferText(start));
 });
 
 test("reuses Vim search and substitution patterns without changing search direction", () => {

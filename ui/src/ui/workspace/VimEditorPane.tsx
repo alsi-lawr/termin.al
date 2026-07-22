@@ -24,6 +24,7 @@ import {
   replaceVimInsertText,
   vimBufferCursorOffset,
   vimBufferText,
+  vimCommandPreview,
   type VimBuffer,
 } from "../../domain/vim/VimBuffer.ts";
 import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
@@ -93,20 +94,18 @@ type VimEditorPaneProps = Readonly<{
 }>;
 
 function editorTextareaClass(
-  syntax: VimEditorSyntax,
   mode: VimBuffer["mode"]["kind"],
   compositionActive: boolean,
 ): string {
-  if (syntax.kind === "markdown") {
-    if (compositionActive) {
-      return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
-    }
-    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-ui-cursor outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
-  }
-  if (mode === "visual-block") {
+  if (compositionActive) {
     return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
   }
-  return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
+
+  if (mode === "command" || mode === "search") {
+    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-transparent outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
+  }
+
+  return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-ui-cursor outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
 }
 
 function moveInsertCursorForMobile(
@@ -193,7 +192,8 @@ export function VimEditorPane({
   const commandEffect = vimCommandEffectMessage(buffer.commandEffect);
   const bufferStatus = vimStatusMessage(buffer.status);
   const source = vimBufferText(buffer);
-  const textareaClass = editorTextareaClass(syntax, buffer.mode.kind, compositionActive);
+  const preview = vimCommandPreview(buffer);
+  const textareaClass = editorTextareaClass(buffer.mode.kind, compositionActive);
 
   useEffect(() => {
     if (isActive) {
@@ -558,9 +558,11 @@ export function VimEditorPane({
           {modeStatus}
         </span>
         <div className="relative flex min-h-0 flex-1">
-          {syntax.kind === "markdown" ? (
-            <VimEditorHighlightLayer source={source} layerRef={highlightLayerRef} />
-          ) : null}
+          <VimEditorHighlightLayer
+            preview={preview}
+            syntax={syntax.kind}
+            layerRef={highlightLayerRef}
+          />
           {buffer.mode.kind === "visual-block" ? (
             <VimEditorBlockSelectionMirror
               buffer={buffer}
