@@ -763,13 +763,8 @@ module GitHubPublication =
                                                                     | _ -> return Result.Unavailable
                             finally
                                 gate.Release() |> ignore
-                        with
-                        | :? OperationCanceledException when cancellationToken.IsCancellationRequested ->
-                            return raise (OperationCanceledException(cancellationToken))
-                        | :? OperationCanceledException -> return Result.Unavailable
-                        | :? HttpRequestException
-                        | :? JsonException
-                        | :? InvalidOperationException -> return Result.Unavailable
+                        with :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                            return raise error
                 } }
 
     let unavailable: Client =

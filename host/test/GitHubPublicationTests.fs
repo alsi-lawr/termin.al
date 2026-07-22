@@ -530,19 +530,13 @@ module GitHubPublicationTests =
         | result ->
             failwithf "An unchanged head and blob after a 422 must remain a generic unavailable failure: %A." result
 
-    let private runCancellationMapping () =
-        let timeoutHandler =
-            new FakeHandler(fun _ -> raise (TaskCanceledException("upstream timeout")))
-
-        use timeoutClient = new HttpClient(timeoutHandler)
+    let private runCallerCancellationPropagation () =
+        use httpClient =
+            new HttpClient(new FakeHandler(fun _ -> failwith "Cancelled publication reached GitHub."))
 
         let client =
-            GitHubPublication.live timeoutClient (configuration ()) (ContentCacheGeneration()) (fun () ->
+            GitHubPublication.live httpClient (configuration ()) (ContentCacheGeneration()) (fun () ->
                 DateTimeOffset.UtcNow)
-
-        match client.Publish(token (), addRequest, CancellationToken.None).GetAwaiter().GetResult() with
-        | GitHubPublication.Result.Unavailable -> ()
-        | result -> failwithf "Non-caller timeout must be generic unavailable, got %A." result
 
         use cancellation = new CancellationTokenSource()
         cancellation.Cancel()
@@ -562,4 +556,4 @@ module GitHubPublicationTests =
         runUpdateRetainsCatalogIdentity ()
         runReferenceUpdateFailureClassification ()
         runRemovalRetainsAssetsAndDirectories ()
-        runCancellationMapping ()
+        runCallerCancellationPropagation ()

@@ -112,34 +112,27 @@ export class GrpcPublicationClient implements PublicationClient {
     const session = await this.#sessionClient.read(signal);
     if (session.kind !== "available" || session.session.kind !== "owner") return publicationFailed;
 
-    try {
-      const request = await grpcRequest(mutation, draft, markdown, assets, removalConfirmation);
-      const response = await this.#client.publish(
-        request,
-        { meta: this.#context.metadata(), abort: signal },
-      ).response;
+    const request = await grpcRequest(mutation, draft, markdown, assets, removalConfirmation);
+    const response = await this.#client.publish(
+      request,
+      { meta: this.#context.metadata(), abort: signal },
+    ).response;
 
-      return response.conflict
-        ? {
-            kind: "conflict",
-            localMarkdown: response.localMarkdown,
-            upstreamMarkdown: response.upstreamMarkdown,
-            defaultBranch: response.defaultBranch,
-            headSha: response.headSha,
-            blobSha: response.blobSha,
-          }
-        : {
-            kind: "published",
-            sha: response.sha,
-            url: response.url,
-            defaultBranch: response.defaultBranch,
-            documentBlobSha: response.documentBlobSha,
-          };
-    } catch (error: unknown) {
-      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      }
-      return publicationFailed;
-    }
+    return response.conflict
+      ? {
+          kind: "conflict",
+          localMarkdown: response.localMarkdown,
+          upstreamMarkdown: response.upstreamMarkdown,
+          defaultBranch: response.defaultBranch,
+          headSha: response.headSha,
+          blobSha: response.blobSha,
+        }
+      : {
+          kind: "published",
+          sha: response.sha,
+          url: response.url,
+          defaultBranch: response.defaultBranch,
+          documentBlobSha: response.documentBlobSha,
+        };
   }
 }

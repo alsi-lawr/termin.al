@@ -27,8 +27,7 @@ import type { VimSessionBinding } from "./VimSessionState.ts";
 
 type PreviewState =
   | Readonly<{ kind: "loading" }>
-  | Readonly<{ kind: "available"; previews: ReadonlyArray<StagedAssetPreview> }>
-  | Readonly<{ kind: "failed" }>;
+  | Readonly<{ kind: "available"; previews: ReadonlyArray<StagedAssetPreview> }>;
 
 type AuthoringEditorPaneProps = Readonly<{
   paneId: PaneId;
@@ -85,8 +84,6 @@ export function AuthoringEditorPane({
     void authoring.assets(content.draft).then((assets) => {
       if (abandoned) return;
       setPreviews({ kind: "available", previews: previewUrls.replace(assets) });
-    }).catch(() => {
-      if (!abandoned) setPreviews({ kind: "failed" });
     });
     return () => {
       abandoned = true;
@@ -115,66 +112,52 @@ export function AuthoringEditorPane({
 
   const stageFiles = async (files: ReadonlyArray<File>): Promise<void> => {
     const submittedBuffer = content.buffer;
-    try {
-      const result = await authoring.stageAssets(
-        content.draft,
-        vimBufferText(submittedBuffer),
-        vimBufferCursorOffset(submittedBuffer),
-        files,
-      );
-      if (result.kind === "invalid") { setPendingFiles([]); showMessage(result.message); return; }
-      if (result.kind === "stale") {
-        setPendingFiles(files);
-        showMessage("A newer draft revision exists; the selected local files were retained for retry.");
-        return;
-      }
-      setPendingFiles([]);
-      completeMedia(submittedBuffer, result, `${files.length} asset${files.length === 1 ? "" : "s"} staged in draft revision ${result.draft.recordRevision}.`);
-    } catch {
+    const result = await authoring.stageAssets(
+      content.draft,
+      vimBufferText(submittedBuffer),
+      vimBufferCursorOffset(submittedBuffer),
+      files,
+    );
+    if (result.kind === "invalid") { setPendingFiles([]); showMessage(result.message); return; }
+    if (result.kind === "stale") {
       setPendingFiles(files);
-      showMessage("Draft storage is unavailable; the selected local files were retained for retry.");
+      showMessage("A newer draft revision exists; the selected local files were retained for retry.");
+      return;
     }
+    setPendingFiles([]);
+    completeMedia(submittedBuffer, result, `${files.length} asset${files.length === 1 ? "" : "s"} staged in draft revision ${result.draft.recordRevision}.`);
   };
 
   const removeAsset = async (metadata: StagedAssetMetadata): Promise<void> => {
     const submittedBuffer = content.buffer;
-    try {
-      const result = await authoring.removeAsset(
-        content.draft,
-        vimBufferText(submittedBuffer),
-        vimBufferCursorOffset(submittedBuffer),
-        metadata,
-      );
-      if (result.kind === "invalid") { showMessage(result.message); return; }
-      if (result.kind === "stale") { showMessage("A newer draft revision exists; the staged asset was not removed."); return; }
-      completeMedia(submittedBuffer, result, `${fileLabel(metadata)} removed in draft revision ${result.draft.recordRevision}.`);
-    } catch {
-      showMessage("Draft storage is unavailable; the staged asset was not removed.");
-    }
+    const result = await authoring.removeAsset(
+      content.draft,
+      vimBufferText(submittedBuffer),
+      vimBufferCursorOffset(submittedBuffer),
+      metadata,
+    );
+    if (result.kind === "invalid") { showMessage(result.message); return; }
+    if (result.kind === "stale") { showMessage("A newer draft revision exists; the staged asset was not removed."); return; }
+    completeMedia(submittedBuffer, result, `${fileLabel(metadata)} removed in draft revision ${result.draft.recordRevision}.`);
   };
 
   const replaceAsset = async (metadata: StagedAssetMetadata, file: File): Promise<void> => {
     const submittedBuffer = content.buffer;
-    try {
-      const result = await authoring.replaceAsset(
-        content.draft,
-        vimBufferText(submittedBuffer),
-        vimBufferCursorOffset(submittedBuffer),
-        metadata,
-        file,
-      );
-      if (result.kind === "invalid") { setPendingFiles([]); showMessage(result.message); return; }
-      if (result.kind === "stale") {
-        setPendingFiles([file]);
-        showMessage("A newer draft revision exists; the selected replacement File was retained.");
-        return;
-      }
-      setPendingFiles([]);
-      completeMedia(submittedBuffer, result, `${fileLabel(metadata)} replaced in draft revision ${result.draft.recordRevision}.`);
-    } catch {
+    const result = await authoring.replaceAsset(
+      content.draft,
+      vimBufferText(submittedBuffer),
+      vimBufferCursorOffset(submittedBuffer),
+      metadata,
+      file,
+    );
+    if (result.kind === "invalid") { setPendingFiles([]); showMessage(result.message); return; }
+    if (result.kind === "stale") {
       setPendingFiles([file]);
-      showMessage("Draft storage is unavailable; the selected replacement File was retained.");
+      showMessage("A newer draft revision exists; the selected replacement File was retained.");
+      return;
     }
+    setPendingFiles([]);
+    completeMedia(submittedBuffer, result, `${fileLabel(metadata)} replaced in draft revision ${result.draft.recordRevision}.`);
   };
 
   const publish = async (mutation: "publish" | "remove", confirmation = ""): Promise<void> => {
@@ -223,10 +206,6 @@ export function AuthoringEditorPane({
         message: `Published ${result.sha}. ${result.url}`,
         closeIfBufferMatchesSubmittedSource: false,
       });
-    } catch (error: unknown) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        showMessage("Publication failed.");
-      }
     } finally {
       if (publicationAbort.current === controller) {
         publicationAbort.current = undefined;
@@ -253,13 +232,9 @@ export function AuthoringEditorPane({
       return;
     }
     if (effect.kind === "force-quit") {
-      try {
-        const result = await authoring.discard(content.draft);
-        if (result.kind === "discarded") onOperation({ kind: "discard-authoring-editor", paneId });
-        else showMessage("A newer draft revision exists; this buffer was not discarded.");
-      } catch {
-        showMessage("Draft storage is unavailable; this buffer was not discarded.");
-      }
+      const result = await authoring.discard(content.draft);
+      if (result.kind === "discarded") onOperation({ kind: "discard-authoring-editor", paneId });
+      else showMessage("A newer draft revision exists; this buffer was not discarded.");
       return;
     }
     if (effect.kind === "preview") {
@@ -288,21 +263,17 @@ export function AuthoringEditorPane({
       return;
     }
     if (effect.kind !== "write" && effect.kind !== "write-quit") return;
-    try {
-      const result = await authoring.save(content.draft, source);
-      if (result.kind === "invalid") { showMessage(result.message); return; }
-      if (result.kind === "stale") { showMessage("A newer draft revision exists; this buffer was not saved."); return; }
-      onOperation({
-        kind: "complete-authoring-save",
-        paneId,
-        draft: result.draft,
-        savedSource: source,
-        message: `Draft revision ${result.draft.recordRevision} saved.`,
-        closeIfBufferMatchesSavedSource: effect.kind === "write-quit",
-      });
-    } catch {
-      showMessage("Draft storage is unavailable; this buffer was not saved.");
-    }
+    const result = await authoring.save(content.draft, source);
+    if (result.kind === "invalid") { showMessage(result.message); return; }
+    if (result.kind === "stale") { showMessage("A newer draft revision exists; this buffer was not saved."); return; }
+    onOperation({
+      kind: "complete-authoring-save",
+      paneId,
+      draft: result.draft,
+      savedSource: source,
+      message: `Draft revision ${result.draft.recordRevision} saved.`,
+      closeIfBufferMatchesSavedSource: effect.kind === "write-quit",
+    });
   };
 
   return (
@@ -360,7 +331,6 @@ export function AuthoringEditorPane({
           )}
         </div>
         {previews.kind === "loading" ? <p className="mt-2 text-xs text-text-muted">Loading staged assets…</p> : null}
-        {previews.kind === "failed" ? <p className="mt-2 text-xs text-text-muted">Staged asset previews are unavailable.</p> : null}
         {previews.kind === "available" && previews.previews.length === 0 ? <p className="mt-2 text-xs text-text-muted">No staged assets.</p> : null}
         {previews.kind === "available" && previews.previews.length > 0 ? (
           <ul className="mt-2 flex gap-2 overflow-x-auto">

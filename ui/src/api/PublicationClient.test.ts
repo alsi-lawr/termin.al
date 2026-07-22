@@ -82,7 +82,7 @@ test("generated publication client sends binary-unary domain values with antifor
   assert.equal(metadata?.["X-CSRF-TOKEN"], token);
 });
 
-test("generated publication client returns direct conflict values and preserves cancellation", async () => {
+test("generated publication client returns direct conflict values", async () => {
   const conflictRpc = {
     publish: () => ({
       response: Promise.resolve({
@@ -115,20 +115,4 @@ test("generated publication client returns direct conflict values and preserves 
     headSha: "b".repeat(40),
     blobSha: "c".repeat(40),
   });
-
-  const controller = new AbortController();
-  controller.abort();
-  const cancelledRpc = { publish: () => ({ response: Promise.reject(new Error("cancelled")) }) };
-  const cancelledClient = new GrpcPublicationClient(new BrowserGrpcContext(), ownerSession, cancelledRpc);
-  await assert.rejects(
-    cancelledClient.mutate(
-      "publish",
-      draft({ kind: "new", defaultBranch: "main", headSha: "a".repeat(40) }),
-      "local",
-      [],
-      "",
-      controller.signal,
-    ),
-    (error: unknown) => error instanceof DOMException && error.name === "AbortError",
-  );
 });

@@ -154,11 +154,7 @@ export function usePaneWorkspace(
   const currentDirectory = corpus.filesystem.root.path;
   const [authoring] = useState<AuthoringService | undefined>(() => {
     if (applicationMode === "demo" || publicationClient === undefined) return undefined;
-    try {
-      return new AuthoringService(corpus, authentication, new IndexedDbDraftStore(window.indexedDB), publicationClient);
-    } catch {
-      return undefined;
-    }
+    return new AuthoringService(corpus, authentication, new IndexedDbDraftStore(window.indexedDB), publicationClient);
   });
   const [filesystemStorage] = useState<VirtualFilesystemStorageBackend | undefined>(
     browserVirtualFilesystemStorage,
