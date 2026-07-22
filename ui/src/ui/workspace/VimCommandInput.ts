@@ -21,6 +21,10 @@ export type VimCommandKeyboardInput = Readonly<{
 export type VimCommandKeyboardResult =
   | Readonly<{ kind: "allow-default" }>
   | Readonly<{ kind: "prevent-default" }>
+  | Readonly<{
+      kind: "history";
+      direction: "older" | "newer";
+    }>
   | Readonly<{ kind: "input"; input: VimCommandInput }>;
 
 export function vimCommandInputFromKeyboard(
@@ -33,11 +37,24 @@ export function vimCommandInputFromKeyboard(
     return { kind: "allow-default" };
   }
 
+  if (input.ctrlKey && !input.metaKey) {
+    switch (input.key.toLowerCase()) {
+      case "p":
+        return { kind: "history", direction: "older" };
+      case "n":
+        return { kind: "history", direction: "newer" };
+    }
+  }
+
   if (input.ctrlKey || input.metaKey) {
     return { kind: "prevent-default" };
   }
 
   switch (input.key) {
+    case "ArrowUp":
+      return { kind: "history", direction: "older" };
+    case "ArrowDown":
+      return { kind: "history", direction: "newer" };
     case "Escape":
       return { kind: "input", input: { kind: "escape" } };
     case "Enter":

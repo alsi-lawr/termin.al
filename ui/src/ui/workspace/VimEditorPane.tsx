@@ -20,6 +20,7 @@ import {
   moveVimInsertCursor,
   moveVimInsertCursorToTextOffset,
   normalVimKeyFromKeyboard,
+  replaceVimCommandInput,
   replaceVimInsertText,
   vimBufferCursorOffset,
   vimBufferText,
@@ -29,6 +30,7 @@ import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
 import { vimLineStartOffset } from "../../domain/vim/VimMotion.ts";
 import {
   applyVimCommandInput,
+  type VimCommandInput,
 } from "./VimCommandInput.ts";
 import { handleVimEditorPaneCommandInput } from "./VimEditorPaneCommandHandler.ts";
 import {
@@ -51,6 +53,20 @@ import {
 } from "./VimEditorModeStatus.ts";
 import { VimEditorBlockSelectionMirror } from "./VimEditorBlockSelectionMirror.tsx";
 import { VimEditorHighlightLayer } from "./VimEditorHighlightLayer.tsx";
+import {
+  emptyVimSessionListing,
+  initialVimHistoryNavigation,
+  navigateVimHistory,
+  recordVimSubmission,
+  vimCommandEffectMessage,
+  vimHistory,
+  vimSessionListing,
+  vimStatusMessage,
+  type VimHistoryDirection,
+  type VimHistoryNavigation,
+  type VimSessionBinding,
+  type VimSessionListing,
+} from "./VimSessionState.ts";
 
 type VimEditorSyntax =
   | Readonly<{ kind: "markdown" }>
@@ -68,6 +84,7 @@ type VimEditorPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   onToggleMobileCtrl: () => void;
   onConsumeMobileCtrl: () => void;
   resolveMobileCtrlInput: (
@@ -90,42 +107,6 @@ function editorTextareaClass(
     return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
   }
   return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-surface-deepest p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
-}
-
-function commandEffectLabel(buffer: VimBuffer): string | undefined {
-  switch (buffer.commandEffect.kind) {
-    case "none":
-      return undefined;
-    case "write":
-      return "Write requested";
-    case "quit":
-      return "Quit requested";
-    case "force-quit":
-      return "Force quit requested";
-    case "unrecognized-command":
-      return "Unknown command";
-  }
-}
-
-function bufferStatusLabel(buffer: VimBuffer): string | undefined {
-  switch (buffer.status.kind) {
-    case "none":
-      return undefined;
-    case "invalid-input":
-      return `Invalid input: ${buffer.status.source}`;
-    case "invalid-search":
-      return `Invalid pattern: ${buffer.status.query}`;
-    case "no-search-match":
-      return `Pattern not found: ${buffer.status.query}`;
-    case "no-previous-search":
-      return "No previous search pattern";
-    case "invalid-substitution":
-      return `Invalid substitution: ${buffer.status.message}`;
-    case "no-substitution-match":
-      return `Pattern not found: ${buffer.status.pattern}`;
-    case "read-only":
-      return `Read-only: ${buffer.status.source}`;
-  }
 }
 
 function moveInsertCursorForMobile(
@@ -191,6 +172,7 @@ export function VimEditorPane({
   onActivate,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -200,12 +182,16 @@ export function VimEditorPane({
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const composing = useRef(false);
   const [compositionActive, setCompositionActive] = useState(false);
+  const [historyNavigation, setHistoryNavigation] =
+    useState<VimHistoryNavigation>(initialVimHistoryNavigation);
+  const [listing, setListing] =
+    useState<VimSessionListing>(emptyVimSessionListing);
   const modeStatusId = useId();
   const modeStatus = vimEditorModeStatus(buffer);
   const modePresentation = vimEditorModePresentation(buffer.mode);
   const statusLine = vimEditorStatusLine(buffer, title);
-  const commandEffect = commandEffectLabel(buffer);
-  const bufferStatus = bufferStatusLabel(buffer);
+  const commandEffect = vimCommandEffectMessage(buffer.commandEffect);
+  const bufferStatus = vimStatusMessage(buffer.status);
   const source = vimBufferText(buffer);
   const textareaClass = editorTextareaClass(syntax, buffer.mode.kind, compositionActive);
 
@@ -291,12 +277,60 @@ export function VimEditorPane({
     mirror.scrollLeft = event.currentTarget.scrollLeft;
   };
 
+  const applyEditorBuffer = (next: VimBuffer): void => {
+    setHistoryNavigation(initialVimHistoryNavigation);
+    setListing(emptyVimSessionListing);
+    onBufferChange(next);
+  };
+
+  const handleCommandInput = (input: VimCommandInput): void => {
+    if (
+      input.kind === "submit" &&
+      (buffer.mode.kind === "command" || buffer.mode.kind === "search")
+    ) {
+      const history = buffer.mode.kind;
+      const source = buffer.mode.input;
+      const next = applyVimCommandInput(buffer, input);
+      const nextSession = recordVimSubmission(vimSession.state, {
+        history,
+        source,
+        previous: buffer,
+        next,
+      });
+      setHistoryNavigation(initialVimHistoryNavigation);
+      setListing(vimSessionListing(nextSession, next.commandEffect));
+      vimSession.onStateChange(nextSession);
+      onBufferChange(next);
+      return;
+    }
+
+    setHistoryNavigation(initialVimHistoryNavigation);
+    setListing(emptyVimSessionListing);
+    onBufferChange(applyVimCommandInput(buffer, input));
+  };
+
+  const handleHistory = (direction: VimHistoryDirection): void => {
+    if (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") {
+      return;
+    }
+
+    const transition = navigateVimHistory(
+      vimHistory(vimSession.state, buffer.mode.kind),
+      buffer.mode.input,
+      historyNavigation,
+      direction,
+    );
+    setHistoryNavigation(transition.navigation);
+    setListing(emptyVimSessionListing);
+    onBufferChange(replaceVimCommandInput(buffer, transition.input));
+  };
+
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
     if (buffer.mode.kind !== "insert") {
       return;
     }
 
-    onBufferChange(
+    applyEditorBuffer(
       replaceVimInsertText(
         buffer,
         event.currentTarget.value,
@@ -310,7 +344,7 @@ export function VimEditorPane({
       return;
     }
 
-    onBufferChange(
+    applyEditorBuffer(
       moveVimInsertCursorToTextOffset(
         buffer,
         event.currentTarget.selectionEnd,
@@ -330,17 +364,12 @@ export function VimEditorPane({
     setCompositionActive(false);
 
     if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
-      onBufferChange(
-        applyVimCommandInput(buffer, {
-          kind: "text",
-          text: event.data,
-        }),
-      );
+      handleCommandInput({ kind: "text", text: event.data });
       return;
     }
 
     if (buffer.mode.kind === "insert") {
-      onBufferChange(
+      applyEditorBuffer(
         replaceVimInsertText(
           buffer,
           event.currentTarget.value,
@@ -355,7 +384,7 @@ export function VimEditorPane({
   ): void => {
     if (buffer.mode.kind === "normal" || isVimVisualMode(buffer.mode)) {
       event.preventDefault();
-      onBufferChange(applyNormalVimKey(buffer, { kind: "paste-after" }));
+      applyEditorBuffer(applyNormalVimKey(buffer, { kind: "paste-after" }));
       return;
     }
 
@@ -364,9 +393,9 @@ export function VimEditorPane({
     }
 
     handleVimEditorPaneCommandInput({
-      buffer,
       input: { kind: "paste", text: event.clipboardData.getData("text") },
-      onBufferChange,
+      onCommandInput: handleCommandInput,
+      onHistory: handleHistory,
       onPaneKeyInput,
       preventDefault: () => {
         event.preventDefault();
@@ -392,7 +421,7 @@ export function VimEditorPane({
     );
 
     if (key.kind === "recognized") {
-      onBufferChange(applyNormalVimKey(buffer, key.key));
+      applyEditorBuffer(applyNormalVimKey(buffer, key.key));
     }
   };
 
@@ -410,14 +439,14 @@ export function VimEditorPane({
 
     if (buffer.mode.kind === "command" || buffer.mode.kind === "search") {
       handleVimEditorPaneCommandInput({
-        buffer,
         input: {
           kind: "keydown",
           key: input.key,
           ctrlKey: input.ctrlKey,
           metaKey: input.metaKey,
         },
-        onBufferChange,
+        onCommandInput: handleCommandInput,
+        onHistory: handleHistory,
         onPaneKeyInput,
         preventDefault: () => {
           event.preventDefault();
@@ -440,13 +469,13 @@ export function VimEditorPane({
 
     if (event.key === "Escape") {
       event.preventDefault();
-      onBufferChange(applyNormalVimKey(buffer, { kind: "escape" }));
+      applyEditorBuffer(applyNormalVimKey(buffer, { kind: "escape" }));
       return;
     }
 
     if (event.key === "Tab") {
       event.preventDefault();
-      onBufferChange(insertVimText(buffer, "\t"));
+      applyEditorBuffer(insertVimText(buffer, "\t"));
       return;
     }
 
@@ -576,14 +605,19 @@ export function VimEditorPane({
             {buffer.mode.input}
           </div>
         ) : null}
-        {commandEffect === undefined ? null : (
-          <div className="mt-2 text-text-muted" role="status" aria-live="polite">
-            {commandEffect}
+        {listing.kind === "none" ? null : (
+          <div className="mt-2 whitespace-pre-wrap text-text-muted" role="status" aria-live="polite">
+            {listing.lines.join("\n")}
           </div>
         )}
-        {bufferStatus === undefined ? null : (
+        {commandEffect.kind === "none" ? null : (
           <div className="mt-2 text-text-muted" role="status" aria-live="polite">
-            {bufferStatus}
+            {commandEffect.message.text}
+          </div>
+        )}
+        {bufferStatus.kind === "none" ? null : (
+          <div className="mt-2 text-text-muted" role="status" aria-live="polite">
+            {bufferStatus.message.text}
           </div>
         )}
       </div>

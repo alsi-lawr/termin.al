@@ -121,6 +121,11 @@ export type VimCommandEffect =
   | Readonly<{ kind: "quit" }>
   | Readonly<{ kind: "force-quit" }>
   | Readonly<{
+      kind: "show-history";
+      history: "command" | "search";
+    }>
+  | Readonly<{ kind: "show-messages" }>
+  | Readonly<{
       kind: "unrecognized-command";
       source: string;
     }>;
@@ -207,7 +212,12 @@ export type VimNormalKeyMatch =
 export type VimParsedCommand =
   | Readonly<{ kind: "write" }>
   | Readonly<{ kind: "quit" }>
-  | Readonly<{ kind: "force-quit" }>;
+  | Readonly<{ kind: "force-quit" }>
+  | Readonly<{
+      kind: "show-history";
+      history: "command" | "search";
+    }>
+  | Readonly<{ kind: "show-messages" }>;
 
 export type VimCommandParseResult =
   | Readonly<{
@@ -2835,6 +2845,20 @@ export function backspaceVimCommandInput(buffer: VimBuffer): VimBuffer {
   };
 }
 
+export function replaceVimCommandInput(
+  buffer: VimBuffer,
+  input: string,
+): VimBuffer {
+  if (buffer.mode.kind !== "command" && buffer.mode.kind !== "search") {
+    return buffer;
+  }
+
+  return {
+    ...buffer,
+    mode: { ...buffer.mode, input },
+  };
+}
+
 type VimSubstitutionCommand = Readonly<{
   range: "current-line" | "whole-buffer";
   substitution: TextSubstitution;
@@ -2983,6 +3007,19 @@ export function parseVimCommand(source: string): VimCommandParseResult {
       return { kind: "recognized", command: { kind: "quit" } };
     case "q!":
       return { kind: "recognized", command: { kind: "force-quit" } };
+    case "history":
+    case "history cmd":
+      return {
+        kind: "recognized",
+        command: { kind: "show-history", history: "command" },
+      };
+    case "history search":
+      return {
+        kind: "recognized",
+        command: { kind: "show-history", history: "search" },
+      };
+    case "messages":
+      return { kind: "recognized", command: { kind: "show-messages" } };
     default:
       return { kind: "unrecognized", source };
   }

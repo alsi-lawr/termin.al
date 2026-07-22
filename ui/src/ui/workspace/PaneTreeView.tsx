@@ -29,6 +29,7 @@ import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import { Terminal } from "../terminal/Terminal";
 import { ViewerPane } from "./ViewerPane";
 import { VimEditorPane } from "./VimEditorPane";
+import type { VimSessionBinding } from "./VimSessionState.ts";
 
 type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
@@ -47,6 +48,7 @@ type PaneTreeViewProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   onToggleMobileCtrl: () => void;
   onConsumeMobileCtrl: () => void;
   resolveMobileCtrlInput: (
@@ -120,6 +122,7 @@ function PaneLeaf({
   hasShellRuntime,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -160,6 +163,7 @@ function PaneLeaf({
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
             mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -184,6 +188,7 @@ function PaneLeaf({
             onActivate={activate}
             onPaneKeyInput={onPaneKeyInput}
             mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -213,6 +218,7 @@ function PaneLeaf({
             }}
             onPaneKeyInput={onPaneKeyInput}
             mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -234,6 +240,7 @@ export function PaneTreeView({
   hasShellRuntime,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -257,6 +264,7 @@ export function PaneTreeView({
         hasShellRuntime={hasShellRuntime}
         onPaneKeyInput={onPaneKeyInput}
         mobileCtrlPressed={mobileCtrlPressed}
+        vimSession={vimSession}
         onToggleMobileCtrl={onToggleMobileCtrl}
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -308,6 +316,7 @@ export function PaneTreeView({
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
           mobileCtrlPressed={mobileCtrlPressed}
+          vimSession={vimSession}
           onToggleMobileCtrl={onToggleMobileCtrl}
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -339,6 +348,7 @@ export function PaneTreeView({
           hasShellRuntime={hasShellRuntime}
           onPaneKeyInput={onPaneKeyInput}
           mobileCtrlPressed={mobileCtrlPressed}
+          vimSession={vimSession}
           onToggleMobileCtrl={onToggleMobileCtrl}
           onConsumeMobileCtrl={onConsumeMobileCtrl}
           resolveMobileCtrlInput={resolveMobileCtrlInput}

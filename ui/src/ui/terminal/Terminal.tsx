@@ -57,6 +57,7 @@ import { ViewerPane } from "../workspace/ViewerPane";
 import { HierarchicalCollectionPane } from "../workspace/HierarchicalCollectionPane.tsx";
 import { ThemeSelectorPane } from "../workspace/ThemeSelectorPane.tsx";
 import { generatedManpageCorpus } from "../../content/ManpageCorpusVite.ts";
+import type { VimSessionBinding } from "../workspace/VimSessionState.ts";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
@@ -72,6 +73,7 @@ type TerminalProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   onToggleMobileCtrl: () => void;
   onConsumeMobileCtrl: () => void;
   resolveMobileCtrlInput: (
@@ -103,6 +105,7 @@ export function Terminal({
   onActivate,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -245,6 +248,7 @@ export function Terminal({
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
         mobileCtrlPressed={mobileCtrlPressed}
+        vimSession={vimSession}
         onToggleMobileCtrl={onToggleMobileCtrl}
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -289,6 +293,7 @@ export function Terminal({
             onActivate={onActivate}
             onPaneKeyInput={onPaneKeyInput}
             mobileCtrlPressed={mobileCtrlPressed}
+            vimSession={vimSession}
             onToggleMobileCtrl={onToggleMobileCtrl}
             onConsumeMobileCtrl={onConsumeMobileCtrl}
             resolveMobileCtrlInput={resolveMobileCtrlInput}

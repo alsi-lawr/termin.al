@@ -1,16 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  applyNormalVimKey,
-  createVimBuffer,
-  type VimBuffer,
-  VimMode,
-} from "../../domain/vim/VimBuffer.ts";
+import type { VimCommandInput } from "./VimCommandInput.ts";
 import { handleVimEditorPaneCommandInput } from "./VimEditorPaneCommandHandler.ts";
 
 test("dispatches keyboard paste through the Vim editor command boundary", () => {
-  const start = createVimBuffer({ text: "", mode: VimMode.Normal });
-  const command = applyNormalVimKey(start, { kind: "enter-command" });
   const keyboardInputs: ReadonlyArray<Readonly<{
     key: string;
     ctrlKey: boolean;
@@ -22,14 +15,12 @@ test("dispatches keyboard paste through the Vim editor command boundary", () => 
 
   for (const keyboardInput of keyboardInputs) {
     let defaultPreventionCount = 0;
-    const bufferChanges: VimBuffer[] = [];
+    const inputs: VimCommandInput[] = [];
 
     handleVimEditorPaneCommandInput({
-      buffer: command,
       input: { kind: "keydown", ...keyboardInput },
-      onBufferChange: (buffer) => {
-        bufferChanges.push(buffer);
-      },
+      onCommandInput: (input) => inputs.push(input),
+      onHistory: () => undefined,
       onPaneKeyInput: () => ({ kind: "unhandled" }),
       preventDefault: () => {
         defaultPreventionCount += 1;
@@ -37,14 +28,12 @@ test("dispatches keyboard paste through the Vim editor command boundary", () => 
     });
 
     assert.equal(defaultPreventionCount, 0);
-    assert.equal(bufferChanges.length, 0);
+    assert.equal(inputs.length, 0);
 
     handleVimEditorPaneCommandInput({
-      buffer: command,
       input: { kind: "paste", text: "q!" },
-      onBufferChange: (buffer) => {
-        bufferChanges.push(buffer);
-      },
+      onCommandInput: (input) => inputs.push(input),
+      onHistory: () => undefined,
       onPaneKeyInput: () => ({ kind: "unhandled" }),
       preventDefault: () => {
         defaultPreventionCount += 1;
@@ -52,72 +41,52 @@ test("dispatches keyboard paste through the Vim editor command boundary", () => 
     });
 
     assert.equal(defaultPreventionCount, 1);
-    assert.equal(bufferChanges.length, 1);
-
-    const afterPaste = bufferChanges.at(0);
-
-    if (afterPaste === undefined) {
-      throw new Error("expected one command buffer update from paste");
-    }
-
-    assert.deepEqual(afterPaste.mode, {
-      kind: "command",
-      input: "q!",
-    });
+    assert.deepEqual(inputs, [{ kind: "text", text: "q!" }]);
   }
 });
 
 test("gives pane prefix handling precedence over command input", () => {
-  const start = createVimBuffer({ text: "", mode: VimMode.Normal });
-  const command = applyNormalVimKey(start, { kind: "enter-command" });
   let defaultPreventionCount = 0;
-  const bufferChanges: VimBuffer[] = [];
-  const paneInputs: Array<Readonly<{
-    key: string;
-    ctrlKey: boolean;
-    metaKey: boolean;
-  }>> = [];
+  const inputs: VimCommandInput[] = [];
+  const history: string[] = [];
 
   handleVimEditorPaneCommandInput({
-    buffer: command,
-    input: { kind: "keydown", key: "b", ctrlKey: true, metaKey: false },
-    onBufferChange: (buffer) => {
-      bufferChanges.push(buffer);
-    },
-    onPaneKeyInput: (input) => {
-      paneInputs.push(input);
-      return { kind: "handled" };
-    },
+    input: { kind: "keydown", key: "p", ctrlKey: true, metaKey: false },
+    onCommandInput: (input) => inputs.push(input),
+    onHistory: (direction) => history.push(direction),
+    onPaneKeyInput: () => ({ kind: "handled" }),
     preventDefault: () => {
       defaultPreventionCount += 1;
     },
   });
 
-  assert.deepEqual(paneInputs, [
-    { key: "b", ctrlKey: true, metaKey: false },
-  ]);
   assert.equal(defaultPreventionCount, 1);
-  assert.equal(bufferChanges.length, 0);
+  assert.deepEqual(inputs, []);
+  assert.deepEqual(history, []);
 });
 
-test("consumes unrelated modified command controls", () => {
-  const start = createVimBuffer({ text: "", mode: VimMode.Normal });
-  const command = applyNormalVimKey(start, { kind: "enter-command" });
+test("dispatches history controls and consumes unrelated modified controls", () => {
   let defaultPreventionCount = 0;
-  const bufferChanges: VimBuffer[] = [];
+  const history: string[] = [];
 
-  handleVimEditorPaneCommandInput({
-    buffer: command,
-    input: { kind: "keydown", key: "c", ctrlKey: true, metaKey: false },
-    onBufferChange: (buffer) => {
-      bufferChanges.push(buffer);
-    },
-    onPaneKeyInput: () => ({ kind: "unhandled" }),
-    preventDefault: () => {
-      defaultPreventionCount += 1;
-    },
-  });
+  for (const input of [
+    { key: "ArrowUp", ctrlKey: false, metaKey: false },
+    { key: "ArrowDown", ctrlKey: false, metaKey: false },
+    { key: "p", ctrlKey: true, metaKey: false },
+    { key: "n", ctrlKey: true, metaKey: false },
+    { key: "c", ctrlKey: true, metaKey: false },
+  ]) {
+    handleVimEditorPaneCommandInput({
+      input: { kind: "keydown", ...input },
+      onCommandInput: () => undefined,
+      onHistory: (direction) => history.push(direction),
+      onPaneKeyInput: () => ({ kind: "unhandled" }),
+      preventDefault: () => {
+        defaultPreventionCount += 1;
+      },
+    });
+  }
 
-  assert.equal(defaultPreventionCount, 1);
-  assert.equal(bufferChanges.length, 0);
+  assert.equal(defaultPreventionCount, 5);
+  assert.deepEqual(history, ["older", "newer", "older", "newer"]);
 });

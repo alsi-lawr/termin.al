@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ContentId } from "../../api/ContentContracts.ts";
 import type { ViewerContent } from "../../content/ViewerContent.ts";
 import { ViewerPane } from "./ViewerPane.tsx";
+import { createVimSessionState } from "./VimSessionState.ts";
 
 function contentId(value: string): ContentId {
   const validation = ContentId.tryCreate(value, "responsive viewer test content");
@@ -27,6 +28,10 @@ function renderViewerPane(viewer: ViewerContent): string {
         kind: "unhandled",
       }),
       mobileCtrlPressed: false,
+      vimSession: {
+        state: createVimSessionState(),
+        onStateChange: () => undefined,
+      },
       onToggleMobileCtrl: () => undefined,
       onConsumeMobileCtrl: () => undefined,
       resolveMobileCtrlInput: (input) => ({

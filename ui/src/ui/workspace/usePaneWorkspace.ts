@@ -48,6 +48,11 @@ import type {
   InputCapturePaneKeyInput,
   InputCapturePaneKeyResult,
 } from "../terminal/InputCapture";
+import {
+  createVimSessionState,
+  type VimSessionBinding,
+  type VimSessionState,
+} from "./VimSessionState.ts";
 export type PaneCloseConfirmation =
   | Readonly<{ kind: "none" }>
   | Readonly<{
@@ -60,6 +65,7 @@ export type PaneWorkspaceController = Readonly<{
   focusVersion: number;
   closeConfirmation: PaneCloseConfirmation;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
   onCloseShellPresentation: (
@@ -118,6 +124,9 @@ export function usePaneWorkspace(
     }),
   );
   const [focusVersion, setFocusVersion] = useState(0);
+  const [vimSessionState, setVimSessionState] = useState(
+    createVimSessionState,
+  );
   const [closeConfirmation, setCloseConfirmation] =
     useState<PaneCloseConfirmation>({ kind: "none" });
   const [mobileCtrlModifier, setMobileCtrlModifier] =
@@ -165,6 +174,10 @@ export function usePaneWorkspace(
   const setMobileCtrl = useCallback((modifier: MobileCtrlModifier): void => {
     mobileCtrlModifierRef.current = modifier;
     setMobileCtrlModifier(modifier);
+  }, []);
+
+  const onVimSessionStateChange = useCallback((state: VimSessionState): void => {
+    setVimSessionState(state);
   }, []);
 
   const onToggleMobileCtrl = useCallback((): void => {
@@ -366,6 +379,10 @@ export function usePaneWorkspace(
     focusVersion,
     closeConfirmation,
     mobileCtrlPressed: mobileCtrlModifier.kind === "armed",
+    vimSession: {
+      state: vimSessionState,
+      onStateChange: onVimSessionStateChange,
+    },
     applyOperation,
     onShellAction,
     onCloseShellPresentation,

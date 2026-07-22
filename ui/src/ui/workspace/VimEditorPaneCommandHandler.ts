@@ -1,6 +1,5 @@
-import type { VimBuffer } from "../../domain/vim/VimBuffer.ts";
 import {
-  applyVimCommandInput,
+  type VimCommandInput,
   vimCommandInputFromKeyboard,
 } from "./VimCommandInput.ts";
 import type {
@@ -21,9 +20,9 @@ type VimEditorPaneCommandInput =
     }>;
 
 type VimEditorPaneCommandHandlerOptions = Readonly<{
-  buffer: VimBuffer;
   input: VimEditorPaneCommandInput;
-  onBufferChange: (buffer: VimBuffer) => void;
+  onCommandInput: (input: VimCommandInput) => void;
+  onHistory: (direction: "older" | "newer") => void;
   onPaneKeyInput: (
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
@@ -31,17 +30,15 @@ type VimEditorPaneCommandHandlerOptions = Readonly<{
 }>;
 
 export function handleVimEditorPaneCommandInput({
-  buffer,
   input,
-  onBufferChange,
+  onCommandInput,
+  onHistory,
   onPaneKeyInput,
   preventDefault,
 }: VimEditorPaneCommandHandlerOptions): void {
   if (input.kind === "paste") {
     preventDefault();
-    onBufferChange(
-      applyVimCommandInput(buffer, { kind: "text", text: input.text }),
-    );
+    onCommandInput({ kind: "text", text: input.text });
     return;
   }
 
@@ -64,8 +61,12 @@ export function handleVimEditorPaneCommandInput({
     case "prevent-default":
       preventDefault();
       return;
+    case "history":
+      preventDefault();
+      onHistory(commandKeyResult.direction);
+      return;
     case "input":
       preventDefault();
-      onBufferChange(applyVimCommandInput(buffer, commandKeyResult.input));
+      onCommandInput(commandKeyResult.input);
   }
 }

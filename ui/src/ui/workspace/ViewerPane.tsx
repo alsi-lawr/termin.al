@@ -62,6 +62,7 @@ import {
   type VimBuffer,
 } from "../../domain/vim/VimBuffer.ts";
 import { VimEditorPane } from "./VimEditorPane.tsx";
+import type { VimSessionBinding } from "./VimSessionState.ts";
 
 type ViewerPaneProps = Readonly<{
   viewer: ViewerContent;
@@ -72,6 +73,7 @@ type ViewerPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   onToggleMobileCtrl: () => void;
   onConsumeMobileCtrl: () => void;
   resolveMobileCtrlInput: (
@@ -118,6 +120,7 @@ type ViManpagerProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => InputCapturePaneKeyResult;
   mobileCtrlPressed: boolean;
+  vimSession: VimSessionBinding;
   onToggleMobileCtrl: () => void;
   onConsumeMobileCtrl: () => void;
   resolveMobileCtrlInput: (
@@ -135,6 +138,7 @@ function ViManpager({
   onActivate,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -179,6 +183,7 @@ function ViManpager({
       onActivate={onActivate}
       onPaneKeyInput={onPaneKeyInput}
       mobileCtrlPressed={mobileCtrlPressed}
+      vimSession={vimSession}
       onToggleMobileCtrl={onToggleMobileCtrl}
       onConsumeMobileCtrl={onConsumeMobileCtrl}
       resolveMobileCtrlInput={resolveMobileCtrlInput}
@@ -340,6 +345,7 @@ function StandardViewerPane({
   onActivate,
   onPaneKeyInput,
   mobileCtrlPressed,
+  vimSession,
   onToggleMobileCtrl,
   onConsumeMobileCtrl,
   resolveMobileCtrlInput,
@@ -785,6 +791,7 @@ function StandardViewerPane({
         onActivate={onActivate}
         onPaneKeyInput={onPaneKeyInput}
         mobileCtrlPressed={mobileCtrlPressed}
+        vimSession={vimSession}
         onToggleMobileCtrl={onToggleMobileCtrl}
         onConsumeMobileCtrl={onConsumeMobileCtrl}
         resolveMobileCtrlInput={resolveMobileCtrlInput}

@@ -546,6 +546,26 @@ test("retains command, search, and insert-mode behavior", () => {
   );
   assert.deepEqual(write.commandEffect, { kind: "write" });
 
+  for (const [source, commandEffect] of [
+    ["history", { kind: "show-history", history: "command" }],
+    ["history cmd", { kind: "show-history", history: "command" }],
+    ["history search", { kind: "show-history", history: "search" }],
+    ["messages", { kind: "show-messages" }],
+  ] as const) {
+    const listed = submitVimCommand(
+      appendVimCommandInput(press(start, ":"), source),
+    );
+    assert.deepEqual(listed.commandEffect, commandEffect);
+  }
+
+  const invalidHistory = submitVimCommand(
+    appendVimCommandInput(press(start, ":"), "history invalid"),
+  );
+  assert.deepEqual(invalidHistory.commandEffect, {
+    kind: "unrecognized-command",
+    source: "history invalid",
+  });
+
   for (const source of ["w!", "write", "write!", "wq", "wq!", "x", "xit"]) {
     const unsupported = submitVimCommand(
       appendVimCommandInput(press(start, ":"), source),

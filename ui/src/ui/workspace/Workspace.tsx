@@ -49,6 +49,7 @@ export function Workspace({
             hasShellRuntime={controller.hasShellRuntime}
             onPaneKeyInput={controller.onPaneKeyInput}
             mobileCtrlPressed={controller.mobileCtrlPressed}
+            vimSession={controller.vimSession}
             onToggleMobileCtrl={controller.onToggleMobileCtrl}
             onConsumeMobileCtrl={controller.onConsumeMobileCtrl}
             resolveMobileCtrlInput={controller.resolveMobileCtrlInput}

@@ -93,4 +93,16 @@ test("applies physical command controls", () => {
   });
   assert.equal(escaped.mode.kind, "normal");
   assert.deepEqual(submitted.commandEffect, { kind: "write" });
+
+  for (const [keyboardInput, direction] of [
+    [{ key: "ArrowUp", ctrlKey: false, metaKey: false }, "older"],
+    [{ key: "ArrowDown", ctrlKey: false, metaKey: false }, "newer"],
+    [{ key: "p", ctrlKey: true, metaKey: false }, "older"],
+    [{ key: "n", ctrlKey: true, metaKey: false }, "newer"],
+  ] as const) {
+    assert.deepEqual(vimCommandInputFromKeyboard(keyboardInput), {
+      kind: "history",
+      direction,
+    });
+  }
 });
