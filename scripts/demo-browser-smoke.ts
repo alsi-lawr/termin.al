@@ -125,6 +125,105 @@ async function waitForApplication(session: DevToolsSession): Promise<void> {
   throw new Error("The live application root did not render.");
 }
 
+async function evaluate(session: DevToolsSession, expression: string): Promise<unknown> {
+  const result = await session.command("Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+  });
+  return property(property(result, "result"), "value");
+}
+
+async function waitFor(
+  session: DevToolsSession,
+  expression: string,
+  failureMessage: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await evaluate(session, expression) === true) return;
+    await Bun.sleep(25);
+  }
+  throw new Error(failureMessage);
+}
+
+async function pressKey(
+  session: DevToolsSession,
+  key: string,
+  options: Readonly<{ code?: string; modifiers?: number }> = {},
+): Promise<void> {
+  const parameters = {
+    key,
+    code: options.code ?? key,
+    modifiers: options.modifiers ?? 0,
+  };
+  await session.command("Input.dispatchKeyEvent", { type: "keyDown", ...parameters });
+  await session.command("Input.dispatchKeyEvent", { type: "keyUp", ...parameters });
+}
+
+async function enterTerminalCommand(
+  session: DevToolsSession,
+  command: string,
+): Promise<void> {
+  const focused = await evaluate(session, `(() => {
+    const inputs = document.querySelectorAll('textarea[aria-label="Terminal command input"]');
+    const input = inputs.item(inputs.length - 1);
+    if (!(input instanceof HTMLTextAreaElement)) return false;
+    input.focus();
+    return document.activeElement === input;
+  })()`);
+  if (!focused) throw new Error("The active terminal command input could not be focused.");
+  await session.command("Input.insertText", { text: command });
+  await pressKey(session, "Enter");
+}
+
+async function reloadDemo(session: DevToolsSession): Promise<void> {
+  await session.command("Page.navigate", { url: new URL("/demo", baseUrl).href });
+  await waitForDemoBadge(session);
+}
+
+async function exerciseStrictModeRuntime(session: DevToolsSession): Promise<void> {
+  await reloadDemo(session);
+  await enterTerminalCommand(session, "pane split horizontal shell");
+  await waitFor(
+    session,
+    `document.querySelectorAll('textarea[aria-label="Terminal command input"]').length === 2`,
+    "A fresh shell pane did not open after StrictMode replay.",
+  );
+
+  await enterTerminalCommand(session, "echo strict-mode-runtime");
+  await waitFor(
+    session,
+    `document.body.textContent?.includes("strict-mode-runtime") === true`,
+    "The fresh shell could not execute a deterministic command after StrictMode replay.",
+  );
+
+  await evaluate(session, `(() => {
+    const inputs = document.querySelectorAll('textarea[aria-label="Terminal command input"]');
+    const input = inputs.item(inputs.length - 1);
+    if (!(input instanceof HTMLTextAreaElement)) return false;
+    input.focus();
+    return true;
+  })()`);
+  await session.command("Input.insertText", { text: "cat ~/ab" });
+  await pressKey(session, "Tab");
+  await waitFor(
+    session,
+    `(() => {
+      const inputs = document.querySelectorAll('textarea[aria-label="Terminal command input"]');
+      const input = inputs.item(inputs.length - 1);
+      return input instanceof HTMLTextAreaElement && input.value === "cat ~/about.md";
+    })()`,
+    "The fresh shell could not resolve deterministic command completion after StrictMode replay.",
+  );
+  await pressKey(session, "Enter");
+
+  await enterTerminalCommand(session, "pane close");
+  await waitFor(
+    session,
+    `document.querySelectorAll('textarea[aria-label="Terminal command input"]').length === 1`,
+    "The fresh shell pane did not close through public shell behavior.",
+  );
+}
+
 const baseUrl = new URL(process.env.TERMINAL_SMOKE_BASE_URL ?? "http://127.0.0.1:5089");
 const debugPort = Number.parseInt(process.env.TERMINAL_SMOKE_DEBUG_PORT ?? "9339", 10);
 const chrome = process.env.CHROME_BIN ?? "google-chrome";
@@ -191,6 +290,8 @@ try {
   if (forbiddenDemoRequest !== undefined) {
     throw new Error(`/demo attempted a forbidden ${forbiddenDemoRequest.resourceType} request: ${forbiddenDemoRequest.url}`);
   }
+
+  await exerciseStrictModeRuntime(session);
 
   await session.command("Page.navigate", { url: new URL("/", baseUrl).href });
   await waitForApplication(session);
