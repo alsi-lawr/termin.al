@@ -31,11 +31,12 @@ Consume the repository as a flake input and import the module:
 }
 ```
 
-These are all five module options:
+These are all six module options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `enable` | `false` | Enable the service. |
+| `package` | The consuming termin.al flake's default package | Application package to run. Override it to deploy a separately pinned build. |
 | `listenAddress` | `"127.0.0.1"` | HTTP listen address. |
 | `port` | `5000` | HTTP port, limited to 1024–65535. |
 | `environmentFile` | `null` | Optional absolute runtime environment-file path. |

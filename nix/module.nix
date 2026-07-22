@@ -1,4 +1,4 @@
-{ source }:
+{ self }:
 {
   config,
   lib,
@@ -7,9 +7,6 @@
 }:
 let
   cfg = config.services.termin-al;
-  application = import ./application.nix {
-    inherit lib pkgs source;
-  };
   cvPath = "/run/secrets/termin.al-cv.md";
   listenHost =
     if lib.hasInfix ":" cfg.listenAddress then "[${cfg.listenAddress}]" else cfg.listenAddress;
@@ -17,6 +14,13 @@ in
 {
   options.services.termin-al = {
     enable = lib.mkEnableOption "termin.al";
+
+    package = lib.mkOption {
+      type = lib.types.package;
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      defaultText = lib.literalExpression "inputs.termin-al.packages.${pkgs.stdenv.hostPlatform.system}.default";
+      description = "termin.al package to run.";
+    };
 
     listenAddress = lib.mkOption {
       type = lib.types.str;
@@ -82,8 +86,8 @@ in
 
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${pkgs.dotnetCorePackages.aspnetcore_10_0}/bin/dotnet ${application}/lib/termin-al/Termin.Al.Host.dll";
-        WorkingDirectory = "${application}/lib/termin-al";
+        ExecStart = "${pkgs.dotnetCorePackages.aspnetcore_10_0}/bin/dotnet ${cfg.package}/lib/termin-al/Termin.Al.Host.dll";
+        WorkingDirectory = "${cfg.package}/lib/termin-al";
         Restart = "on-failure";
         RestartSec = "5s";
         TimeoutStopSec = "30s";

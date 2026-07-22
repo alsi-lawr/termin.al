@@ -10,9 +10,19 @@
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; };
+      application = import ./nix/application.nix {
+        inherit pkgs;
+        inherit (pkgs) lib;
+        source = ./.;
+      };
     in
     {
-      nixosModules.default = import ./nix/module.nix { source = ./.; };
+      packages.${system} = {
+        default = application;
+        termin-al = application;
+      };
+
+      nixosModules.default = import ./nix/module.nix { inherit self; };
 
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
