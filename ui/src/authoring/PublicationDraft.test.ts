@@ -15,6 +15,16 @@ test("accepts arbitrary-depth canonical blog and notes paths without traversal",
   }
 });
 
+test("uses the host virtual-path maximum as the browser canonical-path boundary", () => {
+  const directoriesAtLimit = ["a".repeat(128), "b".repeat(128), "c".repeat(128), "d".repeat(113)].join("/");
+  const maximum = `~/blog/${directoriesAtLimit}/x.md`;
+  const overMaximum = maximum.replace("d".repeat(113), "d".repeat(114));
+  assert.equal(maximum.length, 512);
+  assert.equal(overMaximum.length, 513);
+  assert.equal(publicationPathFromVirtualPath(maximum).kind, "valid");
+  assert.equal(publicationPathFromVirtualPath(overMaximum).kind, "invalid");
+});
+
 test("validates the complete strict publication front matter contract", () => {
   const source = minimalPublicationSource("cross-tab-drafts");
   const parsed = validatePublicationSource(source);

@@ -279,12 +279,12 @@ function PaneLeaf({
       const handleEffect = async (effect: VimCommandEffect, buffer: VimBuffer): Promise<void> => {
         if (authoring === undefined) return;
         const source = vimBufferText(buffer);
-        const update = (draft: typeof content.draft, savedSource: string, message: string): void => {
-          onOperation({ kind: "update-authoring-editor", paneId: pane.id, draft, savedSource, buffer, message });
+        const showMessage = (message: string): void => {
+          onOperation({ kind: "set-authoring-message", paneId: pane.id, message });
         };
         if (effect.kind === "quit") {
           if (source === content.savedSource) onOperation({ kind: "close" });
-          else update(content.draft, content.savedSource, "No write since last change; use :q! to discard.");
+          else showMessage("No write since last change; use :q! to discard.");
           return;
         }
         if (effect.kind === "force-quit") {
@@ -292,16 +292,16 @@ function PaneLeaf({
           try {
             result = await authoring.discard(content.draft);
           } catch {
-            update(content.draft, content.savedSource, "Draft storage is unavailable; this buffer was not discarded.");
+            showMessage("Draft storage is unavailable; this buffer was not discarded.");
             return;
           }
-          if (result.kind === "discarded") onOperation({ kind: "confirm-close" });
-          else update(content.draft, content.savedSource, "A newer draft revision exists; this buffer was not discarded.");
+          if (result.kind === "discarded") onOperation({ kind: "discard-authoring-editor", paneId: pane.id });
+          else showMessage("A newer draft revision exists; this buffer was not discarded.");
           return;
         }
         if (effect.kind === "preview") {
           const parsed = validatePublicationSource(source);
-          if (parsed.kind === "invalid") { update(content.draft, content.savedSource, parsed.message); return; }
+          if (parsed.kind === "invalid") { showMessage(parsed.message); return; }
           onOperation({
             kind: "open-authoring-preview",
             paneId: pane.id,
@@ -320,13 +320,19 @@ function PaneLeaf({
         try {
           result = await authoring.save(content.draft, source);
         } catch {
-          update(content.draft, content.savedSource, "Draft storage is unavailable; this buffer was not saved.");
+          showMessage("Draft storage is unavailable; this buffer was not saved.");
           return;
         }
-        if (result.kind === "invalid") { update(content.draft, content.savedSource, result.message); return; }
-        if (result.kind === "stale") { update(content.draft, content.savedSource, "A newer draft revision exists; this buffer was not saved."); return; }
-        update(result.draft, source, `Draft revision ${result.draft.recordRevision} saved.`);
-        if (effect.kind === "write-quit") onOperation({ kind: "confirm-close" });
+        if (result.kind === "invalid") { showMessage(result.message); return; }
+        if (result.kind === "stale") { showMessage("A newer draft revision exists; this buffer was not saved."); return; }
+        onOperation({
+          kind: "complete-authoring-save",
+          paneId: pane.id,
+          draft: result.draft,
+          savedSource: source,
+          message: `Draft revision ${result.draft.recordRevision} saved.`,
+          closeIfBufferMatchesSavedSource: effect.kind === "write-quit",
+        });
       };
       return (
         <div className={paneClass}>

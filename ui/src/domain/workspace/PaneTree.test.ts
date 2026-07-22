@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { insertVimText } from "../vim/VimBuffer.ts";
+import { createVimBuffer, insertVimText, vimBufferText } from "../vim/VimBuffer.ts";
+import { minimalPublicationSource, validatePublicationSource, type PublicationDraft } from "../../authoring/PublicationDraft.ts";
 import {
   applyPaneOperation,
   createEditorPaneContent,
+  createAuthoringEditorPaneContent,
   createPaneWorkspace,
   createPlaceholderViewerPaneContent,
   createShellPaneContent,
@@ -236,4 +238,78 @@ test("requires confirmation before closing a dirty editor pane", () => {
   assert.deepEqual(paneLeaves(confirmed.tree).map((pane) => pane.id), [
     "pane-1",
   ]);
+});
+
+function authoringDraft(source: string, recordRevision = 0): PublicationDraft {
+  const frontMatter = validatePublicationSource(source);
+  if (frontMatter.kind === "invalid") assert.fail(frontMatter.message);
+  return {
+    schemaVersion: 1,
+    recordRevision,
+    kind: "note",
+    repositoryPath: "notes/runtime/example.md",
+    virtualPath: "~/notes/runtime/example.md",
+    frontMatter: frontMatter.value,
+    source,
+    base: { kind: "new", defaultBranch: "main", headSha: "a".repeat(40) },
+    dirty: true,
+    unpublished: true,
+    stagedAssets: [],
+  };
+}
+
+test("async authoring completions preserve the current buffer and conditionally close wq", () => {
+  const source = minimalPublicationSource("example");
+  const submittedSource = source + "\nSubmitted.";
+  const newerSource = submittedSource + "\nTyped while saving.";
+  const initial = split(
+    createPaneWorkspace({ initialContent: createShellPaneContent() }),
+    "vertical",
+    createAuthoringEditorPaneContent(authoringDraft(source)),
+  );
+  const editorId = initial.activePaneId;
+  const withNewerBuffer = applied(applyPaneOperation(initial, {
+    kind: "replace-editor-buffer",
+    paneId: editorId,
+    buffer: createVimBuffer({ text: newerSource, mode: { kind: "normal" } }),
+  }));
+  const completed = applied(applyPaneOperation(withNewerBuffer, {
+    kind: "complete-authoring-save",
+    paneId: editorId,
+    draft: authoringDraft(submittedSource, 1),
+    savedSource: submittedSource,
+    message: "saved",
+    closeIfBufferMatchesSavedSource: true,
+  }));
+  const retained = paneLeaves(completed.tree).find((pane) => pane.id === editorId);
+  if (retained?.content.kind !== "authoring-editor") assert.fail("A newer buffer must keep the editor open.");
+  assert.equal(vimBufferText(retained.content.buffer), newerSource);
+  assert.equal(retained.content.savedSource, submittedSource);
+  assert.equal(retained.content.draft.recordRevision, 1);
+
+  const messaged = applied(applyPaneOperation(completed, {
+    kind: "set-authoring-message",
+    paneId: editorId,
+    message: "stale",
+  }));
+  const afterMessage = paneLeaves(messaged.tree).find((pane) => pane.id === editorId);
+  assert.equal(
+    afterMessage?.content.kind === "authoring-editor" ? vimBufferText(afterMessage.content.buffer) : undefined,
+    newerSource,
+  );
+
+  const matching = applied(applyPaneOperation(initial, {
+    kind: "replace-editor-buffer",
+    paneId: editorId,
+    buffer: createVimBuffer({ text: submittedSource, mode: { kind: "normal" } }),
+  }));
+  const closed = applied(applyPaneOperation(matching, {
+    kind: "complete-authoring-save",
+    paneId: editorId,
+    draft: authoringDraft(submittedSource, 1),
+    savedSource: submittedSource,
+    message: "saved",
+    closeIfBufferMatchesSavedSource: true,
+  }));
+  assert.equal(paneLeaves(closed.tree).some((pane) => pane.id === editorId), false);
 });

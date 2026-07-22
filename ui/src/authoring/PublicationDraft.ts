@@ -54,7 +54,7 @@ const slugPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const tagPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 
 export function publicationPathFromVirtualPath(value: string): DraftValidation<PublicationPath> {
-  if (!value.startsWith("~/") || value.length > 514 || value.includes("\0")) {
+  if (!value.startsWith("~/") || value.length > 512 || value.includes("\0")) {
     return { kind: "invalid", message: "edit requires a canonical blog or notes Markdown path." };
   }
 

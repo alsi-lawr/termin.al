@@ -160,12 +160,21 @@ export type PaneOperation =
       buffer: VimBuffer;
     }>
   | Readonly<{
-      kind: "update-authoring-editor";
+      kind: "set-authoring-message";
+      paneId: PaneId;
+      message: string;
+    }>
+  | Readonly<{
+      kind: "complete-authoring-save";
       paneId: PaneId;
       draft: PublicationDraft;
       savedSource: string;
-      buffer: VimBuffer;
-      message: string | undefined;
+      message: string;
+      closeIfBufferMatchesSavedSource: boolean;
+    }>
+  | Readonly<{
+      kind: "discard-authoring-editor";
+      paneId: PaneId;
     }>
   | Readonly<{
       kind: "open-authoring-preview";
@@ -408,18 +417,6 @@ function collectPaneGeometries(
     },
     geometries,
   );
-}
-
-function activePane(workspace: PaneWorkspace): Pane {
-  const pane = paneLeaves(workspace.tree).find(
-    (candidate) => candidate.id === workspace.activePaneId,
-  );
-
-  if (pane === undefined) {
-    throw new Error("Pane workspaces must retain an active pane.");
-  }
-
-  return pane;
 }
 
 function setActivePane(
@@ -728,8 +725,9 @@ function nextLayout(layout: PaneLayout): Exclude<PaneLayout, "manual"> {
   return next;
 }
 
-function closeActivePane(
+function closePane(
   workspace: PaneWorkspace,
+  paneId: PaneId,
   confirmed: boolean,
 ): PaneOperationResult {
   const panes = paneLeaves(workspace.tree);
@@ -738,28 +736,33 @@ function closeActivePane(
     return { kind: "rejected", reason: "close-last-pane" };
   }
 
-  const active = activePane(workspace);
+  const pane = panes.find((candidate) => candidate.id === paneId);
+
+  if (pane === undefined) {
+    return { kind: "rejected", reason: "target-pane-unavailable" };
+  }
 
   if (
     !confirmed &&
-    ((active.content.kind === "editor" && isVimBufferDirty(active.content.buffer)) ||
-      (active.content.kind === "authoring-editor" && vimBufferText(active.content.buffer) !== active.content.savedSource))
+    ((pane.content.kind === "editor" && isVimBufferDirty(pane.content.buffer)) ||
+      (pane.content.kind === "authoring-editor" && vimBufferText(pane.content.buffer) !== pane.content.savedSource))
   ) {
-    return { kind: "confirmation-required", pane: active };
+    return { kind: "confirmation-required", pane };
   }
 
-  const activeIndex = panes.findIndex((pane) => pane.id === active.id);
-  const replacement =
-    panes[activeIndex + 1] ?? panes[activeIndex - 1];
+  const paneIndex = panes.findIndex((candidate) => candidate.id === pane.id);
+  const replacement = pane.id === workspace.activePaneId
+    ? panes[paneIndex + 1] ?? panes[paneIndex - 1]
+    : panes.find((candidate) => candidate.id === workspace.activePaneId);
 
   if (replacement === undefined) {
     throw new Error("Closing a non-final pane must leave an active replacement.");
   }
 
-  const removed = removePane(workspace.tree, active.id);
+  const removed = removePane(workspace.tree, pane.id);
 
   if (removed.kind !== "removed" || removed.tree === undefined) {
-    throw new Error("Closing an active pane must remove it from the pane tree.");
+    throw new Error("Closing a pane must remove it from the pane tree.");
   }
 
   return {
@@ -772,6 +775,10 @@ function closeActivePane(
       layout: "manual",
     },
   };
+}
+
+function closeActivePane(workspace: PaneWorkspace, confirmed: boolean): PaneOperationResult {
+  return closePane(workspace, workspace.activePaneId, confirmed);
 }
 
 function applyLayout(
@@ -1097,7 +1104,7 @@ export function applyPaneOperation(
         },
       };
     }
-    case "update-authoring-editor": {
+    case "set-authoring-message": {
       const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
       if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
       if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
@@ -1107,10 +1114,37 @@ export function applyPaneOperation(
           ...workspace,
           tree: replacePane(workspace.tree, pane.id, {
             ...pane,
-            content: { ...pane.content, draft: operation.draft, savedSource: operation.savedSource, buffer: operation.buffer, message: operation.message },
+            content: { ...pane.content, message: operation.message },
           }),
         },
       };
+    }
+    case "complete-authoring-save": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      const updated = {
+        ...workspace,
+        tree: replacePane(workspace.tree, pane.id, {
+          ...pane,
+          content: {
+            ...pane.content,
+            draft: operation.draft,
+            savedSource: operation.savedSource,
+            message: operation.message,
+          },
+        }),
+      };
+      return operation.closeIfBufferMatchesSavedSource &&
+          vimBufferText(pane.content.buffer) === operation.savedSource
+        ? closePane(updated, pane.id, true)
+        : { kind: "applied", workspace: updated };
+    }
+    case "discard-authoring-editor": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      return closePane(workspace, pane.id, true);
     }
     case "open-authoring-preview": {
       const existing = paneLeaves(workspace.tree).find(
