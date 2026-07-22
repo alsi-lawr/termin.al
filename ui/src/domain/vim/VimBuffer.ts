@@ -34,6 +34,10 @@ import {
   parseTextSubstitution,
   type TextSubstitution,
 } from "../text/TextSubstitution.ts";
+import {
+  maximumHighlightedCodeUnits,
+  maximumHighlightRanges,
+} from "../../highlighting/HighlightingTokens.ts";
 
 export type { VimMotion } from "./VimMotion.ts";
 
@@ -1442,7 +1446,11 @@ type VimSearchMatches =
   | Readonly<{ kind: "matches"; values: ReadonlyArray<VimSearchMatch> }>
   | Readonly<{ kind: "invalid" }>;
 
-function searchMatches(text: string, query: string): VimSearchMatches {
+function searchMatches(
+  text: string,
+  query: string,
+  maximumMatches?: number,
+): VimSearchMatches {
   let expression: RegExp;
 
   try {
@@ -1460,6 +1468,10 @@ function searchMatches(text: string, query: string): VimSearchMatches {
 
   while (match !== null) {
     values.push({ start: match.index, end: match.index + match[0].length });
+
+    if (maximumMatches !== undefined && values.length > maximumMatches) {
+      break;
+    }
 
     if (match[0].length === 0) {
       expression.lastIndex = nextUnicodeCursorOffset(text, expression.lastIndex);
@@ -2939,6 +2951,7 @@ type VimSubstitutionEvaluation = Readonly<{
 function evaluateVimSubstitution(
   buffer: VimBuffer,
   command: VimSubstitutionCommand,
+  maximumRanges?: number,
 ): VimSubstitutionEvaluation {
   const lines = [...buffer.lines];
   const startLine = command.range === "whole-buffer" ? 0 : buffer.cursor.line;
@@ -2957,7 +2970,16 @@ function evaluateVimSubstitution(
       continue;
     }
 
-    const result = applyTextSubstitution(line, command.substitution);
+    const remainingRanges = maximumRanges === undefined
+      ? undefined
+      : maximumRanges - ranges.length;
+    const result = applyTextSubstitution(
+      line,
+      command.substitution,
+      remainingRanges === undefined
+        ? undefined
+        : { maximumRanges: remainingRanges },
+    );
     matched = matched || result.matched;
     lines[lineIndex] = result.text;
     ranges.push(...result.ranges.map((range) => ({
@@ -3088,14 +3110,26 @@ function submitVimSubstitution(
 export function vimCommandPreview(buffer: VimBuffer): VimCommandPreview {
   const source = vimBufferText(buffer);
 
+  if (source.length > maximumHighlightedCodeUnits) {
+    return { source, ranges: [] };
+  }
+
   if (buffer.mode.kind === "search") {
     if (buffer.mode.input.length === 0) {
       return { source, ranges: [] };
     }
 
-    const matches = searchMatches(source, buffer.mode.input);
+    const matches = searchMatches(
+      source,
+      buffer.mode.input,
+      maximumHighlightRanges,
+    );
 
-    if (matches.kind === "invalid" || matches.values.length === 0) {
+    if (
+      matches.kind === "invalid" ||
+      matches.values.length === 0 ||
+      matches.values.length > maximumHighlightRanges
+    ) {
       return { source, ranges: [] };
     }
 
@@ -3127,9 +3161,16 @@ export function vimCommandPreview(buffer: VimBuffer): VimCommandPreview {
     return { source, ranges: [] };
   }
 
-  const evaluation = evaluateVimSubstitution(buffer, parsed.command);
-  return evaluation.matched
-    ? { source: joinLines(evaluation.lines), ranges: evaluation.ranges }
+  const evaluation = evaluateVimSubstitution(
+    buffer,
+    parsed.command,
+    maximumHighlightRanges,
+  );
+  const previewSource = joinLines(evaluation.lines);
+  return evaluation.matched &&
+      evaluation.ranges.length <= maximumHighlightRanges &&
+      previewSource.length <= maximumHighlightedCodeUnits
+    ? { source: previewSource, ranges: evaluation.ranges }
     : { source, ranges: [] };
 }
 

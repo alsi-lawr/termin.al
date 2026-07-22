@@ -22,6 +22,10 @@ import {
   type VimRegister,
 } from "./VimBuffer.ts";
 import { vimVisualRange } from "./VimVisualSelection.ts";
+import {
+  maximumHighlightedCodeUnits,
+  maximumHighlightRanges,
+} from "../../highlighting/HighlightingTokens.ts";
 
 function mappedKey(
   key: string,
@@ -836,6 +840,36 @@ test("previews complete substitutions in place without editing until submission"
   assert.equal(vimBufferText(committed), "😀 doggy doggy\ndoggy doggy\nlast");
   assert.equal(committed.undoStack.length, 1);
   assert.equal(vimBufferText(press(committed, "u")), vimBufferText(start));
+});
+
+test("falls back to original unadorned command previews at existing highlighting limits", () => {
+  const overRangeSource = "a".repeat(maximumHighlightRanges + 1);
+  const search = appendVimCommandInput(
+    press(createVimBuffer({ text: overRangeSource, mode: VimMode.Normal }), "/"),
+    "a",
+  );
+  const substitution = appendVimCommandInput(
+    press(createVimBuffer({ text: overRangeSource, mode: VimMode.Normal }), ":"),
+    "%s/a/b/g",
+  );
+  const overCodeUnitSource = "x".repeat(maximumHighlightedCodeUnits + 1);
+  const overCodeUnit = appendVimCommandInput(
+    press(createVimBuffer({ text: overCodeUnitSource, mode: VimMode.Normal }), "/"),
+    "x",
+  );
+
+  assert.deepEqual(vimCommandPreview(search), {
+    source: overRangeSource,
+    ranges: [],
+  });
+  assert.deepEqual(vimCommandPreview(substitution), {
+    source: overRangeSource,
+    ranges: [],
+  });
+  assert.deepEqual(vimCommandPreview(overCodeUnit), {
+    source: overCodeUnitSource,
+    ranges: [],
+  });
 });
 
 test("reuses Vim search and substitution patterns without changing search direction", () => {

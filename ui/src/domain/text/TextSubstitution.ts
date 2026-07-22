@@ -22,6 +22,10 @@ type TextSubstitutionRange = Readonly<{
   role: "matched" | "replaced";
 }>;
 
+type TextSubstitutionOptions = Readonly<{
+  maximumRanges: number;
+}>;
+
 type DelimitedText = Readonly<{ text: string; nextOffset: number }>;
 
 function readDelimited(
@@ -140,6 +144,7 @@ function replacementText(replacement: string, match: RegExpExecArray): string {
 export function applyTextSubstitution(
   text: string,
   substitution: TextSubstitution,
+  options?: TextSubstitutionOptions,
 ): TextSubstitutionResult {
   const flags = substitution.ignoreCase ? "giu" : "gu";
   const expression = new RegExp(substitution.pattern, flags);
@@ -156,7 +161,10 @@ export function applyTextSubstitution(
     output.push(prefix, replacement);
     outputOffset += prefix.length;
 
-    if (replacement.length > 0) {
+    if (
+      replacement.length > 0 &&
+      (options === undefined || ranges.length <= options.maximumRanges)
+    ) {
       ranges.push({
         start: outputOffset,
         end: outputOffset + replacement.length,
