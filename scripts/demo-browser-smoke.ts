@@ -4,6 +4,11 @@ import { join } from "node:path";
 
 type JsonObject = Readonly<Record<string, unknown>>;
 
+type BrowserRequest = Readonly<{
+  url: string;
+  resourceType: string;
+}>;
+
 function object(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null ? value : undefined;
 }
@@ -92,20 +97,20 @@ async function waitForChrome(debugPort: number): Promise<string> {
   throw new Error("Chrome did not open its DevTools endpoint.");
 }
 
-async function visibleMode(session: DevToolsSession, mode: "demo" | "live"): Promise<boolean> {
+async function visibleDemoBadge(session: DevToolsSession): Promise<boolean> {
   const result = await session.command("Runtime.evaluate", {
-    expression: `(() => { const element = document.querySelector('[aria-label="${mode} mode"]'); return element !== null && getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none'; })()`,
+    expression: "(() => { const element = document.querySelector('[aria-label=\"demo mode\"]'); return element !== null && getComputedStyle(element).visibility !== 'hidden' && getComputedStyle(element).display !== 'none'; })()",
     returnByValue: true,
   });
   return property(property(result, "result"), "value") === true;
 }
 
-async function waitForMode(session: DevToolsSession, mode: "demo" | "live"): Promise<void> {
+async function waitForDemoBadge(session: DevToolsSession): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (await visibleMode(session, mode)) return;
+    if (await visibleDemoBadge(session)) return;
     await Bun.sleep(25);
   }
-  throw new Error(`The visible ${mode.toUpperCase()} badge did not appear.`);
+  throw new Error("The visible DEMO badge did not appear.");
 }
 
 async function waitForApplication(session: DevToolsSession): Promise<void> {
@@ -142,11 +147,16 @@ let session: DevToolsSession | undefined;
 
 try {
   session = await DevToolsSession.connect(await waitForChrome(debugPort));
-  const requests: Array<string> = [];
+  const requests: Array<BrowserRequest> = [];
   session.listen((method, parameters) => {
     if (method === "Network.requestWillBeSent") {
       const url = stringProperty(property(parameters, "request"), "url");
-      if (url !== undefined) requests.push(url);
+      const resourceType = stringProperty(parameters, "type");
+      if (url !== undefined && resourceType !== undefined) requests.push({ url, resourceType });
+    }
+    if (method === "Network.webSocketCreated") {
+      const url = stringProperty(parameters, "url");
+      if (url !== undefined) requests.push({ url, resourceType: "WebSocket" });
     }
     if (method === "Fetch.requestPaused") {
       const requestId = stringProperty(parameters, "requestId");
@@ -165,24 +175,26 @@ try {
 
   const demoStart = requests.length;
   await session.command("Page.navigate", { url: new URL("/demo", baseUrl).href });
-  await waitForMode(session, "demo");
+  await waitForDemoBadge(session);
   await session.command("Page.reload", { ignoreCache: true });
-  await waitForMode(session, "demo");
+  await waitForDemoBadge(session);
 
   const demoRequests = requests.slice(demoStart);
-  const forbiddenDemoRequest = demoRequests.find((url) => {
-    const request = new URL(url);
-    return request.origin !== baseUrl.origin
-      || request.pathname.startsWith("/terminal.v1.")
-      || request.pathname.startsWith("/api/auth/");
+  const forbiddenDemoRequest = demoRequests.find(({ url, resourceType }) => {
+    const requestUrl = new URL(url);
+    return resourceType === "EventSource"
+      || resourceType === "WebSocket"
+      || requestUrl.origin !== baseUrl.origin
+      || requestUrl.pathname.startsWith("/terminal.v1.")
+      || requestUrl.pathname.startsWith("/api/auth/");
   });
   if (forbiddenDemoRequest !== undefined) {
-    throw new Error(`/demo attempted a forbidden application or external request: ${forbiddenDemoRequest}`);
+    throw new Error(`/demo attempted a forbidden ${forbiddenDemoRequest.resourceType} request: ${forbiddenDemoRequest.url}`);
   }
 
   await session.command("Page.navigate", { url: new URL("/", baseUrl).href });
   await waitForApplication(session);
-  if (await visibleMode(session, "demo")) throw new Error("The live root displayed the DEMO badge.");
+  if (await visibleDemoBadge(session)) throw new Error("The live root displayed the DEMO badge.");
 
   console.log(`Browser smoke passed: ${demoRequests.length} same-origin static /demo requests, direct entry and refresh, live root unbadged.`);
 } finally {
