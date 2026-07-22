@@ -10,7 +10,6 @@ let
   application = import ./application.nix {
     inherit lib pkgs source;
   };
-  stateDirectory = "/var/lib/termin.al";
   cvPath = "/run/secrets/termin.al-cv.md";
   listenHost =
     if lib.hasInfix ":" cfg.listenAddress then "[${cfg.listenAddress}]" else cfg.listenAddress;
@@ -26,7 +25,7 @@ in
     };
 
     port = lib.mkOption {
-      type = lib.types.port;
+      type = lib.types.ints.between 1024 65535;
       default = 5000;
       description = "Port on which the termin.al HTTP service listens.";
     };
@@ -46,8 +45,9 @@ in
       default = null;
       example = "/run/secrets/termin-al-cv-source.md";
       description = ''
-        Absolute runtime path to the optional CV document. systemd bind-mounts
-        it read-only at ${cvPath}; the source is not copied to the Nix store.
+        Absolute runtime path to the optional CV document. systemd loads it as
+        a service credential and exposes that credential read-only at ${cvPath};
+        the source is not copied to the Nix store.
       '';
     };
   };
@@ -77,7 +77,7 @@ in
         ASPNETCORE_ENVIRONMENT = "Production";
         ASPNETCORE_URLS = "http://${listenHost}:${toString cfg.port}";
         DOTNET_EnableDiagnostics = "0";
-        Stats__DataPath = "${stateDirectory}/stats";
+        Stats__DataPath = "/var/lib/termin.al/stats";
       };
 
       serviceConfig = {
@@ -97,7 +97,8 @@ in
         UMask = "0077";
 
         EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
-        BindReadOnlyPaths = lib.optional (cfg.cvFile != null) "${cfg.cvFile}:${cvPath}";
+        LoadCredential = lib.optional (cfg.cvFile != null) "termin-al-cv.md:${cfg.cvFile}";
+        BindReadOnlyPaths = lib.optional (cfg.cvFile != null) "%d/termin-al-cv.md:${cvPath}";
 
         CapabilityBoundingSet = "";
         LockPersonality = true;

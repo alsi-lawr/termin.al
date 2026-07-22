@@ -48,8 +48,7 @@ let
     outputHash = "sha256-L9bet/EnjxS/6JaZsXalD026UAUBvowmO/nzeLMKPBM=";
   };
 
-  fetchNupkg = pkgs.dotnetCorePackages.fetchNupkg;
-  grpcTools = fetchNupkg {
+  grpcTools = pkgs.dotnetCorePackages.fetchNupkg {
     pname = "Grpc.Tools";
     version = "2.82.0";
     hash = "sha256-5yYsikQ12205O5Gd5LoUELbO0xhm35joNFb5Accygz4=";
