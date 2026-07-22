@@ -589,7 +589,13 @@ module Program =
 
         let viewer = Cv.generateViewerKey ()
 
-        authenticationApplication (Some viewer.CanonicalHash) true false now Cv.SecretFilePath GitHubPublication.unavailable
+        authenticationApplication
+            (Some viewer.CanonicalHash)
+            true
+            false
+            now
+            Cv.SecretFilePath
+            GitHubPublication.unavailable
         |> fun (application, _, capturedLogs) ->
             withRunningHost application (fun client ->
                 let session, _ =
@@ -659,6 +665,7 @@ module Program =
             DateTimeOffset.Parse("2026-07-22T12:00:00Z")
 
         let suppliedTokens = ResizeArray<string>()
+
         let publication =
             { new GitHubPublication.Client with
                 member _.Publish(ownerToken, _, _) =
@@ -775,7 +782,13 @@ module Program =
             File.WriteAllText(cvPath, cvBytes, UTF8Encoding(false))
 
             let application, githubHandler, capturedLogs =
-                authenticationApplication (Some viewerKey.CanonicalHash) true false now cvPath GitHubPublication.unavailable
+                authenticationApplication
+                    (Some viewerKey.CanonicalHash)
+                    true
+                    false
+                    now
+                    cvPath
+                    GitHubPublication.unavailable
 
             let mutable callbackValues = []
 

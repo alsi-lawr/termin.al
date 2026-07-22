@@ -66,9 +66,7 @@ module GitHubPublication =
           HeadSha: string
           TreeSha: string }
 
-    type private FileState =
-        { BlobSha: string
-          Text: string }
+    type private FileState = { BlobSha: string; Text: string }
 
     type private CatalogEntry =
         { Element: JsonElement
@@ -89,8 +87,12 @@ module GitHubPublication =
 
     let private apiBase = Uri("https://api.github.com/")
     let private apiVersion = "2026-03-10"
-    let private jsonOptions = JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower)
-    let private writeGates = ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal)
+
+    let private jsonOptions =
+        JsonSerializerOptions(PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower)
+
+    let private writeGates =
+        ConcurrentDictionary<string, SemaphoreSlim>(StringComparer.Ordinal)
 
     let private escapePath (value: string) =
         value.Split('/') |> Array.map Uri.EscapeDataString |> String.concat "/"
@@ -138,8 +140,7 @@ module GitHubPublication =
     let private send (httpClient: HttpClient) token method path payload cancellationToken =
         task {
             use request = requestMessage token method path payload
-            use! response =
-                httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+            use! response = httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             let! body = response.Content.ReadAsStringAsync(cancellationToken)
             return response.StatusCode, body
         }
@@ -225,8 +226,15 @@ module GitHubPublication =
                 match tryString "sha" json, tryString "encoding" json, tryString "content" json with
                 | Some sha, Some "base64", Some encoded when isSha sha ->
                     try
-                        let bytes = Convert.FromBase64String(encoded.Replace("\n", "", StringComparison.Ordinal))
-                        return Some(Some { BlobSha = sha; Text = Encoding.UTF8.GetString bytes })
+                        let bytes =
+                            Convert.FromBase64String(encoded.Replace("\n", "", StringComparison.Ordinal))
+
+                        return
+                            Some(
+                                Some
+                                    { BlobSha = sha
+                                      Text = Encoding.UTF8.GetString bytes }
+                            )
                     with :? FormatException ->
                         return None
                 | _ -> return None
@@ -242,7 +250,10 @@ module GitHubPublication =
                 ||> List.map2 (fun element domainEntry ->
                     { Element = element
                       Id = domainEntry |> ContentDomain.CatalogEntry.id |> ContentDomain.CatalogId.value
-                      Path = domainEntry |> ContentDomain.CatalogEntry.path |> ContentDomain.VirtualPath.value
+                      Path =
+                        domainEntry
+                        |> ContentDomain.CatalogEntry.path
+                        |> ContentDomain.VirtualPath.value
                       DocumentHandle =
                         domainEntry
                         |> ContentDomain.CatalogEntry.documentHandle
@@ -262,10 +273,7 @@ module GitHubPublication =
         let hash = SHA256.HashData(Encoding.UTF8.GetBytes value)
 
         let encoded =
-            Convert.ToBase64String(hash)
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_')
+            Convert.ToBase64String(hash).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 
         prefix + encoded
 
@@ -305,7 +313,9 @@ module GitHubPublication =
         writer.WriteEndObject()
 
     let private catalogBytes operation request now (catalog: CatalogState) =
-        let matching = catalog.Entries |> List.filter (fun entry -> entry.SourcePath = Some request.RepositoryPath)
+        let matching =
+            catalog.Entries
+            |> List.filter (fun entry -> entry.SourcePath = Some request.RepositoryPath)
 
         if List.length matching > 1 then
             None
@@ -322,11 +332,12 @@ module GitHubPublication =
                 writer.WritePropertyName("entries")
                 writer.WriteStartArray()
 
-                let timestamp =
-                    ContentDomain.Timestamp.create now |> ContentDomain.Timestamp.value
+                let timestamp = ContentDomain.Timestamp.create now |> ContentDomain.Timestamp.value
 
                 let documentSize = Encoding.UTF8.GetByteCount request.Markdown
-                let existingDirectories = catalog.Entries |> List.map (fun entry -> entry.Path) |> Set.ofList
+
+                let existingDirectories =
+                    catalog.Entries |> List.map (fun entry -> entry.Path) |> Set.ofList
 
                 let missingDirectories =
                     if operation = Operation.Add then
@@ -378,7 +389,11 @@ module GitHubPublication =
                 writer.Flush()
                 let bytes = stream.ToArray()
                 let generated = Encoding.UTF8.GetString bytes
-                if parseCatalogBody generated catalog.BlobSha |> Option.isSome then Some bytes else None
+
+                if parseCatalogBody generated catalog.BlobSha |> Option.isSome then
+                    Some bytes
+                else
+                    None
 
     let private createBlob httpClient token repository bytes cancellationToken =
         task {
@@ -408,6 +423,7 @@ module GitHubPublication =
                        sha = entry.Sha |})
 
             let payload = {| baseTree = baseTree; tree = tree |}
+
             let! status, body =
                 send httpClient token HttpMethod.Post $"repos/{repository}/git/trees" (Some payload) cancellationToken
 
@@ -421,7 +437,11 @@ module GitHubPublication =
 
     let private createCommit httpClient token repository subject tree head cancellationToken =
         task {
-            let payload = {| message = subject; tree = tree; parents = [| head |] |}
+            let payload =
+                {| message = subject
+                   tree = tree
+                   parents = [| head |] |}
+
             let! status, body =
                 send httpClient token HttpMethod.Post $"repos/{repository}/git/commits" (Some payload) cancellationToken
 
@@ -436,6 +456,7 @@ module GitHubPublication =
     let private updateReference httpClient token repository (branch: string) commit cancellationToken =
         task {
             let payload = {| sha = commit; force = false |}
+
             let! status, _ =
                 send
                     httpClient
@@ -475,10 +496,15 @@ module GitHubPublication =
         | Error _ -> Error()
         | Ok repositoryPath ->
             let expectedVirtualPath = "~/" + request.RepositoryPath
+
             let validOperation =
                 match request.Operation with
-                | Operation.Add -> String.IsNullOrEmpty request.ExpectedBlobSha && String.IsNullOrEmpty request.RemovalConfirmation
-                | Operation.Update -> isSha request.ExpectedBlobSha && String.IsNullOrEmpty request.RemovalConfirmation
+                | Operation.Add ->
+                    String.IsNullOrEmpty request.ExpectedBlobSha
+                    && String.IsNullOrEmpty request.RemovalConfirmation
+                | Operation.Update ->
+                    isSha request.ExpectedBlobSha
+                    && String.IsNullOrEmpty request.RemovalConfirmation
                 | Operation.Remove ->
                     isSha request.ExpectedBlobSha
                     && request.RemovalConfirmation = request.RepositoryPath
@@ -489,7 +515,8 @@ module GitHubPublication =
                 |> List.map (fun (asset: Asset) ->
                     { DestinationPath = asset.DestinationPath
                       DeclaredMediaType = asset.DeclaredMediaType
-                      Bytes = asset.Bytes }: PublicationMedia.Candidate)
+                      Bytes = asset.Bytes }
+                    : PublicationMedia.Candidate)
                 |> PublicationMedia.validate request.RepositoryPath
 
             if
@@ -512,10 +539,7 @@ module GitHubPublication =
         (assets: PublicationMedia.Validated list)
         cancellationToken
         =
-        let rec createAssets
-            (pending: PublicationMedia.Validated list)
-            (entries: TreeEntry list)
-            =
+        let rec createAssets (pending: PublicationMedia.Validated list) (entries: TreeEntry list) =
             task {
                 match pending with
                 | [] -> return Some(List.rev entries)
@@ -545,12 +569,7 @@ module GitHubPublication =
                     )
             else
                 match!
-                    createBlob
-                        httpClient
-                        token
-                        repository
-                        (Encoding.UTF8.GetBytes request.Markdown)
-                        cancellationToken
+                    createBlob httpClient token repository (Encoding.UTF8.GetBytes request.Markdown) cancellationToken
                 with
                 | None -> return None
                 | Some documentSha ->
@@ -590,139 +609,158 @@ module GitHubPublication =
                             do! gate.WaitAsync(cancellationToken)
 
                             try
-                                    match! readRepositoryState httpClient token repository cancellationToken with
+                                match! readRepositoryState httpClient token repository cancellationToken with
+                                | None -> return Result.Unavailable
+                                | Some state ->
+                                    match!
+                                        readFile
+                                            httpClient
+                                            token
+                                            repository
+                                            request.RepositoryPath
+                                            state.HeadSha
+                                            cancellationToken
+                                    with
                                     | None -> return Result.Unavailable
-                                    | Some state ->
-                                        match! readFile httpClient token repository request.RepositoryPath state.HeadSha cancellationToken with
-                                        | None -> return Result.Unavailable
-                                        | Some document ->
-                                            let baseConflict =
-                                                state.DefaultBranch <> request.ExpectedDefaultBranch
-                                                || state.HeadSha <> request.ExpectedHeadSha
+                                    | Some document ->
+                                        let baseConflict =
+                                            state.DefaultBranch <> request.ExpectedDefaultBranch
+                                            || state.HeadSha <> request.ExpectedHeadSha
 
-                                            let documentConflict =
-                                                match request.Operation, document with
-                                                | Operation.Add, Some _ -> true
-                                                | Operation.Add, None -> false
-                                                | (Operation.Update | Operation.Remove), Some value ->
-                                                    value.BlobSha <> request.ExpectedBlobSha
-                                                | (Operation.Update | Operation.Remove), None -> true
+                                        let documentConflict =
+                                            match request.Operation, document with
+                                            | Operation.Add, Some _ -> true
+                                            | Operation.Add, None -> false
+                                            | (Operation.Update | Operation.Remove), Some value ->
+                                                value.BlobSha <> request.ExpectedBlobSha
+                                            | (Operation.Update | Operation.Remove), None -> true
 
-                                            if baseConflict || documentConflict then
-                                                return conflict request state document
-                                            else
-                                                match! readCatalog httpClient token repository state.HeadSha cancellationToken with
+                                        if baseConflict || documentConflict then
+                                            return conflict request state document
+                                        else
+                                            match!
+                                                readCatalog httpClient token repository state.HeadSha cancellationToken
+                                            with
+                                            | None -> return Result.Unavailable
+                                            | Some catalog ->
+                                                match catalogBytes request.Operation request (now ()) catalog with
                                                 | None -> return Result.Unavailable
-                                                | Some catalog ->
-                                                    match catalogBytes request.Operation request (now ()) catalog with
+                                                | Some catalogContent ->
+                                                    match!
+                                                        createPublicationTreeEntries
+                                                            httpClient
+                                                            token
+                                                            repository
+                                                            request
+                                                            validatedAssets
+                                                            cancellationToken
+                                                    with
                                                     | None -> return Result.Unavailable
-                                                    | Some catalogContent ->
+                                                    | Some(documentBlobSha, contentTreeEntries) ->
                                                         match!
-                                                            createPublicationTreeEntries
+                                                            createBlob
                                                                 httpClient
                                                                 token
                                                                 repository
-                                                                request
-                                                                validatedAssets
+                                                                catalogContent
                                                                 cancellationToken
                                                         with
                                                         | None -> return Result.Unavailable
-                                                        | Some(documentBlobSha, contentTreeEntries) ->
+                                                        | Some catalogBlobSha ->
+                                                            let treeEntries =
+                                                                contentTreeEntries
+                                                                @ [ { Path = "content/catalog.json"
+                                                                      Mode = "100644"
+                                                                      Type = "blob"
+                                                                      Sha = Some catalogBlobSha } ]
+
                                                             match!
-                                                                createBlob
+                                                                createTree
                                                                     httpClient
                                                                     token
                                                                     repository
-                                                                    catalogContent
+                                                                    state.TreeSha
+                                                                    treeEntries
                                                                     cancellationToken
                                                             with
                                                             | None -> return Result.Unavailable
-                                                            | Some catalogBlobSha ->
-                                                                let treeEntries =
-                                                                    contentTreeEntries
-                                                                    @ [ { Path = "content/catalog.json"
-                                                                          Mode = "100644"
-                                                                          Type = "blob"
-                                                                          Sha = Some catalogBlobSha } ]
-
+                                                            | Some treeSha ->
                                                                 match!
-                                                                    createTree
+                                                                    createCommit
                                                                         httpClient
                                                                         token
                                                                         repository
-                                                                        state.TreeSha
-                                                                        treeEntries
+                                                                        (subject
+                                                                            request.Operation
+                                                                            request.RepositoryPath)
+                                                                        treeSha
+                                                                        state.HeadSha
                                                                         cancellationToken
                                                                 with
                                                                 | None -> return Result.Unavailable
-                                                                | Some treeSha ->
+                                                                | Some commitSha ->
                                                                     match!
-                                                                        createCommit
+                                                                        updateReference
                                                                             httpClient
                                                                             token
                                                                             repository
-                                                                            (subject request.Operation request.RepositoryPath)
-                                                                            treeSha
-                                                                            state.HeadSha
+                                                                            state.DefaultBranch
+                                                                            commitSha
                                                                             cancellationToken
                                                                     with
-                                                                    | None -> return Result.Unavailable
-                                                                    | Some commitSha ->
+                                                                    | HttpStatusCode.OK ->
+                                                                        generation.Advance commitSha |> ignore
+
+                                                                        return
+                                                                            Result.Published
+                                                                                { Sha = commitSha
+                                                                                  Url =
+                                                                                    $"https://github.com/{repository}/commit/{commitSha}"
+                                                                                  DefaultBranch = state.DefaultBranch
+                                                                                  DocumentBlobSha = documentBlobSha }
+                                                                    | HttpStatusCode.Conflict
+                                                                    | HttpStatusCode.UnprocessableEntity ->
                                                                         match!
-                                                                            updateReference
+                                                                            readRepositoryState
                                                                                 httpClient
                                                                                 token
                                                                                 repository
-                                                                                state.DefaultBranch
-                                                                                commitSha
                                                                                 cancellationToken
                                                                         with
-                                                                        | HttpStatusCode.OK ->
-                                                                            generation.Advance commitSha |> ignore
-                                                                            return
-                                                                                Result.Published
-                                                                                    { Sha = commitSha
-                                                                                      Url = $"https://github.com/{repository}/commit/{commitSha}"
-                                                                                      DefaultBranch = state.DefaultBranch
-                                                                                      DocumentBlobSha = documentBlobSha }
-                                                                        | HttpStatusCode.Conflict
-                                                                        | HttpStatusCode.UnprocessableEntity ->
+                                                                        | None -> return Result.Unavailable
+                                                                        | Some latest ->
                                                                             match!
-                                                                                readRepositoryState
+                                                                                readFile
                                                                                     httpClient
                                                                                     token
                                                                                     repository
+                                                                                    request.RepositoryPath
+                                                                                    latest.HeadSha
                                                                                     cancellationToken
                                                                             with
                                                                             | None -> return Result.Unavailable
-                                                                            | Some latest ->
-                                                                                match!
-                                                                                    readFile
-                                                                                        httpClient
-                                                                                        token
-                                                                                        repository
-                                                                                        request.RepositoryPath
-                                                                                        latest.HeadSha
-                                                                                        cancellationToken
-                                                                                with
-                                                                                | None -> return Result.Unavailable
-                                                                                | Some latestDocument ->
-                                                                                    let fileChanged =
-                                                                                        match document, latestDocument with
-                                                                                        | None, None -> false
-                                                                                        | Some before, Some after ->
-                                                                                            before.BlobSha <> after.BlobSha
-                                                                                        | _ -> true
+                                                                            | Some latestDocument ->
+                                                                                let fileChanged =
+                                                                                    match document, latestDocument with
+                                                                                    | None, None -> false
+                                                                                    | Some before, Some after ->
+                                                                                        before.BlobSha <> after.BlobSha
+                                                                                    | _ -> true
 
-                                                                                    if
-                                                                                        latest.DefaultBranch <> state.DefaultBranch
-                                                                                        || latest.HeadSha <> state.HeadSha
-                                                                                        || fileChanged
-                                                                                    then
-                                                                                        return conflict request latest latestDocument
-                                                                                    else
-                                                                                        return Result.Unavailable
-                                                                        | _ -> return Result.Unavailable
+                                                                                if
+                                                                                    latest.DefaultBranch
+                                                                                    <> state.DefaultBranch
+                                                                                    || latest.HeadSha <> state.HeadSha
+                                                                                    || fileChanged
+                                                                                then
+                                                                                    return
+                                                                                        conflict
+                                                                                            request
+                                                                                            latest
+                                                                                            latestDocument
+                                                                                else
+                                                                                    return Result.Unavailable
+                                                                    | _ -> return Result.Unavailable
                             finally
                                 gate.Release() |> ignore
                         with
@@ -734,6 +772,6 @@ module GitHubPublication =
                         | :? InvalidOperationException -> return Result.Unavailable
                 } }
 
-    let unavailable : Client =
+    let unavailable: Client =
         { new Client with
             member _.Publish(_, _, _) = Task.FromResult(Result.Unavailable) }

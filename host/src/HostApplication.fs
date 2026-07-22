@@ -58,12 +58,10 @@ module HostApplication =
                     generation
 
             let worker =
-                new ContentCacheRefreshWorker(
-                    ContentHeadProbe.live httpClient githubConfiguration,
-                    generation
-                )
+                new ContentCacheRefreshWorker(ContentHeadProbe.live httpClient githubConfiguration, generation)
 
-            let publication = GitHubPublication.live httpClient githubConfiguration generation (fun () -> DateTimeOffset.UtcNow)
+            let publication =
+                GitHubPublication.live httpClient githubConfiguration generation (fun () -> DateTimeOffset.UtcNow)
 
             contentClient, publication, Some httpClient, Some worker
 
@@ -80,7 +78,9 @@ module HostApplication =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
-        builder.Services.AddSingleton<GitHubPublication.Client>(GitHubPublication.unavailable) |> ignore
+
+        builder.Services.AddSingleton<GitHubPublication.Client>(GitHubPublication.unavailable)
+        |> ignore
 
         let statsRuntime: Stats.BrowserRuntime =
             { Store = statsStore
@@ -122,13 +122,7 @@ module HostApplication =
         let now () = DateTimeOffset.UtcNow
         let statsStore = Stats.unavailableStore now
 
-        createWithContentClientAndStats
-            args
-            contentClient
-            statsStore
-            false
-            Stats.randomBytes
-            now
+        createWithContentClientAndStats args contentClient statsStore false Stats.randomBytes now
 
     let create (args: string array) : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)

@@ -544,7 +544,10 @@ module Auth =
     type OwnerAccessToken = private OwnerAccessToken of string
 
     let tryOwnerAccessToken value =
-        if String.IsNullOrWhiteSpace value then None else Some(OwnerAccessToken value)
+        if String.IsNullOrWhiteSpace value then
+            None
+        else
+            Some(OwnerAccessToken value)
 
     let resolveOwnerAccessToken (context: HttpContext) =
         task {
