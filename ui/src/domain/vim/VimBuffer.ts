@@ -2948,11 +2948,29 @@ type VimSubstitutionEvaluation = Readonly<{
   ranges: ReadonlyArray<VimCommandPreviewRange>;
 }>;
 
+type BoundedVimSubstitutionEvaluation =
+  | Readonly<{ kind: "completed"; evaluation: VimSubstitutionEvaluation }>
+  | Readonly<{ kind: "output-limit-exceeded" }>;
+
+type VimSubstitutionEvaluationOptions = Readonly<{
+  maximumRanges: number;
+  maximumOutputCodeUnits: number;
+}>;
+
 function evaluateVimSubstitution(
   buffer: VimBuffer,
   command: VimSubstitutionCommand,
-  maximumRanges?: number,
-): VimSubstitutionEvaluation {
+): VimSubstitutionEvaluation;
+function evaluateVimSubstitution(
+  buffer: VimBuffer,
+  command: VimSubstitutionCommand,
+  options: VimSubstitutionEvaluationOptions,
+): BoundedVimSubstitutionEvaluation;
+function evaluateVimSubstitution(
+  buffer: VimBuffer,
+  command: VimSubstitutionCommand,
+  options?: VimSubstitutionEvaluationOptions,
+): VimSubstitutionEvaluation | BoundedVimSubstitutionEvaluation {
   const lines = [...buffer.lines];
   const startLine = command.range === "whole-buffer" ? 0 : buffer.cursor.line;
   const endLine = command.range === "whole-buffer"
@@ -2960,6 +2978,10 @@ function evaluateVimSubstitution(
     : buffer.cursor.line;
   const ranges: Array<VimCommandPreviewRange> = [];
   let lineOffset = lineStartOffset(buffer.lines, startLine);
+  const trailingSourceCodeUnits = options === undefined ||
+      endLine === buffer.lines.length - 1
+    ? 0
+    : joinLines(buffer.lines.slice(endLine + 1)).length;
   let matched = false;
   let firstChanged: VimPosition | undefined;
 
@@ -2970,16 +2992,28 @@ function evaluateVimSubstitution(
       continue;
     }
 
-    const remainingRanges = maximumRanges === undefined
+    const remainingRanges = options === undefined
       ? undefined
-      : maximumRanges - ranges.length;
-    const result = applyTextSubstitution(
-      line,
-      command.substitution,
-      remainingRanges === undefined
-        ? undefined
-        : { maximumRanges: remainingRanges },
-    );
+      : options.maximumRanges - ranges.length;
+    const remainingCodeUnits = options === undefined
+      ? undefined
+      : options.maximumOutputCodeUnits -
+        lineOffset -
+        trailingSourceCodeUnits -
+        Number(lineIndex < buffer.lines.length - 1);
+    const boundedResult = remainingRanges === undefined || remainingCodeUnits === undefined
+      ? undefined
+      : applyTextSubstitution(line, command.substitution, {
+          maximumRanges: remainingRanges,
+          maximumOutputCodeUnits: remainingCodeUnits,
+        });
+
+    if (boundedResult?.kind === "output-limit-exceeded") {
+      return boundedResult;
+    }
+
+    const result = boundedResult?.result ??
+      applyTextSubstitution(line, command.substitution);
     matched = matched || result.matched;
     lines[lineIndex] = result.text;
     ranges.push(...result.ranges.map((range) => ({
@@ -2992,10 +3026,13 @@ function evaluateVimSubstitution(
       firstChanged = { line: lineIndex, column: result.firstChangedOffset };
     }
 
-    lineOffset += result.text.length + 1;
+    lineOffset += result.text.length + Number(lineIndex < buffer.lines.length - 1);
   }
 
-  return { lines, matched, firstChanged, ranges };
+  const evaluation = { lines, matched, firstChanged, ranges };
+  return options === undefined
+    ? evaluation
+    : { kind: "completed", evaluation };
 }
 
 function finishVimSubstitution(
@@ -3161,15 +3198,23 @@ export function vimCommandPreview(buffer: VimBuffer): VimCommandPreview {
     return { source, ranges: [] };
   }
 
-  const evaluation = evaluateVimSubstitution(
+  const boundedEvaluation = evaluateVimSubstitution(
     buffer,
     parsed.command,
-    maximumHighlightRanges,
+    {
+      maximumRanges: maximumHighlightRanges,
+      maximumOutputCodeUnits: maximumHighlightedCodeUnits,
+    },
   );
+
+  if (boundedEvaluation.kind === "output-limit-exceeded") {
+    return { source, ranges: [] };
+  }
+
+  const evaluation = boundedEvaluation.evaluation;
   const previewSource = joinLines(evaluation.lines);
   return evaluation.matched &&
-      evaluation.ranges.length <= maximumHighlightRanges &&
-      previewSource.length <= maximumHighlightedCodeUnits
+      evaluation.ranges.length <= maximumHighlightRanges
     ? { source: previewSource, ranges: evaluation.ranges }
     : { source, ranges: [] };
 }

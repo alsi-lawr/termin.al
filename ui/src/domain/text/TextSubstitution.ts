@@ -24,7 +24,16 @@ type TextSubstitutionRange = Readonly<{
 
 type TextSubstitutionOptions = Readonly<{
   maximumRanges: number;
+  maximumOutputCodeUnits: number;
 }>;
+
+type BoundedTextSubstitutionResult =
+  | Readonly<{ kind: "completed"; result: TextSubstitutionResult }>
+  | Readonly<{ kind: "output-limit-exceeded" }>;
+
+type ReplacementTextResult =
+  | Readonly<{ kind: "completed"; text: string }>
+  | Readonly<{ kind: "output-limit-exceeded" }>;
 
 type DelimitedText = Readonly<{ text: string; nextOffset: number }>;
 
@@ -116,36 +125,59 @@ export function parseTextSubstitution(
   };
 }
 
-function replacementText(replacement: string, match: RegExpExecArray): string {
+function replacementText(
+  replacement: string,
+  match: RegExpExecArray,
+  maximumCodeUnits?: number,
+): ReplacementTextResult {
   let text = "";
 
   for (let offset = 0; offset < replacement.length; offset += 1) {
     const character = replacement[offset];
     const escaped = replacement[offset + 1];
+    let addition: string;
 
     if (character === "&") {
-      text += match[0];
+      addition = match[0];
     } else if (character !== "\\" || escaped === undefined) {
-      text += character;
+      addition = character;
     } else if (escaped === "&" || escaped === "\\") {
-      text += escaped;
+      addition = escaped;
       offset += 1;
     } else if (/^[1-9]$/u.test(escaped)) {
-      text += match[Number(escaped)] ?? "";
+      addition = match[Number(escaped)] ?? "";
       offset += 1;
     } else {
-      text += character;
+      addition = character;
     }
+
+    if (
+      maximumCodeUnits !== undefined &&
+      text.length + addition.length > maximumCodeUnits
+    ) {
+      return { kind: "output-limit-exceeded" };
+    }
+
+    text += addition;
   }
 
-  return text;
+  return { kind: "completed", text };
 }
 
 export function applyTextSubstitution(
   text: string,
   substitution: TextSubstitution,
+): TextSubstitutionResult;
+export function applyTextSubstitution(
+  text: string,
+  substitution: TextSubstitution,
+  options: TextSubstitutionOptions,
+): BoundedTextSubstitutionResult;
+export function applyTextSubstitution(
+  text: string,
+  substitution: TextSubstitution,
   options?: TextSubstitutionOptions,
-): TextSubstitutionResult {
+): TextSubstitutionResult | BoundedTextSubstitutionResult {
   const flags = substitution.ignoreCase ? "giu" : "gu";
   const expression = new RegExp(substitution.pattern, flags);
   const output: string[] = [];
@@ -156,25 +188,44 @@ export function applyTextSubstitution(
   let match = expression.exec(text);
 
   while (match !== null) {
-    const replacement = replacementText(substitution.replacement, match);
-    const prefix = text.slice(copiedOffset, match.index);
-    output.push(prefix, replacement);
-    outputOffset += prefix.length;
+    const prefixLength = match.index - copiedOffset;
 
     if (
-      replacement.length > 0 &&
+      options !== undefined &&
+      outputOffset + prefixLength > options.maximumOutputCodeUnits
+    ) {
+      return { kind: "output-limit-exceeded" };
+    }
+
+    const replacement = replacementText(
+      substitution.replacement,
+      match,
+      options === undefined
+        ? undefined
+        : options.maximumOutputCodeUnits - outputOffset - prefixLength,
+    );
+
+    if (replacement.kind === "output-limit-exceeded") {
+      return replacement;
+    }
+
+    output.push(text.slice(copiedOffset, match.index), replacement.text);
+    outputOffset += prefixLength;
+
+    if (
+      replacement.text.length > 0 &&
       (options === undefined || ranges.length <= options.maximumRanges)
     ) {
       ranges.push({
         start: outputOffset,
-        end: outputOffset + replacement.length,
-        role: replacement === match[0] ? "matched" : "replaced",
+        end: outputOffset + replacement.text.length,
+        role: replacement.text === match[0] ? "matched" : "replaced",
       });
     }
 
-    outputOffset += replacement.length;
+    outputOffset += replacement.text.length;
     copiedOffset = match.index + match[0].length;
-    firstChangedOffset ??= replacement === match[0] ? undefined : match.index;
+    firstChangedOffset ??= replacement.text === match[0] ? undefined : match.index;
 
     if (!substitution.replaceEveryMatch || match.index === text.length) {
       break;
@@ -189,10 +240,20 @@ export function applyTextSubstitution(
   }
 
   const matched = output.length > 0;
-  return {
+  const suffixLength = text.length - copiedOffset;
+
+  if (
+    options !== undefined &&
+    outputOffset + suffixLength > options.maximumOutputCodeUnits
+  ) {
+    return { kind: "output-limit-exceeded" };
+  }
+
+  const result: TextSubstitutionResult = {
     text: matched ? output.join("") + text.slice(copiedOffset) : text,
     matched,
     firstChangedOffset,
     ranges,
   };
+  return options === undefined ? result : { kind: "completed", result };
 }

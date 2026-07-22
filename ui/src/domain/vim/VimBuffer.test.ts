@@ -857,6 +857,21 @@ test("falls back to original unadorned command previews at existing highlighting
     press(createVimBuffer({ text: overCodeUnitSource, mode: VimMode.Normal }), "/"),
     "x",
   );
+  const expandedSource = "a".repeat(Math.floor(maximumHighlightedCodeUnits / 2) + 1);
+  const expanded = appendVimCommandInput(
+    press(createVimBuffer({ text: expandedSource, mode: VimMode.Normal }), ":"),
+    "%s/a/aa/g",
+  );
+  const exactRangeSource = "a".repeat(maximumHighlightRanges);
+  const exactRange = appendVimCommandInput(
+    press(createVimBuffer({ text: exactRangeSource, mode: VimMode.Normal }), ":"),
+    "%s/a/b/g",
+  );
+  const exactCodeUnitSource = "x".repeat(maximumHighlightedCodeUnits);
+  const exactCodeUnit = appendVimCommandInput(
+    press(createVimBuffer({ text: exactCodeUnitSource, mode: VimMode.Normal }), "/"),
+    "^x",
+  );
 
   assert.deepEqual(vimCommandPreview(search), {
     source: overRangeSource,
@@ -870,6 +885,16 @@ test("falls back to original unadorned command previews at existing highlighting
     source: overCodeUnitSource,
     ranges: [],
   });
+  assert.deepEqual(vimCommandPreview(expanded), {
+    source: expandedSource,
+    ranges: [],
+  });
+  const exactRangePreview = vimCommandPreview(exactRange);
+  assert.equal(exactRangePreview.source, "b".repeat(maximumHighlightRanges));
+  assert.equal(exactRangePreview.ranges.length, maximumHighlightRanges);
+  assert.deepEqual(vimCommandPreview(exactCodeUnit).ranges, [
+    { start: 0, end: 1, role: "current-search" },
+  ]);
 });
 
 test("reuses Vim search and substitution patterns without changing search direction", () => {
