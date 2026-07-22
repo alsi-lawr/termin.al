@@ -287,6 +287,101 @@ async function exerciseConnectedPagerKeys(session: DevToolsSession): Promise<voi
   );
 }
 
+async function dispatchEditorKey(
+  session: DevToolsSession,
+  key: string,
+  ctrlKey: boolean,
+  metaKey: boolean,
+): Promise<boolean> {
+  const allowed = await evaluate(session, `(() => {
+    const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+    if (!(editor instanceof HTMLTextAreaElement)) return false;
+    return editor.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ${JSON.stringify(key)},
+      ctrlKey: ${ctrlKey},
+      metaKey: ${metaKey},
+      bubbles: true,
+      cancelable: true,
+    }));
+  })()`);
+  return allowed === true;
+}
+
+async function waitForEditorPrompt(
+  session: DevToolsSession,
+  prompt: string,
+  failureMessage: string,
+): Promise<void> {
+  await waitFor(
+    session,
+    `Array.from(document.querySelectorAll('[role="status"]')).some((element) => element.textContent === ${JSON.stringify(prompt)})`,
+    failureMessage,
+  );
+}
+
+async function exerciseConnectedCommandPaste(session: DevToolsSession): Promise<void> {
+  await reloadDemo(session);
+  await enterTerminalCommand(session, "pane split horizontal editor");
+  await waitFor(
+    session,
+    `document.querySelector('textarea[aria-label$=" editor text"]') !== null`,
+    "A writable editor did not open through the public pane command.",
+  );
+  const focused = await evaluate(session, `(() => {
+    const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+    if (!(editor instanceof HTMLTextAreaElement)) return false;
+    editor.focus();
+    return document.activeElement === editor;
+  })()`);
+  if (focused !== true) throw new Error("The rendered editor textarea could not be focused.");
+
+  await dispatchEditorKey(session, "Escape", false, false);
+  await dispatchEditorKey(session, ":", false, false);
+  await waitForEditorPrompt(session, ":", "The rendered editor did not enter command mode.");
+  for (const [ctrlKey, metaKey] of [[true, false], [false, true]]) {
+    if (!await dispatchEditorKey(session, "v", ctrlKey, metaKey)) {
+      throw new Error("A command-mode paste keydown was consumed by the rendered editor.");
+    }
+    await waitForEditorPrompt(session, ":", "A paste keydown changed the command prompt.");
+  }
+
+  const pastePrevented = await evaluate(session, `(() => {
+    const editor = document.querySelector('textarea[aria-label$=" editor text"]');
+    if (!(editor instanceof HTMLTextAreaElement)) return false;
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", "paste-once");
+    return !editor.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: clipboard,
+    }));
+  })()`);
+  if (pastePrevented !== true) throw new Error("The rendered command paste was not consumed.");
+  await waitForEditorPrompt(
+    session,
+    ":paste-once",
+    "The rendered command paste did not produce exactly one visible update.",
+  );
+
+  await dispatchEditorKey(session, "Escape", false, false);
+  await dispatchEditorKey(session, "/", false, false);
+  await waitForEditorPrompt(session, "/", "The rendered editor did not enter search mode.");
+  for (const [ctrlKey, metaKey] of [[true, false], [false, true]]) {
+    if (!await dispatchEditorKey(session, "v", ctrlKey, metaKey)) {
+      throw new Error("A search-mode paste keydown was consumed by the rendered editor.");
+    }
+    await waitForEditorPrompt(session, "/", "A paste keydown changed the search prompt.");
+  }
+
+  if (await dispatchEditorKey(session, "b", true, false)) {
+    throw new Error("The rendered editor did not consume the pane prefix.");
+  }
+  if (await dispatchEditorKey(session, "c", true, false)) {
+    throw new Error("The rendered editor did not consume an unrelated modified control.");
+  }
+  await waitForEditorPrompt(session, "/", "Consumed controls changed the search prompt.");
+}
+
 const baseUrl = new URL(process.env.TERMINAL_SMOKE_BASE_URL ?? "http://127.0.0.1:5089");
 const debugPort = Number.parseInt(process.env.TERMINAL_SMOKE_DEBUG_PORT ?? "9339", 10);
 const chrome = process.env.CHROME_BIN ?? "google-chrome";
@@ -356,6 +451,7 @@ try {
 
   await exerciseStrictModeRuntime(session);
   await exerciseConnectedPagerKeys(session);
+  await exerciseConnectedCommandPaste(session);
 
   await session.command("Page.navigate", { url: new URL("/", baseUrl).href });
   await waitForApplication(session);
