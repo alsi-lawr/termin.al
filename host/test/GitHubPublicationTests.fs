@@ -102,6 +102,25 @@ module GitHubPublicationTests =
     let private baseCatalog =
         """{"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"blog","path":"~/blog","updatedAt":"2026-07-15T00:00:00.000Z","size":0}]}"""
 
+    let private runSharedCatalogCodecContract () =
+        match CatalogManifest.tryParse baseCatalog with
+        | Ok manifest when
+            manifest.ManifestCatalogEntries.Length = 2
+            && manifest.ManifestRawEntries.Length = 2 -> ()
+        | result -> failwithf "The shared catalog codec rejected its canonical manifest: %A." result
+
+        let duplicateSource =
+            """{"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"blog","path":"~/blog","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"file","id":"first","path":"~/blog/first.md","updatedAt":"2026-07-15T00:00:00.000Z","size":1,"documentHandle":"first","sourcePath":"blog/shared.md"},{"kind":"file","id":"second","path":"~/blog/second.md","updatedAt":"2026-07-15T00:00:00.000Z","size":1,"documentHandle":"second","sourcePath":"blog/shared.md"}]}"""
+
+        let invalid =
+            [ """{"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0,"unknown":true}]}"""
+              """{"entries":[{"kind":"file","id":"orphan","path":"~/blog/orphan.md","updatedAt":"2026-07-15T00:00:00.000Z","size":1,"documentHandle":"orphan","sourcePath":"blog/orphan.md"}]}"""
+              """{"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"home","path":"~/blog","updatedAt":"2026-07-15T00:00:00.000Z","size":0}]}"""
+              duplicateSource ]
+
+        if invalid |> List.exists (CatalogManifest.tryParse >> Result.isOk) then
+            failwith "The shared catalog codec accepted invalid fields, structure, identity, or duplicate source paths."
+
     let private runAtomicAdd () =
         let mutable blob = 0
         let handler =
@@ -327,6 +346,70 @@ module GitHubPublicationTests =
         if not (commit.Body.Contains("blogs: update engineering/interfaces/example.md", StringComparison.Ordinal)) then
             failwith "The deterministic recursive update subject changed."
 
+    let private runReferenceUpdateFailureClassification () =
+        let existingCatalog =
+            """{"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"blog","path":"~/blog","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"engineering","path":"~/blog/engineering","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"directory","id":"interfaces","path":"~/blog/engineering/interfaces","updatedAt":"2026-07-15T00:00:00.000Z","size":0},{"kind":"file","id":"existing-id","path":"~/blog/engineering/interfaces/example.md","updatedAt":"2026-07-15T00:00:00.000Z","size":90,"documentHandle":"existing-handle","sourcePath":"blog/engineering/interfaces/example.md"}]}"""
+
+        let execute updateStatus latestHead latestBlob =
+            let mutable referenceReads = 0
+            let mutable blobs = 0
+            let handler =
+                new FakeHandler(fun request ->
+                    match request.Method, request.Path with
+                    | "GET", "/repos/example-owner/content" ->
+                        response HttpStatusCode.OK "{\"default_branch\":\"main\"}"
+                    | "GET", "/repos/example-owner/content/git/ref/heads/main" ->
+                        referenceReads <- referenceReads + 1
+                        let head = if referenceReads = 1 then sha 'a' else latestHead
+                        response HttpStatusCode.OK $"{{\"object\":{{\"sha\":\"{head}\"}}}}"
+                    | "GET", path when path = $"/repos/example-owner/content/git/commits/{sha 'a'}" ->
+                        response HttpStatusCode.OK $"{{\"tree\":{{\"sha\":\"{sha 'b'}\"}}}}"
+                    | "GET", path when path = $"/repos/example-owner/content/git/commits/{latestHead}" ->
+                        response HttpStatusCode.OK $"{{\"tree\":{{\"sha\":\"{sha 'b'}\"}}}}"
+                    | "GET", path when path.StartsWith("/repos/example-owner/content/contents/blog/engineering/interfaces/example.md?") ->
+                        let blob = if referenceReads = 1 then sha 'c' else latestBlob
+                        let text = if referenceReads = 1 then markdown "Old" else markdown "Latest"
+                        response HttpStatusCode.OK (contentResponse blob text)
+                    | "GET", path when path.StartsWith("/repos/example-owner/content/contents/content/catalog.json?") ->
+                        response HttpStatusCode.OK (contentResponse (sha 'd') existingCatalog)
+                    | "POST", "/repos/example-owner/content/git/blobs" ->
+                        blobs <- blobs + 1
+                        response HttpStatusCode.Created $"{{\"sha\":\"{if blobs = 1 then sha 'e' else sha 'f'}\"}}"
+                    | "POST", "/repos/example-owner/content/git/trees" ->
+                        response HttpStatusCode.Created $"{{\"sha\":\"{sha '1'}\"}}"
+                    | "POST", "/repos/example-owner/content/git/commits" ->
+                        response HttpStatusCode.Created $"{{\"sha\":\"{sha '2'}\"}}"
+                    | "PATCH", "/repos/example-owner/content/git/refs/heads/main" ->
+                        response updateStatus "{}"
+                    | _ -> response HttpStatusCode.BadRequest "{}")
+
+            use httpClient = new HttpClient(handler)
+            let generation = ContentCacheGeneration()
+            let client = GitHubPublication.live httpClient (configuration ()) generation (fun () -> DateTimeOffset.UtcNow)
+            let request =
+                { addRequest with
+                    Operation = GitHubPublication.Operation.Update
+                    ExpectedBlobSha = sha 'c'
+                    Assets = [] }
+            let result = client.Publish(token (), request, CancellationToken.None).GetAwaiter().GetResult()
+
+            if generation.Current <> 0L then
+                failwith "A failed reference update must not advance the content cache generation."
+
+            result
+
+        match execute HttpStatusCode.Conflict (sha '9') (sha '8') with
+        | GitHubPublication.Result.Conflict conflict when
+            conflict.HeadSha = sha '9'
+            && conflict.BlobSha = sha '8'
+            && conflict.UpstreamMarkdown = markdown "Latest" -> ()
+        | result -> failwithf "A changed head after reference failure must return the direct latest conflict: %A." result
+
+        match execute HttpStatusCode.UnprocessableEntity (sha 'a') (sha 'c') with
+        | GitHubPublication.Result.Unavailable -> ()
+        | result ->
+            failwithf "An unchanged head and blob after a 422 must remain a generic unavailable failure: %A." result
+
     let private runCancellationMapping () =
         let timeoutHandler = new FakeHandler(fun _ -> raise (TaskCanceledException("upstream timeout")))
         use timeoutClient = new HttpClient(timeoutHandler)
@@ -343,8 +426,10 @@ module GitHubPublicationTests =
         with :? OperationCanceledException -> ()
 
     let run () =
+        runSharedCatalogCodecContract ()
         runAtomicAdd ()
         runExpectedBaseConflicts ()
         runUpdateRetainsCatalogIdentity ()
+        runReferenceUpdateFailureClassification ()
         runRemovalRetainsAssetsAndDirectories ()
         runCancellationMapping ()

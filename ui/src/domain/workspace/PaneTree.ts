@@ -1231,7 +1231,12 @@ export function applyPaneOperation(
             ...pane,
             content: {
               ...pane.content,
-              draft: operation.draft,
+              draft: {
+                ...pane.content.draft,
+                base: operation.draft.base,
+                dirty: true,
+                unpublished: true,
+              },
               buffer,
               message: operation.message,
             },

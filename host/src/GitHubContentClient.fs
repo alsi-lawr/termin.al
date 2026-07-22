@@ -129,18 +129,9 @@ module GitHubContentClient =
           RepositoryIsArchived: bool
           RepositoryIsPrivate: bool }
 
-    type private ManifestDocument =
-        { ManifestDocumentPath: ContentDomain.RepositoryPath
-          ManifestVirtualPath: ContentDomain.VirtualPath
-          ManifestUpdatedAt: ContentDomain.Timestamp }
-
-    type private ManifestData =
-        { ManifestCatalogEntries: ContentDomain.CatalogEntry list
-          ManifestDocumentsById: Map<string, ManifestDocument> }
-
     type private CatalogInput =
         { CatalogRepository: GitHubRepositoryData
-          CatalogManifest: ManifestData
+          CatalogManifest: CatalogManifest.Data
           CatalogManifestPath: ContentDomain.RepositoryPath
           CatalogManifestPayload: GitHubPayload }
 
@@ -718,129 +709,6 @@ module GitHubContentClient =
                         |> Result.mapError (fun _ -> invalidProblem ())
             }
 
-        let parseManifest (body: string) : Result<ManifestData, string> =
-            let parseEntry (element: JsonElement) =
-                if element.ValueKind <> JsonValueKind.Object then
-                    Error "Catalog entries must be objects."
-                else
-                    match requiredString "kind" element with
-                    | Error message -> Error message
-                    | Ok kind ->
-                        let expected =
-                            match kind with
-                            | "directory"
-                            | "locked-file" -> [ "kind"; "id"; "path"; "updatedAt"; "size" ]
-                            | "file" -> [ "kind"; "id"; "path"; "updatedAt"; "size"; "documentHandle"; "sourcePath" ]
-                            | _ -> []
-
-                        if List.isEmpty expected || not (hasOnlyProperties expected element) then
-                            Error "Catalog entry fields are invalid."
-                        else
-                            match
-                                requiredString "id" element,
-                                requiredString "path" element,
-                                requiredString "updatedAt" element,
-                                requiredInteger "size" element
-                            with
-                            | Ok id, Ok path, Ok updatedAt, Ok size ->
-                                match
-                                    toDomainResult (ContentDomain.CatalogId.tryCreate "catalog.id" id),
-                                    toDomainResult (ContentDomain.VirtualPath.tryCreate "catalog.path" path),
-                                    toTimestamp "catalog.updatedAt" updatedAt,
-                                    toDomainResult (ContentDomain.ByteSize.tryCreate "catalog.size" size)
-                                with
-                                | Ok parsedId, Ok parsedPath, Ok parsedUpdatedAt, Ok parsedSize ->
-                                    match kind with
-                                    | "directory" ->
-                                        Ok(
-                                            ContentDomain.Directory(parsedId, parsedPath, parsedUpdatedAt, parsedSize),
-                                            None
-                                        )
-                                    | "locked-file" ->
-                                        Ok(
-                                            ContentDomain.LockedFile(parsedId, parsedPath, parsedUpdatedAt, parsedSize),
-                                            None
-                                        )
-                                    | "file" ->
-                                        match
-                                            requiredString "documentHandle" element, requiredString "sourcePath" element
-                                        with
-                                        | Ok handle, Ok sourcePath ->
-                                            match
-                                                toDomainResult (
-                                                    ContentDomain.ContentId.tryCreate "catalog.documentHandle" handle
-                                                ),
-                                                toDomainResult (
-                                                    ContentDomain.RepositoryPath.tryCreate
-                                                        "catalog.sourcePath"
-                                                        sourcePath
-                                                )
-                                            with
-                                            | Ok parsedHandle, Ok parsedSourcePath ->
-                                                Ok(
-                                                    ContentDomain.File(
-                                                        parsedId,
-                                                        parsedPath,
-                                                        parsedUpdatedAt,
-                                                        parsedSize,
-                                                        parsedHandle
-                                                    ),
-                                                    Some(
-                                                        ContentDomain.ContentId.value parsedHandle,
-                                                        { ManifestDocumentPath = parsedSourcePath
-                                                          ManifestVirtualPath = parsedPath
-                                                          ManifestUpdatedAt = parsedUpdatedAt }
-                                                    )
-                                                )
-                                            | Error message, _
-                                            | _, Error message -> Error message
-                                        | Error message, _
-                                        | _, Error message -> Error message
-                                    | _ -> Error "Catalog entry kind is invalid."
-                                | Error message, _, _, _
-                                | _, Error message, _, _
-                                | _, _, Error message, _
-                                | _, _, _, Error message -> Error message
-                            | Error message, _, _, _
-                            | _, Error message, _, _
-                            | _, _, Error message, _
-                            | _, _, _, Error message -> Error message
-
-            parseJson body (fun root ->
-                match property "entries" root with
-                | Some entries when
-                    root.ValueKind = JsonValueKind.Object
-                    && hasOnlyProperties [ "entries" ] root
-                    && entries.ValueKind = JsonValueKind.Array
-                    ->
-                    let rawEntries = entries.EnumerateArray() |> Seq.toList
-
-                    if List.length rawEntries > ContentDomain.PageItemLimit then
-                        Error "Catalog has too many entries."
-                    else
-                        let rec parseEntries pending parsedEntries documents =
-                            match pending with
-                            | [] ->
-                                Ok
-                                    { ManifestCatalogEntries = List.rev parsedEntries
-                                      ManifestDocumentsById = documents }
-                            | entry :: remaining ->
-                                parseEntry entry
-                                |> Result.bind (fun (catalogEntry, document) ->
-                                    match document with
-                                    | None -> parseEntries remaining (catalogEntry :: parsedEntries) documents
-                                    | Some(documentId, locator) ->
-                                        if Map.containsKey documentId documents then
-                                            Error "Catalog document handles are duplicated."
-                                        else
-                                            parseEntries
-                                                remaining
-                                                (catalogEntry :: parsedEntries)
-                                                (Map.add documentId locator documents))
-
-                        parseEntries rawEntries [] Map.empty
-                | _ -> Error "Catalog manifests must contain only entries.")
-
         let getCatalogInput cancellationToken =
             task {
                 let contentRepository = GitHubContentConfiguration.contentRepository configuration
@@ -857,7 +725,7 @@ module GitHubContentClient =
                         match payload with
                         | Error failure -> return Error(mapFetchFailure failure)
                         | Ok manifestPayload ->
-                            match parseManifest manifestPayload.PayloadBody with
+                            match CatalogManifest.tryParse manifestPayload.PayloadBody with
                             | Error _ -> return Error(invalidProblem ())
                             | Ok manifest ->
                                 return

@@ -8,6 +8,7 @@
     <Compile Include="PublicationMedia.fs" />
     <Compile Include="ContentDomain.fs" />
     <Compile Include="ContentClient.fs" />
+    <Compile Include="CatalogManifest.fs" />
     <Compile Include="GitHubContentClient.fs" />
     <Compile Include="ContentCacheRefresh.fs" />
     <Compile Include="Auth.fs" />

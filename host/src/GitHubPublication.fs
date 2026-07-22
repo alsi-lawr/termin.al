@@ -72,7 +72,6 @@ module GitHubPublication =
 
     type private CatalogEntry =
         { Element: JsonElement
-          Kind: string
           Id: string
           Path: string
           DocumentHandle: string option
@@ -234,131 +233,23 @@ module GitHubPublication =
             | _ -> return None
         }
 
-    let private catalogEntry (element: JsonElement) =
-        let properties =
-            if element.ValueKind = JsonValueKind.Object then
-                element.EnumerateObject() |> Seq.map (fun property -> property.Name) |> Set.ofSeq
-            else
-                Set.empty
-
-        let mutable sizeElement = Unchecked.defaultof<JsonElement>
-
-        match tryString "kind" element, tryString "id" element, tryString "path" element, tryString "updatedAt" element with
-        | Some kind, Some id, Some path, Some updatedAt when element.TryGetProperty("size", &sizeElement) ->
-            let expected =
-                if kind = "file" then
-                    Set.ofList [ "kind"; "id"; "path"; "updatedAt"; "size"; "documentHandle"; "sourcePath" ]
-                elif kind = "directory" || kind = "locked-file" then
-                    Set.ofList [ "kind"; "id"; "path"; "updatedAt"; "size" ]
-                else
-                    Set.empty
-
-            let mutable size = 0
-
-            match
-                ContentDomain.CatalogId.tryCreate "catalog.id" id,
-                ContentDomain.VirtualPath.tryCreate "catalog.path" path,
-                ContentDomain.Timestamp.tryCreate "catalog.updatedAt" updatedAt,
-                sizeElement.TryGetInt32(&size),
-                ContentDomain.ByteSize.tryCreate "catalog.size" size
-            with
-            | Ok parsedId, Ok parsedPath, Ok parsedUpdatedAt, true, Ok parsedSize when properties = expected ->
-                match kind, tryString "documentHandle" element, tryString "sourcePath" element with
-                | "directory", None, None ->
-                    Some(
-                        { Element = element.Clone()
-                          Kind = kind
-                          Id = id
-                          Path = path
-                          DocumentHandle = None
-                          SourcePath = None },
-                        ContentDomain.Directory(parsedId, parsedPath, parsedUpdatedAt, parsedSize)
-                    )
-                | "locked-file", None, None ->
-                    Some(
-                        { Element = element.Clone()
-                          Kind = kind
-                          Id = id
-                          Path = path
-                          DocumentHandle = None
-                          SourcePath = None },
-                        ContentDomain.LockedFile(parsedId, parsedPath, parsedUpdatedAt, parsedSize)
-                    )
-                | "file", Some handle, Some sourcePath ->
-                    match
-                        ContentDomain.ContentId.tryCreate "catalog.documentHandle" handle,
-                        ContentDomain.RepositoryPath.tryCreate "catalog.sourcePath" sourcePath
-                    with
-                    | Ok parsedHandle, Ok _ ->
-                        Some(
-                            { Element = element.Clone()
-                              Kind = kind
-                              Id = id
-                              Path = path
-                              DocumentHandle = Some handle
-                              SourcePath = Some sourcePath },
-                            ContentDomain.File(parsedId, parsedPath, parsedUpdatedAt, parsedSize, parsedHandle)
-                        )
-                    | _ -> None
-                | _ -> None
-            | _ -> None
-        | _ -> None
-
-    let private domainCatalogIsValid entries =
-        match
-            ContentDomain.RepositoryName.tryCreate "catalog.repository" "validation/catalog",
-            ContentDomain.RepositoryPath.tryCreate "catalog.source.path" "content/catalog.json",
-            ContentDomain.ContentRevision.tryCreate "catalog.source.revision" "validation",
-            ContentDomain.ContentUrl.tryCreate "catalog.source.url" "https://example.invalid/catalog",
-            ContentDomain.Timestamp.tryCreate "catalog.cache.fetched" "2026-01-01T00:00:00.000Z",
-            ContentDomain.Timestamp.tryCreate "catalog.cache.fresh" "2026-01-01T00:01:00.000Z",
-            ContentDomain.Timestamp.tryCreate "catalog.cache.stale" "2026-01-01T00:02:00.000Z"
-        with
-        | Ok repository, Ok path, Ok revision, Ok url, Ok fetched, Ok fresh, Ok stale ->
-            match ContentDomain.CacheMetadata.tryCreate ContentDomain.Fresh fetched fresh stale with
-            | Error _ -> false
-            | Ok cache ->
-                let source = ContentDomain.ContentSource.create repository path revision url
-                ContentDomain.Catalog.tryCreate source cache entries |> Result.isOk
-        | _ -> false
-
     let private parseCatalogBody body blobSha =
-        match parseJson body with
-        | None -> None
-        | Some root ->
-            let rootProperties =
-                if root.ValueKind = JsonValueKind.Object then
-                    root.EnumerateObject() |> Seq.map (fun property -> property.Name) |> Set.ofSeq
-                else
-                    Set.empty
+        match CatalogManifest.tryParse body with
+        | Error _ -> None
+        | Ok manifest ->
+            let entries =
+                (manifest.ManifestRawEntries, manifest.ManifestCatalogEntries)
+                ||> List.map2 (fun element domainEntry ->
+                    { Element = element
+                      Id = domainEntry |> ContentDomain.CatalogEntry.id |> ContentDomain.CatalogId.value
+                      Path = domainEntry |> ContentDomain.CatalogEntry.path |> ContentDomain.VirtualPath.value
+                      DocumentHandle =
+                        domainEntry
+                        |> ContentDomain.CatalogEntry.documentHandle
+                        |> Option.map ContentDomain.ContentId.value
+                      SourcePath = tryString "sourcePath" element })
 
-            let mutable entriesElement = Unchecked.defaultof<JsonElement>
-
-            if
-                rootProperties <> Set.singleton "entries"
-                || not (root.TryGetProperty("entries", &entriesElement))
-                || entriesElement.ValueKind <> JsonValueKind.Array
-            then
-                None
-            else
-                let parsed = entriesElement.EnumerateArray() |> Seq.map catalogEntry |> Seq.toList
-
-                if parsed |> List.exists Option.isNone then
-                    None
-                else
-                    let values = parsed |> List.choose id
-                    let sourcePaths = values |> List.choose (fst >> fun entry -> entry.SourcePath)
-                    let domainEntries = values |> List.map snd
-
-                    if
-                        sourcePaths.Length <> (sourcePaths |> Set.ofList |> Set.count)
-                        || not (domainCatalogIsValid domainEntries)
-                    then
-                        None
-                    else
-                        Some
-                            { Entries = values |> List.map fst
-                              BlobSha = blobSha }
+            Some { Entries = entries; BlobSha = blobSha }
 
     let private readCatalog httpClient token repository head cancellationToken =
         task {
@@ -814,9 +705,23 @@ module GitHubPublication =
                                                                                         latest.HeadSha
                                                                                         cancellationToken
                                                                                 with
-                                                                                | Some latestDocument ->
-                                                                                    return conflict request latest latestDocument
                                                                                 | None -> return Result.Unavailable
+                                                                                | Some latestDocument ->
+                                                                                    let fileChanged =
+                                                                                        match document, latestDocument with
+                                                                                        | None, None -> false
+                                                                                        | Some before, Some after ->
+                                                                                            before.BlobSha <> after.BlobSha
+                                                                                        | _ -> true
+
+                                                                                    if
+                                                                                        latest.DefaultBranch <> state.DefaultBranch
+                                                                                        || latest.HeadSha <> state.HeadSha
+                                                                                        || fileChanged
+                                                                                    then
+                                                                                        return conflict request latest latestDocument
+                                                                                    else
+                                                                                        return Result.Unavailable
                                                                         | _ -> return Result.Unavailable
                             finally
                                 gate.Release() |> ignore

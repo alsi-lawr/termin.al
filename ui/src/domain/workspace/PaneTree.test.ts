@@ -412,10 +412,20 @@ test("conflict completion wraps concurrent typing in the LOCAL side of whole-doc
   const submitted = minimalPublicationSource("example");
   const concurrent = submitted + "\nTyped while awaiting conflict.";
   const upstream = minimalPublicationSource("upstream");
+  const currentDraft = {
+    ...authoringDraft(submitted, 3),
+    stagedAssets: [{ destinationPath: "assets/notes/runtime/example/image.png", mediaType: "image/png" }],
+  } satisfies PublicationDraft;
+  const latestBase = {
+    kind: "existing" as const,
+    defaultBranch: "main",
+    headSha: "b".repeat(40),
+    blobSha: "c".repeat(40),
+  };
   const initial = split(
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
     "vertical",
-    createAuthoringEditorPaneContent(authoringDraft(submitted)),
+    createAuthoringEditorPaneContent(currentDraft),
   );
   const editorId = initial.activePaneId;
   const changed = applied(applyPaneOperation(initial, {
@@ -428,7 +438,7 @@ test("conflict completion wraps concurrent typing in the LOCAL side of whole-doc
     paneId: editorId,
     draft: {
       ...authoringDraft(submitted),
-      base: { kind: "existing", defaultBranch: "main", headSha: "b".repeat(40), blobSha: "c".repeat(40) },
+      base: latestBase,
     },
     submittedSource: submitted,
     conflictBuffer: createVimBuffer({ text: "unused submitted markers", mode: { kind: "normal" } }),
@@ -441,4 +451,9 @@ test("conflict completion wraps concurrent typing in the LOCAL side of whole-doc
     vimBufferText(pane.content.buffer),
     `<<<<<<< LOCAL\n${concurrent}\n=======\n${upstream}\n>>>>>>> UPSTREAM`,
   );
+  assert.equal(pane.content.draft.recordRevision, 3);
+  assert.deepEqual(pane.content.draft.stagedAssets, currentDraft.stagedAssets);
+  assert.deepEqual(pane.content.draft.base, latestBase);
+  assert.equal(pane.content.draft.dirty, true);
+  assert.equal(pane.content.draft.unpublished, true);
 });

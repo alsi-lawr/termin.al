@@ -516,7 +516,14 @@ module Program =
         if Cv.verifyViewerKey "invalid" wrongKey then
             failwith "An invalid configured CV hash must fail closed."
 
-    let private authenticationApplication viewerHash cvKeyRingReady expiredAccess now cvPath =
+    let private authenticationApplication
+        viewerHash
+        cvKeyRingReady
+        expiredAccess
+        now
+        cvPath
+        (publication: GitHubPublication.Client)
+        =
         let arguments =
             [ "--GitHub:App:ClientId=" + String('c', 24)
               "--GitHub:App:ClientSecret=" + String('s', 32)
@@ -539,7 +546,7 @@ module Program =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
-        builder.Services.AddSingleton<GitHubPublication.Client>(GitHubPublication.unavailable) |> ignore
+        builder.Services.AddSingleton<GitHubPublication.Client>(publication) |> ignore
 
         let statsRuntime: Stats.BrowserRuntime =
             { Store = statsStore
@@ -576,13 +583,13 @@ module Program =
         application.MapGrpcService<PublicationGrpcService>().EnableGrpcWeb() |> ignore
         application, githubHandler, capturedLogs
 
-    let private runMutationBoundaryChecks () =
+    let private runAnonymousMutationBoundaryChecks () =
         let now () =
             DateTimeOffset.Parse("2026-07-22T12:00:00Z")
 
         let viewer = Cv.generateViewerKey ()
 
-        authenticationApplication (Some viewer.CanonicalHash) true false now Cv.SecretFilePath
+        authenticationApplication (Some viewer.CanonicalHash) true false now Cv.SecretFilePath GitHubPublication.unavailable
         |> fun (application, _, capturedLogs) ->
             withRunningHost application (fun client ->
                 let session, _ =
@@ -645,13 +652,75 @@ module Program =
 
         [ callbackCode; state ]
 
+    let private runMutationBoundaryChecks () =
+        runAnonymousMutationBoundaryChecks ()
+
+        let now () =
+            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+
+        let suppliedTokens = ResizeArray<string>()
+        let publication =
+            { new GitHubPublication.Client with
+                member _.Publish(ownerToken, _, _) =
+                    suppliedTokens.Add(Auth.ownerAccessTokenValue ownerToken)
+                    Task.FromResult(GitHubPublication.Result.Unavailable) }
+
+        let viewer = Cv.generateViewerKey ()
+
+        authenticationApplication (Some viewer.CanonicalHash) true false now Cv.SecretFilePath publication
+        |> fun (application, _, capturedLogs) ->
+            withRunningHost application (fun client ->
+                establishOwnerSession client |> ignore
+
+                let session, _ =
+                    grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
+
+                let rejectedHeaders =
+                    [ [ Auth.AntiforgeryHeaderName, session.CsrfToken ]
+                      [ "Origin", "https://wrong.example"
+                        Auth.AntiforgeryHeaderName, session.CsrfToken ]
+                      [ "Origin", "http://127.0.0.1" ]
+                      [ "Origin", "http://127.0.0.1"; Auth.AntiforgeryHeaderName, String('w', 32) ] ]
+
+                for headers in rejectedHeaders do
+                    let status =
+                        grpcWebFailureStatus
+                            client
+                            "/terminal.v1.PublicationApi/Publish"
+                            headers
+                            (PublicationRequest(Operation = PublicationOperation.Add))
+
+                    if status <> int StatusCode.PermissionDenied then
+                        failwith "Owner publication accepted invalid Origin or antiforgery metadata."
+
+                if suppliedTokens.Count <> 0 then
+                    failwith "Rejected owner publication metadata reached the publication client."
+
+                let status =
+                    grpcWebFailureStatus
+                        client
+                        "/terminal.v1.PublicationApi/Publish"
+                        [ "Origin", "http://127.0.0.1"; Auth.AntiforgeryHeaderName, session.CsrfToken ]
+                        (PublicationRequest(Operation = PublicationOperation.Add))
+
+                if status <> int StatusCode.Unavailable then
+                    failwith "A valid owner publication failure must remain generic unavailable."
+
+                if suppliedTokens.Count <> 1 || suppliedTokens[0] <> String('a', 48) then
+                    failwith "A valid owner publication did not receive exactly the server-held owner access token.")
+
+            let retained = String.Join("\n", capturedLogs)
+
+            if retained.Contains(String('a', 48), StringComparison.Ordinal) then
+                failwith "The owner access token must not be logged by publication boundary handling."
+
     let private runOwnerCvFailClosedChecks () =
         let now () =
             DateTimeOffset.Parse("2026-07-22T12:00:00Z")
 
         let viewerHash = (Cv.generateViewerKey ()).CanonicalHash
 
-        authenticationApplication None true false now Cv.SecretFilePath
+        authenticationApplication None true false now Cv.SecretFilePath GitHubPublication.unavailable
         |> fun (application, _, _) ->
             withRunningHost application (fun client ->
                 establishOwnerSession client |> ignore
@@ -662,7 +731,7 @@ module Program =
                 if status <> int StatusCode.Unavailable then
                     failwith "Unavailable CV storage must fail closed.")
 
-        authenticationApplication (Some viewerHash) false false now Cv.SecretFilePath
+        authenticationApplication (Some viewerHash) false false now Cv.SecretFilePath GitHubPublication.unavailable
         |> fun (application, _, _) ->
             withRunningHost application (fun client ->
                 establishOwnerSession client |> ignore
@@ -674,7 +743,7 @@ module Program =
                     failwith "Unavailable CV storage must fail closed.")
 
         let application, githubHandler, _ =
-            authenticationApplication (Some viewerHash) true true now Cv.SecretFilePath
+            authenticationApplication (Some viewerHash) true true now Cv.SecretFilePath GitHubPublication.unavailable
 
         withRunningHost application (fun client ->
             establishOwnerSession client |> ignore
@@ -706,7 +775,7 @@ module Program =
             File.WriteAllText(cvPath, cvBytes, UTF8Encoding(false))
 
             let application, githubHandler, capturedLogs =
-                authenticationApplication (Some viewerKey.CanonicalHash) true false now cvPath
+                authenticationApplication (Some viewerKey.CanonicalHash) true false now cvPath GitHubPublication.unavailable
 
             let mutable callbackValues = []
 
