@@ -237,7 +237,41 @@ module Program =
                 use rejectedLogout = client.Send(logout)
 
                 if rejectedLogout.StatusCode <> HttpStatusCode.BadRequest then
-                    failwith "Logout without the exact configured Origin must be rejected.")
+                    failwith "Logout without the exact configured Origin must be rejected."
+
+                use unavailableCv = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+
+                if unavailableCv.StatusCode <> HttpStatusCode.ServiceUnavailable then
+                    failwith "Missing CV hash configuration must fail CV delivery closed."
+
+                if not unavailableCv.Headers.CacheControl.NoStore then
+                    failwith "CV responses must not be cached."
+
+                let unavailableCvBody =
+                    unavailableCv.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+                if not (unavailableCvBody.Contains("CV access failed.", StringComparison.Ordinal)) then
+                    failwith "CV configuration failures must remain generic.")
+
+    let private runCvCryptographyChecks () =
+        let generated = Cv.generateViewerKey ()
+
+        if generated.Plaintext.Length <> 43 then
+            failwith "The generated CV viewer key must contain 256 bits encoded as base64url."
+
+        if not (generated.CanonicalHash.StartsWith("pbkdf2-sha256$v=1$i=600000$", StringComparison.Ordinal)) then
+            failwith "The generated CV hash must use the approved canonical algorithm version."
+
+        if not (Cv.verifyViewerKey generated.CanonicalHash generated.Plaintext) then
+            failwith "The generated CV hash must verify its generated viewer key."
+
+        let wrongKey = String('z', generated.Plaintext.Length)
+
+        if Cv.verifyViewerKey generated.CanonicalHash wrongKey then
+            failwith "A different CV viewer key must not verify."
+
+        if Cv.verifyViewerKey "invalid" wrongKey then
+            failwith "An invalid configured CV hash must fail closed."
 
     let private runFreshCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (freshContentClient ())
@@ -313,6 +347,7 @@ module Program =
             StatsTests.run ()
             runHostContractChecks ()
             runAuthenticationContractChecks ()
+            runCvCryptographyChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             0

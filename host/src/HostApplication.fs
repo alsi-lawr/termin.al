@@ -48,6 +48,7 @@ module HostApplication =
             statsHeartbeatInterval
 
         Auth.mapEndpoints application
+        Cv.mapEndpoints application
 
         Api.mapEndpoints application contentClient
 
@@ -86,6 +87,8 @@ module HostApplication =
             authHttpClient
             now
             Auth.randomBytes
+
+        Cv.configureServices builder.Services builder.Configuration allowLocalHttpStatsCookie now Auth.randomBytes
 
         let application = builder.Build()
 
@@ -130,6 +133,13 @@ module HostApplication =
             builder.Environment
             (builder.Environment.IsDevelopment())
             authHttpClient
+            now
+            Auth.randomBytes
+
+        Cv.configureServices
+            builder.Services
+            builder.Configuration
+            (builder.Environment.IsDevelopment())
             now
             Auth.randomBytes
 

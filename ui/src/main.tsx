@@ -19,22 +19,26 @@ async function createApplicationClientComposition(
       const { DemoContentClient } = await import("./content/DemoContentClient.ts");
       const { DemoStatsClient } = await import("./api/StatsClient.ts");
       const { DemoSessionClient } = await import("./api/SessionClient.ts");
+      const { DemoCvClient } = await import("./api/CvClient.ts");
 
       return Object.freeze({
         contentClient: new DemoContentClient(),
         statsClient: new DemoStatsClient(),
         sessionClient: new DemoSessionClient(),
+        cvClient: new DemoCvClient(),
       });
     }
     case "live": {
       const { HttpContentClient } = await import("./api/ContentClient.ts");
       const { HttpStatsClient } = await import("./api/StatsClient.ts");
       const { HttpSessionClient } = await import("./api/SessionClient.ts");
+      const { HttpCvClient } = await import("./api/CvClient.ts");
 
       return Object.freeze({
         contentClient: new HttpContentClient(),
         statsClient: new HttpStatsClient(),
         sessionClient: new HttpSessionClient(),
+        cvClient: new HttpCvClient(),
       });
     }
   }

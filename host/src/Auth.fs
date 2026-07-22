@@ -321,7 +321,7 @@ module Auth =
             | _ -> None
         | _ -> None
 
-    let private keyRingReady () =
+    let keyRingAvailable () =
         if not (Directory.Exists(keyRingPath)) then
             false
         else
@@ -803,7 +803,7 @@ module Auth =
         (now: unit -> DateTimeOffset)
         (randomBytes: int -> byte array)
         =
-        let ready = keyRingReady ()
+        let ready = keyRingAvailable ()
         let dataProtection = services.AddDataProtection().SetApplicationName("termin.al")
 
         if ready then
