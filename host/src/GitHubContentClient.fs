@@ -301,6 +301,8 @@ module GitHubContentClient =
             && not (line.StartsWith("<!--", StringComparison.Ordinal)))
         |> Option.map (fun line -> if line.Length <= 500 then line else line.Substring(0, 500))
 
+    let private missingReadme = "No README found."
+
     let private firstLine (text: string) =
         text.Replace("\r\n", "\n", StringComparison.Ordinal).Split([| '\n' |], StringSplitOptions.None)
         |> Array.tryFind (String.IsNullOrWhiteSpace >> not)
@@ -784,11 +786,6 @@ module GitHubContentClient =
                 | Error failure -> return Error(mapFetchFailure failure)
             }
 
-        let missingProjectReadmeProblem (repository: GitHubRepositoryData) =
-            ContentDomain.Problem.create
-                ContentDomain.NotFound
-                $"The public README for {repositoryName repository.RepositoryFullName} was not found."
-
         let getProfileReadme cancellationToken =
             task {
                 let profileRepository = GitHubContentConfiguration.profileRepository configuration
@@ -866,14 +863,16 @@ module GitHubContentClient =
 
             getPages (Some firstPage) 0 []
 
-        let projectFromRepository (repository: GitHubRepositoryData) (readme: string) =
+        let projectFromRepository (repository: GitHubRepositoryData) (readme: string option) =
             let fullName = repositoryName repository.RepositoryFullName
             let repositoryShortName = fullName.Substring(fullName.IndexOf('/') + 1)
             let slugValue = normalizeSlug repositoryShortName
 
+            let readmeBody = readme |> Option.defaultValue missingReadme
+
             let summary =
                 readme
-                |> summaryFromMarkdown
+                |> Option.bind summaryFromMarkdown
                 |> Option.orElse repository.RepositoryDescription
                 |> Option.defaultValue $"Public repository {repositoryShortName}."
 
@@ -884,7 +883,7 @@ module GitHubContentClient =
                 toDomainResult (ContentDomain.ContentSummary.tryCreate "project.summary" summary),
                 toDomainResult (ContentDomain.ProjectCollectionPath.tryCreate "project.collectionPath" "recent/github"),
                 toDomainResult (ContentDomain.ContentTag.tryCreate "project.tag" "github"),
-                toDomainResult (ContentDomain.MarkdownBody.tryCreate "project.readme" readme)
+                toDomainResult (ContentDomain.MarkdownBody.tryCreate "project.readme" readmeBody)
             with
             | Ok slug, Ok id, Ok title, Ok projectSummary, Ok collectionPath, Ok tag, Ok projectReadme ->
                 Ok(
@@ -911,7 +910,7 @@ module GitHubContentClient =
 
         let getProjectReadmes (repositories: GitHubRepositoryData list) cancellationToken =
             task {
-                let mutable collected: (GitHubRepositoryData * string) list = []
+                let mutable collected: (GitHubRepositoryData * string option) list = []
                 let mutable failure: ContentDomain.Problem option = None
 
                 for repository in repositories do
@@ -920,8 +919,8 @@ module GitHubContentClient =
 
                         match readme with
                         | Error problem -> failure <- Some problem
-                        | Ok(Some(body, _)) -> collected <- (repository, body) :: collected
-                        | Ok None -> failure <- Some(missingProjectReadmeProblem repository)
+                        | Ok(Some(body, _)) -> collected <- (repository, Some body) :: collected
+                        | Ok None -> collected <- (repository, None) :: collected
 
                 match failure with
                 | Some problem -> return Error problem
@@ -945,8 +944,12 @@ module GitHubContentClient =
 
                             match readme with
                             | Error problem -> failure <- Some problem
-                            | Ok None -> failure <- Some(missingProjectReadmeProblem repository)
-                            | Ok(Some(body, _)) ->
+                            | Ok readme ->
+                                let body =
+                                    readme
+                                    |> Option.map (fun (value, _) -> value)
+                                    |> Option.defaultValue missingReadme
+
                                 match ContentDomain.MarkdownBody.tryCreate "project.readme" body with
                                 | Error validationFailure -> failure <- Some(mapValidationFailure validationFailure)
                                 | Ok markdown ->
