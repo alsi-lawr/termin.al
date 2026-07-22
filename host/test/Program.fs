@@ -816,6 +816,7 @@ module Program =
     [<EntryPoint>]
     let main _ =
         try
+            PublicationMediaTests.run ()
             GitHubContentClientTests.run ()
             StatsTests.run ()
             runHostContractChecks ()

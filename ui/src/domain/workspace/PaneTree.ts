@@ -173,6 +173,14 @@ export type PaneOperation =
       closeIfBufferMatchesSavedSource: boolean;
     }>
   | Readonly<{
+      kind: "complete-authoring-media";
+      paneId: PaneId;
+      draft: PublicationDraft;
+      submittedSource: string;
+      completedBuffer: VimBuffer;
+      message: string;
+    }>
+  | Readonly<{
       kind: "discard-authoring-editor";
       paneId: PaneId;
     }>
@@ -1139,6 +1147,30 @@ export function applyPaneOperation(
           vimBufferText(pane.content.buffer) === operation.savedSource
         ? closePane(updated, pane.id, true)
         : { kind: "applied", workspace: updated };
+    }
+    case "complete-authoring-media": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      const buffer = vimBufferText(pane.content.buffer) === operation.submittedSource
+        ? operation.completedBuffer
+        : pane.content.buffer;
+      return {
+        kind: "applied",
+        workspace: {
+          ...workspace,
+          tree: replacePane(workspace.tree, pane.id, {
+            ...pane,
+            content: {
+              ...pane.content,
+              draft: operation.draft,
+              savedSource: operation.draft.source,
+              buffer,
+              message: operation.message,
+            },
+          }),
+        },
+      };
     }
     case "discard-authoring-editor": {
       const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);

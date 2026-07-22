@@ -10,14 +10,23 @@ import {
   minimalPublicationSource,
   publicationPathFromVirtualPath,
   publicationSource,
+  stagedAssetFromFile,
+  stagedAssetMarkdown,
   validatePublicationSource,
   type PublicationDraft,
+  type StagedAsset,
+  type StagedAssetMetadata,
 } from "./PublicationDraft.ts";
 
 export type AuthoringOpenResult =
   | Readonly<{ kind: "opened"; draft: PublicationDraft }>
   | Readonly<{ kind: "rejected"; message: string }>
   | Readonly<{ kind: "cancelled" }>;
+
+export type AuthoringAssetMutationResult =
+  | Readonly<{ kind: "written"; draft: PublicationDraft; source: string; cursorOffset: number }>
+  | Readonly<{ kind: "stale"; current: PublicationDraft }>
+  | Readonly<{ kind: "invalid"; message: string }>;
 
 export class AuthoringService {
   readonly #corpus: ContentCorpus;
@@ -48,6 +57,7 @@ export class AuthoringService {
     const path = publicationPathFromVirtualPath(normalized.path);
     if (path.kind === "invalid") return { kind: "rejected", message: path.message };
 
+    await this.#store.cleanupOrphans();
     const stored = await this.#store.read(path.value.repositoryPath);
     if (stored !== undefined) return { kind: "opened", draft: stored };
     if (signal.aborted) return { kind: "cancelled" };
@@ -127,5 +137,113 @@ export class AuthoringService {
 
   discard(draft: PublicationDraft): Promise<DraftDiscardResult> {
     return this.#store.discard(draft.repositoryPath, draft.recordRevision);
+  }
+
+  assets(draft: PublicationDraft): Promise<ReadonlyArray<StagedAsset>> {
+    return this.#store.readAssets(draft.repositoryPath);
+  }
+
+  async stageAssets(
+    draft: PublicationDraft,
+    source: string,
+    cursorOffset: number,
+    files: ReadonlyArray<File>,
+  ): Promise<AuthoringAssetMutationResult> {
+    if (files.length === 0) return { kind: "invalid", message: "Select at least one raster asset." };
+    const selected: StagedAsset[] = [];
+    for (const file of files) {
+      const asset = await stagedAssetFromFile(draft.repositoryPath, file);
+      if (asset.kind === "invalid") return asset;
+      if (selected.some((candidate) => candidate.metadata.destinationPath === asset.value.metadata.destinationPath)) {
+        return { kind: "invalid", message: "Selected asset destination paths must be unique." };
+      }
+      selected.push(asset.value);
+    }
+    const existingDestinations = new Set(draft.stagedAssets.map((asset) => asset.destinationPath));
+    const links = selected
+      .filter((asset) => !existingDestinations.has(asset.metadata.destinationPath))
+      .map((asset) => stagedAssetMarkdown(asset.metadata));
+    const insertion = links.join("\n");
+    const boundedOffset = Math.max(0, Math.min(source.length, cursorOffset));
+    const stagedSource = source.slice(0, boundedOffset) + insertion + source.slice(boundedOffset);
+    const parsed = validatePublicationSource(stagedSource);
+    if (parsed.kind === "invalid") return parsed;
+    const metadata = [...draft.stagedAssets];
+    for (const asset of selected) {
+      const index = metadata.findIndex((candidate) => candidate.destinationPath === asset.metadata.destinationPath);
+      if (index < 0) metadata.push(asset.metadata);
+      else metadata[index] = asset.metadata;
+    }
+    const result = await this.#store.stage({
+      ...draft,
+      frontMatter: parsed.value,
+      source: stagedSource,
+      dirty: true,
+      stagedAssets: metadata,
+    }, draft.recordRevision, selected);
+    return result.kind === "stale"
+      ? result
+      : { kind: "written", draft: result.draft, source: stagedSource, cursorOffset: boundedOffset + insertion.length };
+  }
+
+  async removeAsset(
+    draft: PublicationDraft,
+    source: string,
+    cursorOffset: number,
+    metadata: StagedAssetMetadata,
+  ): Promise<AuthoringAssetMutationResult> {
+    if (!draft.stagedAssets.some((asset) => asset.destinationPath === metadata.destinationPath)) {
+      return { kind: "invalid", message: "The staged asset is no longer available." };
+    }
+    const link = stagedAssetMarkdown(metadata);
+    const linkIndex = source.indexOf(link);
+    const nextSource = linkIndex < 0
+      ? source
+      : source.slice(0, linkIndex) + source.slice(linkIndex + link.length);
+    const nextCursorOffset = linkIndex < 0 || linkIndex >= cursorOffset
+      ? cursorOffset
+      : Math.max(linkIndex, cursorOffset - link.length);
+    const parsed = validatePublicationSource(nextSource);
+    if (parsed.kind === "invalid") return parsed;
+    const result = await this.#store.remove({
+      ...draft,
+      frontMatter: parsed.value,
+      source: nextSource,
+      dirty: true,
+      stagedAssets: draft.stagedAssets.filter((asset) => asset.destinationPath !== metadata.destinationPath),
+    }, draft.recordRevision, metadata.destinationPath);
+    return result.kind === "stale"
+      ? result
+      : { kind: "written", draft: result.draft, source: nextSource, cursorOffset: nextCursorOffset };
+  }
+
+  async replaceAsset(
+    draft: PublicationDraft,
+    source: string,
+    cursorOffset: number,
+    metadata: StagedAssetMetadata,
+    file: File,
+  ): Promise<AuthoringAssetMutationResult> {
+    if (!draft.stagedAssets.some((asset) => asset.destinationPath === metadata.destinationPath)) {
+      return { kind: "invalid", message: "The staged asset is no longer available." };
+    }
+    const replacement = await stagedAssetFromFile(draft.repositoryPath, file);
+    if (replacement.kind === "invalid") return replacement;
+    if (replacement.value.metadata.destinationPath !== metadata.destinationPath) {
+      return { kind: "invalid", message: "Replacement files must retain the staged asset's canonical filename." };
+    }
+    const parsed = validatePublicationSource(source);
+    if (parsed.kind === "invalid") return parsed;
+    const result = await this.#store.stage({
+      ...draft,
+      frontMatter: parsed.value,
+      source,
+      dirty: true,
+      stagedAssets: draft.stagedAssets.map((asset) =>
+        asset.destinationPath === metadata.destinationPath ? replacement.value.metadata : asset),
+    }, draft.recordRevision, [replacement.value]);
+    return result.kind === "stale"
+      ? result
+      : { kind: "written", draft: result.draft, source, cursorOffset };
   }
 }

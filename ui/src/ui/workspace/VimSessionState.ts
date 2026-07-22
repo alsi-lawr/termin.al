@@ -146,6 +146,8 @@ export function vimCommandEffectMessage(
       return { kind: "message", message: { text: "Write and quit requested" } };
     case "preview":
       return { kind: "message", message: { text: "Preview requested" } };
+    case "asset":
+      return { kind: "message", message: { text: "Asset selection requested" } };
     case "unrecognized-command":
       return { kind: "message", message: { text: "Unknown command" } };
   }
@@ -226,6 +228,7 @@ export function vimSessionListing(
     case "force-quit":
     case "write-quit":
     case "preview":
+    case "asset":
     case "unrecognized-command":
       return emptyVimSessionListing;
   }

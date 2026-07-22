@@ -313,3 +313,52 @@ test("async authoring completions preserve the current buffer and conditionally 
   }));
   assert.equal(paneLeaves(closed.tree).some((pane) => pane.id === editorId), false);
 });
+
+test("async media completion inserts at the submitted cursor without replacing a concurrently edited buffer", () => {
+  const source = minimalPublicationSource("example");
+  const link = "![image](/assets/notes/runtime/example/image.png)";
+  const stagedSource = source + link;
+  const stagedDraft = {
+    ...authoringDraft(stagedSource, 1),
+    stagedAssets: [{ destinationPath: "assets/notes/runtime/example/image.png", mediaType: "image/png" }],
+  } satisfies PublicationDraft;
+  const initial = split(
+    createPaneWorkspace({ initialContent: createShellPaneContent() }),
+    "vertical",
+    createAuthoringEditorPaneContent(authoringDraft(source)),
+  );
+  const editorId = initial.activePaneId;
+  const inserted = applied(applyPaneOperation(initial, {
+    kind: "complete-authoring-media",
+    paneId: editorId,
+    draft: stagedDraft,
+    submittedSource: source,
+    completedBuffer: createVimBuffer({ text: stagedSource, mode: { kind: "normal" } }),
+    message: "staged",
+  }));
+  const insertedPane = paneLeaves(inserted.tree).find((pane) => pane.id === editorId);
+  assert.equal(
+    insertedPane?.content.kind === "authoring-editor" ? vimBufferText(insertedPane.content.buffer) : undefined,
+    stagedSource,
+  );
+
+  const newerSource = source + "Typed while staging.";
+  const concurrent = applied(applyPaneOperation(initial, {
+    kind: "replace-editor-buffer",
+    paneId: editorId,
+    buffer: createVimBuffer({ text: newerSource, mode: { kind: "normal" } }),
+  }));
+  const preserved = applied(applyPaneOperation(concurrent, {
+    kind: "complete-authoring-media",
+    paneId: editorId,
+    draft: stagedDraft,
+    submittedSource: source,
+    completedBuffer: createVimBuffer({ text: stagedSource, mode: { kind: "normal" } }),
+    message: "staged",
+  }));
+  const preservedPane = paneLeaves(preserved.tree).find((pane) => pane.id === editorId);
+  if (preservedPane?.content.kind !== "authoring-editor") assert.fail("Expected the authoring editor.");
+  assert.equal(vimBufferText(preservedPane.content.buffer), newerSource);
+  assert.equal(preservedPane.content.savedSource, stagedSource);
+  assert.equal(preservedPane.content.draft.recordRevision, 1);
+});

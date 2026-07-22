@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="PublicationMedia.fs" />
     <Compile Include="ContentDomain.fs" />
     <Compile Include="ContentClient.fs" />
     <Compile Include="GitHubContentClient.fs" />

@@ -126,6 +126,7 @@ export type VimCommandEffect =
   | Readonly<{ kind: "force-quit" }>
   | Readonly<{ kind: "write-quit" }>
   | Readonly<{ kind: "preview" }>
+  | Readonly<{ kind: "asset" }>
   | Readonly<{
       kind: "show-history";
       history: "command" | "search";
@@ -219,6 +220,7 @@ export type VimParsedCommand =
   | Readonly<{ kind: "write" }>
   | Readonly<{ kind: "write-quit" }>
   | Readonly<{ kind: "preview" }>
+  | Readonly<{ kind: "asset" }>
   | Readonly<{ kind: "quit" }>
   | Readonly<{ kind: "force-quit" }>
   | Readonly<{
@@ -1682,6 +1684,23 @@ export function vimBufferText(buffer: VimBuffer): string {
 
 export function vimBufferCursorOffset(buffer: VimBuffer): number {
   return textOffsetForPosition(buffer.lines, buffer.cursor);
+}
+
+export function applyVimTextReplacement(
+  buffer: VimBuffer,
+  text: string,
+  cursorOffset: number,
+): VimBuffer {
+  const capability = gateVimCapability(buffer, { kind: "text-mutation", source: "authoring media" });
+  if (capability.kind === "handled") return capability.buffer;
+  const lines = splitText(text);
+  const next = createTextState(
+    lines,
+    positionForTextOffset(lines, cursorOffset, VimMode.Normal),
+    VimMode.Normal,
+    { kind: "none" },
+  );
+  return commitEdit(buffer, next, buffer.register, [editInterval(vimBufferText(buffer), text)]);
 }
 
 export function isVimBufferDirty(buffer: VimBuffer): boolean {
@@ -3309,6 +3328,8 @@ export function parseVimCommand(source: string): VimCommandParseResult {
       return { kind: "recognized", command: { kind: "write-quit" } };
     case "preview":
       return { kind: "recognized", command: { kind: "preview" } };
+    case "asset":
+      return { kind: "recognized", command: { kind: "asset" } };
     case "history":
     case "history cmd":
       return {
@@ -3340,6 +3361,8 @@ function writeCapabilityClassification(
     case "x":
     case "xit":
       return { kind: "write-effect", source: ":" + source };
+    case "asset":
+      return { kind: "text-mutation", source: ":asset" };
     default:
       return { kind: "none" };
   }

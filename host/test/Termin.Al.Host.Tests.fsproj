@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="PublicationMediaTests.fs" />
     <Compile Include="GitHubContentClientTests.fs" />
     <Compile Include="StatsTests.fs" />
     <Compile Include="Program.fs" />

@@ -31,6 +31,11 @@ export type StagedAssetMetadata = Readonly<{
   mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 }>;
 
+export type StagedAsset = Readonly<{
+  metadata: StagedAssetMetadata;
+  blob: Blob;
+}>;
+
 export type PublicationDraft = Readonly<{
   schemaVersion: 1;
   recordRevision: number;
@@ -52,6 +57,17 @@ export type DraftValidation<Value> =
 const segmentPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
 const slugPattern = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 const tagPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
+const assetFileNamePattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
+const frontMatterFieldNames = new Set<string>(["title", "summary", "tags"]);
+
+const assetMediaTypes = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+} as const satisfies Readonly<Record<string, StagedAssetMetadata["mediaType"]>>;
+const assetExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif"] as const;
 
 export function publicationPathFromVirtualPath(value: string): DraftValidation<PublicationPath> {
   if (!value.startsWith("~/") || value.length > 512 || value.includes("\0")) {
@@ -119,7 +135,7 @@ export function validatePublicationSource(source: string): DraftValidation<Publi
     const separator = line.indexOf("=");
     if (separator <= 0) return { kind: "invalid", message: "Front matter fields must use key = value syntax." };
     const name = line.slice(0, separator).trim();
-    if (!(["title", "summary", "tags"] as const).includes(name as "title" | "summary" | "tags") || fields.has(name)) {
+    if (!frontMatterFieldNames.has(name) || fields.has(name)) {
       return { kind: "invalid", message: "Front matter fields must be unique title, summary, and tags fields." };
     }
     try {
@@ -162,6 +178,72 @@ export function publicationBodyFromSource(source: string): string {
   const lines = source.replaceAll("\r\n", "\n").split("\n");
   const closing = lines.indexOf("---", 1);
   return closing < 0 ? source : lines.slice(closing + 1).join("\n");
+}
+
+function assetExtension(fileName: string): keyof typeof assetMediaTypes | undefined {
+  for (const extension of assetExtensions) {
+    if (fileName.endsWith(extension)) return extension;
+  }
+  return undefined;
+}
+
+function hasBytes(bytes: Uint8Array, expected: ReadonlyArray<number>, offset = 0): boolean {
+  return expected.every((value, index) => bytes[offset + index] === value);
+}
+
+function mediaSignatureMatches(mediaType: StagedAssetMetadata["mediaType"], bytes: Uint8Array): boolean {
+  switch (mediaType) {
+    case "image/png":
+      return hasBytes(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    case "image/jpeg":
+      return hasBytes(bytes, [0xff, 0xd8, 0xff]);
+    case "image/webp":
+      return hasBytes(bytes, [0x52, 0x49, 0x46, 0x46]) && hasBytes(bytes, [0x57, 0x45, 0x42, 0x50], 8);
+    case "image/gif":
+      return hasBytes(bytes, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+        hasBytes(bytes, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+  }
+}
+
+export async function stagedAssetFromFile(
+  repositoryPath: string,
+  file: File,
+): Promise<DraftValidation<StagedAsset>> {
+  if (!assetFileNamePattern.test(file.name) || file.name === "." || file.name === "..") {
+    return { kind: "invalid", message: "Asset filenames must be one traversal-free canonical segment." };
+  }
+  const extension = assetExtension(file.name);
+  const mediaType = extension === undefined ? undefined : assetMediaTypes[extension];
+  if (mediaType === undefined || mediaType !== file.type) {
+    return { kind: "invalid", message: "Assets must use matching PNG, JPEG, WebP, or GIF filename and media types." };
+  }
+  const documentExtension = repositoryPath.endsWith(".md") ? repositoryPath.length - 3 : -1;
+  if (documentExtension < 0) {
+    throw new Error("Publication drafts must use Markdown repository paths.");
+  }
+  const destinationPath = `assets/${repositoryPath.slice(0, documentExtension)}/${file.name}`;
+  if (destinationPath.length > 512) {
+    return { kind: "invalid", message: "The complete asset repository path exceeds the canonical path maximum." };
+  }
+  const signature = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  if (!mediaSignatureMatches(mediaType, signature)) {
+    return { kind: "invalid", message: "The selected asset signature does not match its declared media type." };
+  }
+  return {
+    kind: "valid",
+    value: {
+      metadata: { destinationPath, mediaType },
+      blob: file,
+    },
+  };
+}
+
+export function stagedAssetMarkdown(metadata: StagedAssetMetadata): string {
+  const fileName = metadata.destinationPath.split("/").at(-1) ?? "";
+  const extension = assetExtension(fileName);
+  if (extension === undefined) throw new Error("Staged assets must have an allowed canonical extension.");
+  const label = fileName.slice(0, -extension.length).replaceAll(/[_.-]+/gu, " ");
+  return `![${label}](/${metadata.destinationPath})`;
 }
 
 function stringProperty(value: object, name: string): string | undefined {
@@ -210,7 +292,26 @@ export function publicationDraftFromStoredValue(value: unknown): PublicationDraf
     : baseKind === "existing" && blobSha !== undefined
       ? { kind: "existing", defaultBranch, headSha, blobSha }
       : undefined;
-  if (base === undefined || !("stagedAssets" in value) || !Array.isArray(value.stagedAssets) || value.stagedAssets.length !== 0) return undefined;
+  if (base === undefined || !("stagedAssets" in value) || !Array.isArray(value.stagedAssets)) return undefined;
+  const expectedAssetPrefix = `assets/${repositoryPath.slice(0, -3)}/`;
+  const stagedAssets: StagedAssetMetadata[] = [];
+  for (const storedAsset of value.stagedAssets) {
+    if (typeof storedAsset !== "object" || storedAsset === null) return undefined;
+    const destinationPath = stringProperty(storedAsset, "destinationPath");
+    const mediaType = stringProperty(storedAsset, "mediaType");
+    if (
+      destinationPath === undefined || destinationPath.length > 512 ||
+      !destinationPath.startsWith(expectedAssetPrefix)
+    ) return undefined;
+    const fileName = destinationPath.slice(expectedAssetPrefix.length);
+    const extension = assetExtension(fileName);
+    if (
+      !assetFileNamePattern.test(fileName) || extension === undefined ||
+      assetMediaTypes[extension] !== mediaType ||
+      stagedAssets.some((asset) => asset.destinationPath === destinationPath)
+    ) return undefined;
+    stagedAssets.push({ destinationPath, mediaType });
+  }
   return {
     schemaVersion: 1,
     recordRevision: revision,
@@ -222,6 +323,6 @@ export function publicationDraftFromStoredValue(value: unknown): PublicationDraf
     base,
     dirty,
     unpublished,
-    stagedAssets: [],
+    stagedAssets,
   };
 }

@@ -571,12 +571,16 @@ test("retains command, search, and insert-mode behavior", () => {
     source: "history invalid",
   });
 
-  for (const [source, commandEffect] of [["wq", { kind: "write-quit" }], ["preview", { kind: "preview" }]] as const) {
+  for (const [source, commandEffect] of [
+    ["wq", { kind: "write-quit" }],
+    ["preview", { kind: "preview" }],
+    ["asset", { kind: "asset" }],
+  ] as const) {
     const supported = submitVimCommand(appendVimCommandInput(press(start, ":"), source));
     assert.deepEqual(supported.commandEffect, commandEffect);
   }
 
-  for (const source of ["w!", "write", "write!", "wq!", "x", "xit"]) {
+  for (const source of ["w!", "write", "write!", "wq!", "x", "xit", "asset image.png"]) {
     const unsupported = submitVimCommand(
       appendVimCommandInput(press(start, ":"), source),
     );

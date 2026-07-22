@@ -95,9 +95,9 @@
       "summary": "Open or recover a publication draft.",
       "sourcePath": "man/edit.1",
       "artifactPath": "ui/src/generated/manpages/edit.txt",
-      "byteCount": 1787,
-      "lineCount": 42,
-      "sha256": "46937e56f84a215f4f3ba0e11fb5093052339097a5e6f61042a94f03a917ad05"
+      "byteCount": 2446,
+      "lineCount": 53,
+      "sha256": "dfcce9e2aa0f5f7c18e8ff53d6ca44056f391ba4af7457ea5823c5e8235298bb"
     },
     {
       "name": "find",

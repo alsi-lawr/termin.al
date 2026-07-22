@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type ClipboardEvent,
   type CompositionEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactElement,
@@ -55,6 +56,7 @@ import {
 } from "./VimEditorModeStatus.ts";
 import { VimEditorBlockSelectionMirror } from "./VimEditorBlockSelectionMirror.tsx";
 import { VimEditorHighlightLayer } from "./VimEditorHighlightLayer.tsx";
+import { routeEditorAssetFiles } from "./EditorAssetFiles.ts";
 import {
   emptyVimSessionListing,
   initialVimHistoryNavigation,
@@ -82,6 +84,7 @@ type VimEditorPaneProps = Readonly<{
   focusVersion: number;
   onBufferChange: (buffer: VimBuffer) => void;
   onCommandEffect?: (effect: VimCommandEffect, buffer: VimBuffer) => void;
+  onAssetFiles?: (files: ReadonlyArray<File>) => void;
   externalMessage?: string;
   onActivate: () => void;
   onPaneKeyInput: (
@@ -172,6 +175,7 @@ export function VimEditorPane({
   focusVersion,
   onBufferChange,
   onCommandEffect,
+  onAssetFiles,
   externalMessage,
   onActivate,
   onPaneKeyInput,
@@ -182,6 +186,7 @@ export function VimEditorPane({
   resolveMobileCtrlInput,
 }: VimEditorPaneProps): ReactElement {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const assetInputRef = useRef<HTMLInputElement | null>(null);
   const highlightLayerRef = useRef<HTMLDivElement | null>(null);
   const mirrorRef = useRef<HTMLDivElement | null>(null);
   const composing = useRef(false);
@@ -307,6 +312,7 @@ export function VimEditorPane({
       vimSession.onStateChange(nextSession);
       onBufferChange(next);
       if (next.commandEffect.kind !== "none") onCommandEffect?.(next.commandEffect, next);
+      if (next.commandEffect.kind === "asset" && onAssetFiles !== undefined) assetInputRef.current?.click();
       return;
     }
 
@@ -388,6 +394,9 @@ export function VimEditorPane({
   const handlePaste = (
     event: ClipboardEvent<HTMLTextAreaElement>,
   ): void => {
+    if (routeEditorAssetFiles(Array.from(event.clipboardData.files), onAssetFiles, () => { event.preventDefault(); })) {
+      return;
+    }
     if (buffer.mode.kind === "normal" || isVimVisualMode(buffer.mode)) {
       event.preventDefault();
       applyEditorBuffer(applyNormalVimKey(buffer, { kind: "paste-after" }));
@@ -407,6 +416,10 @@ export function VimEditorPane({
         event.preventDefault();
       },
     });
+  };
+
+  const handleDrop = (event: DragEvent<HTMLTextAreaElement>): void => {
+    routeEditorAssetFiles(Array.from(event.dataTransfer.files), onAssetFiles, () => { event.preventDefault(); });
   };
 
   const handleBeforeInput = (event: FormEvent<HTMLTextAreaElement>): void => {
@@ -591,10 +604,28 @@ export function VimEditorPane({
             onCompositionStart={handleCompositionStart}
             onCompositionEnd={handleCompositionEnd}
             onPaste={handlePaste}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes("Files") && onAssetFiles !== undefined) event.preventDefault();
+            }}
+            onDrop={handleDrop}
             onKeyDown={handleKeyDown}
             onScroll={handleScroll}
             onFocus={onActivate}
           />
+          {onAssetFiles === undefined ? null : (
+            <input
+              ref={assetInputRef}
+              className="sr-only"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
+              aria-label={title + " staged asset files"}
+              onChange={(event) => {
+                routeEditorAssetFiles(Array.from(event.currentTarget.files ?? []), onAssetFiles, () => {});
+                event.currentTarget.value = "";
+              }}
+            />
+          )}
         </div>
         <div className="mt-2 flex min-w-0 shrink-0 items-center bg-surface-raised text-xs text-text-muted">
           <span className={modePresentation.className}>

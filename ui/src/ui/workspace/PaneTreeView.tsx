@@ -35,9 +35,7 @@ import type { AuthenticationController } from "../../auth/Authentication.ts";
 import type { ViewerContent, ViewerOpenDisposition } from "../../content/ViewerContent.ts";
 import { submitCvSecret } from "../../application/commands/AuthenticationCommands.ts";
 import type { AuthoringService } from "../../authoring/AuthoringService.ts";
-import { publicationBodyFromSource, validatePublicationSource } from "../../authoring/PublicationDraft.ts";
-import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
-import { vimBufferText, type VimBuffer, type VimCommandEffect } from "../../domain/vim/VimBuffer.ts";
+import { AuthoringEditorPane } from "./AuthoringEditorPane.tsx";
 
 type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
@@ -275,77 +273,38 @@ function PaneLeaf({
         </div>
       );
     case "authoring-editor": {
-      const content = pane.content;
-      const handleEffect = async (effect: VimCommandEffect, buffer: VimBuffer): Promise<void> => {
-        if (authoring === undefined) return;
-        const source = vimBufferText(buffer);
-        const showMessage = (message: string): void => {
-          onOperation({ kind: "set-authoring-message", paneId: pane.id, message });
-        };
-        if (effect.kind === "quit") {
-          if (source === content.savedSource) onOperation({ kind: "close" });
-          else showMessage("No write since last change; use :q! to discard.");
-          return;
-        }
-        if (effect.kind === "force-quit") {
-          let result: Awaited<ReturnType<AuthoringService["discard"]>>;
-          try {
-            result = await authoring.discard(content.draft);
-          } catch {
-            showMessage("Draft storage is unavailable; this buffer was not discarded.");
-            return;
-          }
-          if (result.kind === "discarded") onOperation({ kind: "discard-authoring-editor", paneId: pane.id });
-          else showMessage("A newer draft revision exists; this buffer was not discarded.");
-          return;
-        }
-        if (effect.kind === "preview") {
-          const parsed = validatePublicationSource(source);
-          if (parsed.kind === "invalid") { showMessage(parsed.message); return; }
-          onOperation({
-            kind: "open-authoring-preview",
-            paneId: pane.id,
-            repositoryPath: content.draft.repositoryPath,
-            viewer: createDocumentViewerContent({
-              title: `${content.draft.virtualPath} preview`,
-              presentation: "inline",
-              document: { text: publicationBodyFromSource(source), source: { path: content.draft.virtualPath } },
-              statsIdentity: { kind: "uncounted" },
-            }),
-          });
-          return;
-        }
-        if (effect.kind !== "write" && effect.kind !== "write-quit") return;
-        let result: Awaited<ReturnType<AuthoringService["save"]>>;
-        try {
-          result = await authoring.save(content.draft, source);
-        } catch {
-          showMessage("Draft storage is unavailable; this buffer was not saved.");
-          return;
-        }
-        if (result.kind === "invalid") { showMessage(result.message); return; }
-        if (result.kind === "stale") { showMessage("A newer draft revision exists; this buffer was not saved."); return; }
-        onOperation({
-          kind: "complete-authoring-save",
-          paneId: pane.id,
-          draft: result.draft,
-          savedSource: source,
-          message: `Draft revision ${result.draft.recordRevision} saved.`,
-          closeIfBufferMatchesSavedSource: effect.kind === "write-quit",
-        });
-      };
+      if (authoring === undefined) {
+        return (
+          <div className={paneClass}>
+            <VimEditorPane
+              title={pane.content.title}
+              buffer={pane.content.buffer}
+              syntax={{ kind: "markdown" }}
+              isActive={isActive}
+              focusVersion={focusVersion}
+              onActivate={activate}
+              externalMessage={pane.content.message}
+              onBufferChange={(buffer) => { onOperation({ kind: "replace-editor-buffer", paneId: pane.id, buffer }); }}
+              onPaneKeyInput={onPaneKeyInput}
+              mobileCtrlPressed={mobileCtrlPressed}
+              vimSession={vimSession}
+              onToggleMobileCtrl={onToggleMobileCtrl}
+              onConsumeMobileCtrl={onConsumeMobileCtrl}
+              resolveMobileCtrlInput={resolveMobileCtrlInput}
+            />
+          </div>
+        );
+      }
       return (
         <div className={paneClass}>
-          <VimEditorPane
-            title={pane.content.title}
-            buffer={pane.content.buffer}
-            syntax={{ kind: "markdown" }}
+          <AuthoringEditorPane
+            paneId={pane.id}
+            content={pane.content}
+            authoring={authoring}
             isActive={isActive}
             focusVersion={focusVersion}
             onActivate={activate}
-            externalMessage={pane.content.message}
-            onCommandEffect={(effect, buffer) => { void handleEffect(effect, buffer); }}
-            onBufferChange={(buffer) => { onOperation({ kind: "replace-editor-buffer", paneId: pane.id, buffer }); }}
+            onOperation={onOperation}
             onPaneKeyInput={onPaneKeyInput}
             mobileCtrlPressed={mobileCtrlPressed}
             vimSession={vimSession}
