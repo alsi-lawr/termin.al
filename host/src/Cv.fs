@@ -417,3 +417,14 @@ module Cv =
               GlobalWindow = { StartedAt = now (); Failures = 0 } }
         )
         |> ignore
+
+    let validateProductionConfiguration (configuration: IConfiguration) =
+        match configuration[viewerHashConfigurationName] with
+        | null -> Ok()
+        | value when String.IsNullOrWhiteSpace(value) -> Ok()
+        | value when tryParseViewerHash value |> Option.isNone ->
+            Error "CV access is enabled but Cv:ViewerKeyHash is invalid."
+        | _ when not (Auth.keyRingAvailable ()) ->
+            Error "CV access is enabled but the Data Protection key ring is unavailable."
+        | _ when not (File.Exists(SecretFilePath)) -> Error $"CV access is enabled but {SecretFilePath} is unavailable."
+        | _ -> Ok()

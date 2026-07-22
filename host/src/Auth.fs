@@ -602,10 +602,9 @@ module Auth =
 
     let private popupPage (configuration: GitHubConfiguration) ok =
         let origin = configuration.PublicOrigin.AbsoluteUri.TrimEnd('/')
-        let jsonOrigin = JsonSerializer.Serialize(origin)
-        let jsonOk = if ok then "true" else "false"
         let link = HtmlEncoder.Default.Encode(origin)
-        $"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authentication</title></head><body><p>Authentication complete.</p><p><a href=\"{link}\">Return to termin.al</a></p><script>history.replaceState(null,'',location.pathname);if(window.opener){{window.opener.postMessage({{type:'termin.al.auth.complete',ok:{jsonOk}}},{jsonOrigin});window.close();}}</script></body></html>"
+        let status = if ok then "true" else "false"
+        $"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authentication</title></head><body data-auth-ok=\"{status}\" data-public-origin=\"{link}\"><p>Authentication complete.</p><p><a href=\"{link}\">Return to termin.al</a></p><script src=\"/oauth-callback.js\"></script></body></html>"
 
     let private mapStart (application: WebApplication) =
         application.MapGet(
@@ -803,6 +802,26 @@ module Auth =
               RefreshResults = ConcurrentDictionary<string, DateTimeOffset * OwnerTokens option>(StringComparer.Ordinal) }
         )
         |> ignore
+
+    let validateProductionConfiguration (configuration: IConfiguration) =
+        let names =
+            [ "GitHub:App:ClientId"
+              "GitHub:App:ClientSecret"
+              "GitHub:App:CallbackUrl"
+              "GitHub:OwnerId"
+              "Application:PublicOrigin" ]
+
+        let enabled =
+            names |> List.exists (configurationValue configuration >> Option.isSome)
+
+        if not enabled then
+            Ok()
+        elif tryConfiguration configuration |> Option.isNone then
+            Error "GitHub authentication is enabled but its required configuration is incomplete or invalid."
+        elif not (keyRingAvailable ()) then
+            Error "GitHub authentication is enabled but the Data Protection key ring is unavailable."
+        else
+            Ok()
 
     let mapOAuthEndpoints (application: WebApplication) =
         mapStart application

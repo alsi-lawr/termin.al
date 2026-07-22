@@ -17,6 +17,7 @@
     "lint": "bun run oxlint .",
     "manpages:generate": "bun ../scripts/generate-manpages.ts",
     "manpages:check": "bun ../scripts/generate-manpages.ts --check",
+    "smoke:demo": "bun ../scripts/demo-browser-smoke.ts",
     "test": "bun test --max-concurrency 1 ./src",
     "preview": "bun --smol run vite preview --port 5175 --strictPort"
   },

@@ -391,6 +391,14 @@ module Program =
                 if health.Headers.CacheControl.ToString() <> "no-store" then
                     failwith "Health responses must not be cached."
 
+                use readiness = client.GetAsync("/readyz").GetAwaiter().GetResult()
+
+                if readiness.StatusCode <> HttpStatusCode.ServiceUnavailable then
+                    failwith "An unconfigured GitHub content dependency must not report ready."
+
+                if readiness.Headers.CacheControl.ToString() <> "no-store" then
+                    failwith "Readiness responses must not be cached."
+
                 use index = client.GetAsync("/").GetAwaiter().GetResult()
 
                 if index.StatusCode <> HttpStatusCode.OK then
@@ -398,6 +406,20 @@ module Program =
 
                 if isNull index.Headers.ETag then
                     failwith "Static files must retain an ETag validator."
+
+                let csp = index.Headers.GetValues("Content-Security-Policy") |> Seq.exactlyOne
+
+                if csp.Contains("unsafe-inline", StringComparison.Ordinal) then
+                    failwith "The application CSP must not permit inline script or style execution."
+
+                for required in [ "default-src 'none'"; "script-src 'self'"; "connect-src 'self'" ] do
+                    if not (csp.Contains(required, StringComparison.Ordinal)) then
+                        failwithf "The application CSP is missing %s." required
+
+                use callbackScript = client.GetAsync("/oauth-callback.js").GetAwaiter().GetResult()
+
+                if callbackScript.StatusCode <> HttpStatusCode.OK then
+                    failwith "The same-origin OAuth callback script must be served as a static asset."
 
                 use conditionalIndexRequest = new HttpRequestMessage(HttpMethod.Get, "/")
                 conditionalIndexRequest.Headers.IfNoneMatch.Add(index.Headers.ETag)
@@ -656,6 +678,14 @@ module Program =
         if callback.StatusCode <> HttpStatusCode.OK then
             failwithf "Expected owner callback success, but received %O." callback.StatusCode
 
+        let callbackBody = callback.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+        if
+            not (callbackBody.Contains("<script src=\"/oauth-callback.js\"></script>", StringComparison.Ordinal))
+            || callbackBody.Contains("<script>", StringComparison.Ordinal)
+        then
+            failwith "The OAuth callback must use only the checked-in same-origin script."
+
         [ callbackCode; state ]
 
     let private runMutationBoundaryChecks () =
@@ -834,6 +864,11 @@ module Program =
         HostApplication.createWithContentClient [||] (freshContentClient ())
         |> fun application ->
             withRunningHost application (fun client ->
+                use readiness = client.GetAsync("/readyz").GetAwaiter().GetResult()
+
+                if readiness.StatusCode <> HttpStatusCode.OK then
+                    failwith "Available GitHub-backed public content must report ready."
+
                 let response, headers =
                     grpcWebUnary
                         client
@@ -900,6 +935,17 @@ module Program =
                 if release.Tag <> "v1.0.0" || release.PublishedAt <> "2026-07-14T09:30:00.000Z" then
                     failwithf "Changelog release chronology changed across the generated wire contract: %O." release)
 
+    let private runProductionConfigurationChecks () =
+        for arguments in
+            [ [| "--GitHub:App:ClientId=incomplete" |]
+              [| "--Cv:ViewerKeyHash=invalid" |]
+              [| "--ForwardedHeaders:Enabled=true" |] ] do
+            try
+                HostApplication.create arguments |> ignore
+                failwith "Incomplete enabled production security configuration must fail startup."
+            with :? InvalidOperationException ->
+                ()
+
     [<EntryPoint>]
     let main _ =
         try
@@ -916,6 +962,7 @@ module Program =
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             runChangelogReleaseWireCheck ()
+            runProductionConfigurationChecks ()
             0
         with error ->
             eprintfn "Host health check failed: %s" error.Message
