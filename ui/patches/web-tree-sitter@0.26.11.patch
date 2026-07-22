@@ -1,0 +1,58 @@
+diff --git a/web-tree-sitter.js b/web-tree-sitter.js
+index 449545cbe28eabba64252ea5097a7d8f0a686ba8..88d0cf68f1245877e5f53935a2e10114f31d4d0d 100644
+--- a/web-tree-sitter.js
++++ b/web-tree-sitter.js
+@@ -2328,53 +2328,6 @@ async function Module2(moduleArg = {}) {
+         if (!flags.allowUndefined) {
+           reportUndefinedSymbols();
+         }
+-        function addEmAsm(addr, body) {
+-          var args = [];
+-          var arity = 0;
+-          for (; arity < 16; arity++) {
+-            if (body.indexOf("$" + arity) != -1) {
+-              args.push("$" + arity);
+-            } else {
+-              break;
+-            }
+-          }
+-          args = args.join(",");
+-          var func = `(${args}) => { ${body} };`;
+-          ASM_CONSTS[start] = eval(func);
+-        }
+-        __name(addEmAsm, "addEmAsm");
+-        if ("__start_em_asm" in moduleExports) {
+-          var start = moduleExports["__start_em_asm"];
+-          var stop = moduleExports["__stop_em_asm"];
+-          while (start < stop) {
+-            var jsString = UTF8ToString(start);
+-            addEmAsm(start, jsString);
+-            start = HEAPU8.indexOf(0, start) + 1;
+-          }
+-        }
+-        function addEmJs(name, cSig, body) {
+-          var jsArgs = [];
+-          cSig = cSig.slice(1, -1);
+-          if (cSig != "void") {
+-            cSig = cSig.split(",");
+-            for (var i in cSig) {
+-              var jsArg = cSig[i].split(" ").pop();
+-              jsArgs.push(jsArg.replace("*", ""));
+-            }
+-          }
+-          var func = `(${jsArgs}) => ${body};`;
+-          moduleExports[name] = eval(func);
+-        }
+-        __name(addEmJs, "addEmJs");
+-        for (var name in moduleExports) {
+-          if (name.startsWith("__em_js__")) {
+-            var start = moduleExports[name];
+-            var jsString = UTF8ToString(start);
+-            var parts = jsString.split("<::>");
+-            addEmJs(name.replace("__em_js__", ""), parts[0], parts[1]);
+-            delete moduleExports[name];
+-          }
+-        }
+         var applyRelocs = moduleExports["__wasm_apply_data_relocs"];
+         if (applyRelocs) {
+           if (runtimeInitialized) {

@@ -35,5 +35,8 @@
     "oxlint": "1.74.0",
     "typescript": "7.0.2",
     "vite": "8.1.4"
+  },
+  "patchedDependencies": {
+    "web-tree-sitter@0.26.11": "patches/web-tree-sitter@0.26.11.patch"
   }
 }
