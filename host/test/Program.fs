@@ -212,6 +212,7 @@ module Program =
             System.Net.Http.Headers.MediaTypeHeaderValue("application/grpc-web+proto")
 
         use response = client.Send(request)
+
         let headerStatus =
             [ response.Headers :> seq<_>
               response.TrailingHeaders :> seq<_>
@@ -225,6 +226,7 @@ module Program =
 
         let bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
         let text = Encoding.ASCII.GetString(bytes)
+
         let matched =
             Text.RegularExpressions.Regex.Match(
                 text,
@@ -234,10 +236,8 @@ module Program =
 
         match headerStatus with
         | Some status -> status
-        | None when matched.Success ->
-            Int32.Parse(matched.Groups["status"].Value)
-        | None ->
-            failwithf "Expected a failed gRPC-Web trailer status in %A." bytes
+        | None when matched.Success -> Int32.Parse(matched.Groups["status"].Value)
+        | None -> failwithf "Expected a failed gRPC-Web trailer status in %A." bytes
 
     let private assertProblem (response: HttpResponseMessage) expectedStatus expectedCode =
         if response.StatusCode <> expectedStatus then
@@ -316,7 +316,9 @@ module Program =
         let catalog = catalogWithCacheState cacheState
 
         { new ContentClient with
-            member _.GetRepositoryBase _ = Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+            member _.GetRepositoryBase _ =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
 
             member _.GetDocument(_, _) =
@@ -361,14 +363,20 @@ module Program =
             |> requireValid
 
         { new ContentClient with
-            member _.GetRepositoryBase _ = Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+            member _.GetRepositoryBase _ =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+
             member _.GetCatalog _ = Task.FromResult(Ok catalog)
+
             member _.GetDocument(_, _) =
                 Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+
             member _.GetProjects _ =
                 Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+
             member _.GetNow _ =
                 Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+
             member _.GetChangelog _ = Task.FromResult(Ok changelog) }
 
     let private runHostContractChecks () =

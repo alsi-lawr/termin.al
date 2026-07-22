@@ -634,6 +634,7 @@ module GitHubContentClientTests =
     let private testPublicationMetadata () =
         let headSha = String('a', 40)
         let blobSha = String('b', 40)
+
         let catalogPath =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
@@ -657,7 +658,11 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
                 | path when path = $"/repos/example-owner/content/contents/blog/validated-metadata.md?ref={headSha}" ->
                     let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
-                    response HttpStatusCode.OK $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}" None
+
+                    response
+                        HttpStatusCode.OK
+                        $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}"
+                        None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -713,7 +718,9 @@ module GitHubContentClientTests =
             match ContentDomain.ContentDocument.baseRevisions document with
             | Some(head, blob) when
                 ContentDomain.ContentRevision.value head = headSha
-                && ContentDomain.ContentRevision.value blob = blobSha -> ()
+                && ContentDomain.ContentRevision.value blob = blobSha
+                ->
+                ()
             | _ -> failwith "Publication reads must carry the current head and existing blob SHA."
 
     let private testPublicationFrontMatterContract () =
@@ -760,13 +767,18 @@ module GitHubContentClientTests =
         if first || failed || not changed || generation.Current <> 1L then
             failwith "Only a changed observed repository head may advance the content-cache generation."
 
-        let catalogPath = "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+        let catalogPath =
+            "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+
         let gate = RequestGate()
 
         let handler =
             new GatedHandler(
                 (fun request ->
-                    if request.PathAndQuery = catalogPath then Some gate else None),
+                    if request.PathAndQuery = catalogPath then
+                        Some gate
+                    else
+                        None),
                 (fun request ->
                     match request.PathAndQuery with
                     | "/repos/example-owner/content" ->
@@ -795,7 +807,10 @@ module GitHubContentClientTests =
         isolatedGeneration.Observe(String('b', 40)) |> ignore
         gate.Release()
         generationZeroRead.GetAwaiter().GetResult() |> expectOk |> ignore
-        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult() |> expectOk |> ignore
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
 
         if countRequests catalogPath handler.Requests <> 2 then
             failwith "A completed old-generation fetch must not repopulate the current content cache."

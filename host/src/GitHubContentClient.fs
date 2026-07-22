@@ -1814,6 +1814,7 @@ module GitHubContentClient =
                     | Error problem -> return Error problem
                     | Ok value ->
                         let! head = getDefaultBranchHead value cancellationToken
+
                         match head with
                         | Error problem -> return Error problem
                         | Ok headSha ->
@@ -1827,6 +1828,7 @@ module GitHubContentClient =
                                 let repositoryBase: ContentDomain.RepositoryBase =
                                     { DefaultBranch = value.RepositoryDefaultBranch
                                       Head = revision }
+
                                 return Ok repositoryBase
                 }
 
@@ -1857,6 +1859,7 @@ module GitHubContentClient =
                                 )
                         | Some locator ->
                             let repositoryPath = ContentDomain.RepositoryPath.value locator.ManifestDocumentPath
+
                             let isPublication =
                                 repositoryPath.StartsWith("blog/", StringComparison.Ordinal)
                                 || repositoryPath.StartsWith("notes/", StringComparison.Ordinal)
@@ -1869,9 +1872,11 @@ module GitHubContentClient =
                                 | Ok headSha ->
                                     let fullName = repositoryName input.CatalogRepository.RepositoryFullName
                                     let revision = Uri.EscapeDataString(ContentDomain.CommitSha.value headSha)
+
                                     let! payload =
                                         getJson
-                                            (apiUri $"repos/{fullName}/contents/{encodeRepositoryPath locator.ManifestDocumentPath}?ref={revision}")
+                                            (apiUri
+                                                $"repos/{fullName}/contents/{encodeRepositoryPath locator.ManifestDocumentPath}?ref={revision}")
                                             cancellationToken
 
                                     match payload with
@@ -1879,11 +1884,23 @@ module GitHubContentClient =
                                     | Ok response ->
                                         let parsed =
                                             parseJson response.PayloadBody (fun root ->
-                                                match requiredString "sha" root, requiredString "encoding" root, requiredString "content" root with
+                                                match
+                                                    requiredString "sha" root,
+                                                    requiredString "encoding" root,
+                                                    requiredString "content" root
+                                                with
                                                 | Ok blob, Ok "base64", Ok encoded ->
                                                     try
-                                                        Ok(blob, Encoding.UTF8.GetString(Convert.FromBase64String(encoded.Replace("\n", "", StringComparison.Ordinal))))
-                                                    with :? FormatException -> Error "Document content must be valid base64."
+                                                        Ok(
+                                                            blob,
+                                                            Encoding.UTF8.GetString(
+                                                                Convert.FromBase64String(
+                                                                    encoded.Replace("\n", "", StringComparison.Ordinal)
+                                                                )
+                                                            )
+                                                        )
+                                                    with :? FormatException ->
+                                                        Error "Document content must be valid base64."
                                                 | Ok _, Ok _, Ok _ -> Error "Document content encoding must be base64."
                                                 | Error message, _, _
                                                 | _, Error message, _
@@ -1912,7 +1929,8 @@ module GitHubContentClient =
                                                         (Some(documentHead, blobSha))
                                                         markdown
                             else
-                                let! payload = readFile input.CatalogRepository locator.ManifestDocumentPath cancellationToken
+                                let! payload =
+                                    readFile input.CatalogRepository locator.ManifestDocumentPath cancellationToken
 
                                 match payload with
                                 | Ok documentPayload ->
@@ -1932,12 +1950,19 @@ module GitHubContentClient =
                                     match profile with
                                     | Error problem -> return Error problem
                                     | Ok None ->
-                                        return Error(ContentDomain.Problem.create ContentDomain.NotFound "The requested document was not found.")
+                                        return
+                                            Error(
+                                                ContentDomain.Problem.create
+                                                    ContentDomain.NotFound
+                                                    "The requested document was not found."
+                                            )
                                     | Ok(Some(profileRepository, profileBody, profilePayload)) ->
                                         match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
                                         | Error failure -> return Error(mapValidationFailure failure)
                                         | Ok profilePath ->
-                                            let profileMarkdown = String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
+                                            let profileMarkdown =
+                                                String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
+
                                             return
                                                 buildDocument
                                                     profileRepository

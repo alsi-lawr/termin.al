@@ -20,7 +20,14 @@ module ContentClient =
     let configurationInvalid () : ContentClient =
         { new ContentClient with
             member _.GetRepositoryBase _ =
-                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.ConfigurationInvalid "GitHub content configuration is required."))
+                Task.FromResult(
+                    Error(
+                        ContentDomain.Problem.create
+                            ContentDomain.ConfigurationInvalid
+                            "GitHub content configuration is required."
+                    )
+                )
+
             member _.GetCatalog _ =
                 Task.FromResult(
                     Error(

@@ -248,9 +248,11 @@ type ContentGrpcService(contentClient: ContentClient) =
             match! contentClient.GetRepositoryBase context.CancellationToken with
             | Error problem -> return raise (BrowserGrpcWire.contentError problem)
             | Ok value ->
-                return RepositoryBaseResponse(
-                    DefaultBranch = ContentDomain.ContentRevision.value value.DefaultBranch,
-                    HeadSha = ContentDomain.ContentRevision.value value.Head)
+                return
+                    RepositoryBaseResponse(
+                        DefaultBranch = ContentDomain.ContentRevision.value value.DefaultBranch,
+                        HeadSha = ContentDomain.ContentRevision.value value.Head
+                    )
         }
 
     override _.ReadCatalog(_: EmptyRequest, context: ServerCallContext) =
