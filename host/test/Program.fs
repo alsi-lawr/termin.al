@@ -173,6 +173,72 @@ module Program =
                 use unknownApiRoute = client.GetAsync("/api/not-here").GetAwaiter().GetResult()
                 assertProblem unknownApiRoute HttpStatusCode.NotFound "not-found")
 
+    let private runAuthenticationContractChecks () =
+        let now () =
+            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+
+        let statsStore = Stats.unavailableStore now
+
+        HostApplication.createWithContentClientAndStats
+            [||]
+            (freshContentClient ())
+            statsStore
+            true
+            (fun length -> Array.zeroCreate<byte> length)
+            now
+            (TimeSpan.FromSeconds(30.0))
+        |> fun application ->
+            withRunningHost application (fun client ->
+                use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
+
+                if session.StatusCode <> HttpStatusCode.OK then
+                    failwithf "Expected anonymous session response, but received %O." session.StatusCode
+
+                if not (session.Headers.CacheControl.NoStore) then
+                    failwith "Session responses must not be cached."
+
+                let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                use sessionDocument = JsonDocument.Parse(sessionBody)
+                let sessionRoot = sessionDocument.RootElement
+
+                if sessionRoot.GetProperty("kind").GetString() <> "anonymous" then
+                    failwith "A fresh browser must receive the anonymous capability session."
+
+                let csrfToken = sessionRoot.GetProperty("csrfToken").GetString()
+
+                if isNull csrfToken || csrfToken.Length < 16 then
+                    failwith "The anonymous session response must issue an antiforgery request token."
+
+                let antiforgeryCookie =
+                    session.Headers.GetValues("Set-Cookie")
+                    |> Seq.find (fun value -> value.StartsWith("termin.al.antiforgery=", StringComparison.Ordinal))
+
+                for attribute in [ "path=/"; "samesite=strict"; "httponly" ] do
+                    if not (antiforgeryCookie.Contains(attribute, StringComparison.OrdinalIgnoreCase)) then
+                        failwithf "Antiforgery cookie is missing %s." attribute
+
+                if antiforgeryCookie.Contains("secure", StringComparison.OrdinalIgnoreCase) then
+                    failwith "The explicit local HTTP test exception must omit Secure."
+
+                use unavailableAuth =
+                    client.GetAsync("/api/auth/github/start").GetAwaiter().GetResult()
+
+                if unavailableAuth.StatusCode <> HttpStatusCode.ServiceUnavailable then
+                    failwith "Missing GitHub configuration must fail auth closed."
+
+                let unavailableBody =
+                    unavailableAuth.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+
+                if not (unavailableBody.Contains("Authentication failed.", StringComparison.Ordinal)) then
+                    failwith "Auth configuration failures must remain generic."
+
+                use logout = new HttpRequestMessage(HttpMethod.Post, "/api/auth/logout")
+                logout.Headers.Add(Auth.AntiforgeryHeaderName, csrfToken)
+                use rejectedLogout = client.Send(logout)
+
+                if rejectedLogout.StatusCode <> HttpStatusCode.BadRequest then
+                    failwith "Logout without the exact configured Origin must be rejected.")
+
     let private runFreshCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (freshContentClient ())
         |> fun application ->
@@ -246,6 +312,7 @@ module Program =
             GitHubContentClientTests.run ()
             StatsTests.run ()
             runHostContractChecks ()
+            runAuthenticationContractChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             0

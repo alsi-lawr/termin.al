@@ -47,6 +47,8 @@ module HostApplication =
             now
             statsHeartbeatInterval
 
+        Auth.mapEndpoints application
+
         Api.mapEndpoints application contentClient
 
         application.MapFallbackToFile("/demo/{*path:nonfile}", "index.html") |> ignore
@@ -74,7 +76,21 @@ module HostApplication =
         (statsHeartbeatInterval: TimeSpan)
         : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
+        let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
+
+        Auth.configureServices
+            builder.Services
+            builder.Configuration
+            builder.Environment
+            allowLocalHttpStatsCookie
+            authHttpClient
+            now
+            Auth.randomBytes
+
         let application = builder.Build()
+
+        application.Lifetime.ApplicationStopping.Register(Action(authHttpClient.Dispose))
+        |> ignore
 
         application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
         |> ignore
@@ -106,7 +122,21 @@ module HostApplication =
         let contentClient, httpClient = liveContentClient builder.Configuration
         let now () = DateTimeOffset.UtcNow
         let statsStore = Stats.createStore builder.Configuration now
+        let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
+
+        Auth.configureServices
+            builder.Services
+            builder.Configuration
+            builder.Environment
+            (builder.Environment.IsDevelopment())
+            authHttpClient
+            now
+            Auth.randomBytes
+
         let application = builder.Build()
+
+        application.Lifetime.ApplicationStopping.Register(Action(authHttpClient.Dispose))
+        |> ignore
 
         match httpClient with
         | Some value ->
