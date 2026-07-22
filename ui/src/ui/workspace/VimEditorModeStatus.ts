@@ -33,7 +33,7 @@ const modePresentations = {
   "visual-line": { label: "VISUAL LINE", className: "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright" },
   "visual-block": { label: "VISUAL BLOCK", className: "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright" },
   command: { label: "COMMAND", className: "shrink-0 whitespace-nowrap bg-surface-dark px-2 py-1 font-semibold text-text-bright" },
-  search: { label: "SEARCH", className: "shrink-0 whitespace-nowrap bg-ui-search px-2 py-1 font-semibold text-text-on-accent" },
+  search: { label: "SEARCH", className: "shrink-0 whitespace-nowrap bg-surface-dark px-2 py-1 font-semibold text-text-bright ring-1 ring-inset ring-ui-search" },
 } as const satisfies Readonly<Record<VimMode["kind"], VimEditorModePresentation>>;
 
 export function vimEditorModePresentation(
