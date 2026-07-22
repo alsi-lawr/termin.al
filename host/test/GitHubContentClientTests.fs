@@ -18,7 +18,8 @@ module GitHubContentClientTests =
           Accept: string
           ApiVersion: string option
           UserAgent: string
-          IfNoneMatch: string option }
+          IfNoneMatch: string option
+          Authorization: string option }
 
     type private FakeHandler(respond: Request -> HttpResponseMessage) =
         inherit HttpMessageHandler()
@@ -44,7 +45,12 @@ module GitHubContentClientTests =
                   Accept = request.Headers.Accept.ToString()
                   ApiVersion = apiVersion
                   UserAgent = request.Headers.UserAgent.ToString()
-                  IfNoneMatch = ifNoneMatch }
+                  IfNoneMatch = ifNoneMatch
+                  Authorization =
+                    if isNull request.Headers.Authorization then
+                        None
+                    else
+                        Some(request.Headers.Authorization.ToString()) }
 
             lock requestsLock (fun () -> requests.Add captured)
             Task.FromResult(respond captured)
@@ -85,7 +91,12 @@ module GitHubContentClientTests =
                   Accept = request.Headers.Accept.ToString()
                   ApiVersion = apiVersion
                   UserAgent = request.Headers.UserAgent.ToString()
-                  IfNoneMatch = ifNoneMatch }
+                  IfNoneMatch = ifNoneMatch
+                  Authorization =
+                    if isNull request.Headers.Authorization then
+                        None
+                    else
+                        Some(request.Headers.Authorization.ToString()) }
 
             lock requestsLock (fun () -> requests.Add captured)
 
@@ -157,18 +168,24 @@ module GitHubContentClientTests =
 
     let private emptyProjectsManifest = "{\"projects\":[]}"
 
-    let private githubConfiguration () =
+    let private createGitHubConfiguration apiToken =
         let values = Dictionary<string, string>()
         values.Add("GitHub:Owner", "example-owner")
         values.Add("GitHub:ContentRepository", "content")
         values.Add("GitHub:ApplicationRepository", "application")
         values.Add("GitHub:ProfileRepository", "profile")
 
+        match apiToken with
+        | Some value -> values.Add("GitHub:ApiToken", value)
+        | None -> ()
+
         ConfigurationBuilder().AddInMemoryCollection(values).Build()
         |> GitHubContentConfiguration.tryCreate
         |> function
             | Ok value -> value
             | Error problem -> failwith (ContentDomain.Problem.detail problem)
+
+    let private githubConfiguration () = createGitHubConfiguration None
 
     let private createClient handler clock =
         let httpClient = new HttpClient(handler)
@@ -182,6 +199,42 @@ module GitHubContentClientTests =
         match result with
         | Ok value -> value
         | Error problem -> failwithf "Expected content, but got %s." (ContentDomain.Problem.detail problem)
+
+    let private testConfiguredApiTokenAuthenticatesContentAndHeadRequests () =
+        let headSha = String('a', 40)
+
+        let handler =
+            new FakeHandler(fun request ->
+                match request.PathAndQuery with
+                | "/repos/example-owner/content" ->
+                    response HttpStatusCode.OK (repositoryJson "example-owner/content" "\"Content repository\"") None
+                | "/repos/example-owner/content/contents/content/catalog.json?ref=main" ->
+                    response HttpStatusCode.OK catalogManifest None
+                | "/repos/example-owner/content/git/ref/heads/main" ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
+                | _ -> response HttpStatusCode.NotFound "" None)
+
+        let configuration = createGitHubConfiguration (Some "server-read-token")
+        use httpClient = new HttpClient(handler)
+
+        let contentClient =
+            GitHubContentClient.create httpClient configuration (fun () -> DateTimeOffset.UtcNow)
+
+        let headProbe = ContentHeadProbe.live httpClient configuration
+
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult()
+        |> expectOk
+        |> ignore
+
+        match headProbe.Read(CancellationToken.None).GetAwaiter().GetResult() with
+        | Some value when value = headSha -> ()
+        | _ -> failwith "The authenticated content head probe must return the configured repository head."
+
+        if
+            handler.Requests
+            |> List.exists (fun request -> request.Authorization <> Some "Bearer server-read-token")
+        then
+            failwith "Configured server-side GitHub content requests must use the API token."
 
     let private countRequests path (requests: Request list) =
         requests
@@ -1707,6 +1760,7 @@ module GitHubContentClientTests =
             failwith "An over-limit comparison must stop at the explicit range bound."
 
     let run () =
+        testConfiguredApiTokenAuthenticatesContentAndHeadRequests ()
         testColdCache304AndStaleFallback ()
         testSameKeyColdRequests ()
         testSameKeyStaleRequests ()

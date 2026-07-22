@@ -2,6 +2,7 @@ namespace Termin.Al.Host
 
 open System
 open System.Net.Http
+open System.Net.Http.Headers
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
@@ -26,6 +27,10 @@ module ContentHeadProbe =
                 request.Headers.Accept.ParseAdd("application/vnd.github+json")
                 request.Headers.UserAgent.ParseAdd("termin.al-content-head")
                 request.Headers.Add("X-GitHub-Api-Version", "2026-03-10")
+
+                match GitHubContentConfiguration.apiToken configuration with
+                | Some token -> request.Headers.Authorization <- AuthenticationHeaderValue("Bearer", token)
+                | None -> ()
 
                 use! response =
                     httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)

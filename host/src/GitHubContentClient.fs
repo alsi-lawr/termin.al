@@ -17,7 +17,8 @@ type GitHubContentConfiguration =
         { ConfiguredOwner: string
           ConfiguredContentRepository: ContentDomain.RepositoryName
           ConfiguredApplicationRepository: ContentDomain.RepositoryName
-          ConfiguredProfileRepository: ContentDomain.RepositoryName }
+          ConfiguredProfileRepository: ContentDomain.RepositoryName
+          ConfiguredApiToken: string option }
 
 [<RequireQualifiedAccess>]
 module GitHubContentConfiguration =
@@ -40,6 +41,12 @@ module GitHubContentConfiguration =
         let applicationRepository = configuration["GitHub:ApplicationRepository"]
         let profileRepository = configuration["GitHub:ProfileRepository"]
 
+        let apiToken =
+            match configuration["GitHub:ApiToken"] with
+            | null -> None
+            | value when String.IsNullOrWhiteSpace value -> None
+            | value -> Some value
+
         if
             String.IsNullOrWhiteSpace owner
             || String.IsNullOrWhiteSpace contentRepository
@@ -61,7 +68,8 @@ module GitHubContentConfiguration =
                             { ConfiguredOwner = owner
                               ConfiguredContentRepository = validContentRepository
                               ConfiguredApplicationRepository = validApplicationRepository
-                              ConfiguredProfileRepository = validProfileRepository }))))
+                              ConfiguredProfileRepository = validProfileRepository
+                              ConfiguredApiToken = apiToken }))))
 
     let owner (configuration: GitHubContentConfiguration) = configuration.ConfiguredOwner
 
@@ -73,6 +81,8 @@ module GitHubContentConfiguration =
 
     let profileRepository (configuration: GitHubContentConfiguration) =
         configuration.ConfiguredProfileRepository
+
+    let apiToken (configuration: GitHubContentConfiguration) = configuration.ConfiguredApiToken
 
 type ContentCacheGeneration() =
     let gate = obj ()
@@ -443,6 +453,10 @@ module GitHubContentClient =
                 request.Headers.Accept.ParseAdd(accept)
                 request.Headers.UserAgent.ParseAdd(userAgent)
                 request.Headers.Add("X-GitHub-Api-Version", apiVersion)
+
+                match GitHubContentConfiguration.apiToken configuration with
+                | Some token -> request.Headers.Authorization <- AuthenticationHeaderValue("Bearer", token)
+                | None -> ()
 
                 match cached with
                 | Some { CachedEtag = Some etag } ->
