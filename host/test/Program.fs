@@ -15,6 +15,8 @@ open Microsoft.AspNetCore.Hosting.Server.Features
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
+open Google.Protobuf
+open Termin.Al.Contracts.V1
 open Termin.Al.Host
 
 module Program =
@@ -101,6 +103,49 @@ module Program =
         finally
             application.StopAsync().GetAwaiter().GetResult()
             application.DisposeAsync().AsTask().GetAwaiter().GetResult()
+
+    let private grpcWebUnary
+        (client: HttpClient)
+        (path: string)
+        (headers: (string * string) list)
+        (parser: MessageParser<'response>)
+        =
+        use request = new HttpRequestMessage(HttpMethod.Post, path)
+        request.Headers.Add("X-Grpc-Web", "1")
+
+        for name, value in headers do
+            request.Headers.Add(name, value)
+
+        request.Content <- new ByteArrayContent([| 0uy; 0uy; 0uy; 0uy; 0uy |])
+
+        request.Content.Headers.ContentType <-
+            System.Net.Http.Headers.MediaTypeHeaderValue("application/grpc-web+proto")
+
+        use response = client.Send(request)
+
+        if response.StatusCode <> HttpStatusCode.OK then
+            failwithf "Expected gRPC-Web HTTP status 200, but received %O." response.StatusCode
+
+        let bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+
+        if bytes.Length < 5 || bytes[0] <> 0uy then
+            failwith "Expected a binary gRPC-Web unary data frame."
+
+        let length =
+            (int bytes[1] <<< 24)
+            ||| (int bytes[2] <<< 16)
+            ||| (int bytes[3] <<< 8)
+            ||| int bytes[4]
+
+        if length < 0 || bytes.Length < length + 5 then
+            failwith "The binary gRPC-Web unary data frame length is invalid."
+
+        let payload = bytes[5 .. 4 + length]
+
+        parser.ParseFrom(payload),
+        response.Headers
+        |> Seq.map (fun pair -> pair.Key, Seq.toList pair.Value)
+        |> Map.ofSeq
 
     let private assertProblem (response: HttpResponseMessage) expectedStatus expectedCode =
         if response.StatusCode <> expectedStatus then
@@ -227,10 +272,15 @@ module Program =
                         "Expected conditional static GET to return 304 Not Modified, but received %O."
                         conditionalIndex.StatusCode
 
-                use missingConfiguration =
+                use removedCatalogEndpoint =
                     client.GetAsync("/api/content/catalog").GetAwaiter().GetResult()
 
-                assertProblem missingConfiguration HttpStatusCode.InternalServerError "configuration-invalid"
+                assertProblem removedCatalogEndpoint HttpStatusCode.NotFound "not-found"
+
+                use removedSessionEndpoint =
+                    client.GetAsync("/api/session").GetAwaiter().GetResult()
+
+                assertProblem removedSessionEndpoint HttpStatusCode.NotFound "not-found"
 
                 use invalidDocument =
                     client.GetAsync("/api/content/document/%21invalid").GetAwaiter().GetResult()
@@ -256,28 +306,24 @@ module Program =
             (TimeSpan.FromSeconds(30.0))
         |> fun application ->
             withRunningHost application (fun client ->
-                use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
+                let session, sessionHeaders =
+                    grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
 
-                if session.StatusCode <> HttpStatusCode.OK then
-                    failwithf "Expected anonymous session response, but received %O." session.StatusCode
+                let cacheControl = sessionHeaders["Cache-Control"] |> List.exactlyOne
 
-                if not (session.Headers.CacheControl.NoStore) then
+                if not (cacheControl.Contains("no-store", StringComparison.Ordinal)) then
                     failwith "Session responses must not be cached."
 
-                let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                use sessionDocument = JsonDocument.Parse(sessionBody)
-                let sessionRoot = sessionDocument.RootElement
-
-                if sessionRoot.GetProperty("kind").GetString() <> "anonymous" then
+                if session.Kind <> SessionKind.Anonymous then
                     failwith "A fresh browser must receive the anonymous capability session."
 
-                let csrfToken = sessionRoot.GetProperty("csrfToken").GetString()
+                let csrfToken = session.CsrfToken
 
-                if isNull csrfToken || csrfToken.Length < 16 then
+                if csrfToken.Length < 16 then
                     failwith "The anonymous session response must issue an antiforgery request token."
 
                 let antiforgeryCookie =
-                    session.Headers.GetValues("Set-Cookie")
+                    sessionHeaders["Set-Cookie"]
                     |> Seq.find (fun value -> value.StartsWith("termin.al.antiforgery=", StringComparison.Ordinal))
 
                 for attribute in [ "path=/"; "samesite=strict"; "httponly" ] do
@@ -359,6 +405,7 @@ module Program =
         let githubHandler = new GitHubHandler(now, expiredAccess)
         let githubClient = new HttpClient(githubHandler, true)
 
+        builder.Services.AddGrpc() |> ignore
         Auth.configureServices builder.Services builder.Configuration true githubClient now Auth.randomBytes
 
         Cv.configureServices
@@ -375,8 +422,10 @@ module Program =
         application.Lifetime.ApplicationStopping.Register(Action(githubClient.Dispose))
         |> ignore
 
+        application.UseGrpcWeb() |> ignore
         Auth.mapEndpoints application
         Cv.mapEndpoints application
+        application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
         application, githubHandler, capturedLogs
 
     let private establishOwnerSession (client: HttpClient) =
@@ -460,11 +509,10 @@ module Program =
             if replacementCookie.IsNone then
                 failwith "Failed owner refresh must emit the demoted replacement session."
 
-            use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
-            let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-            use sessionDocument = JsonDocument.Parse(sessionBody)
+            let session, _ =
+                grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
 
-            if sessionDocument.RootElement.GetProperty("kind").GetString() <> "github-viewer" then
+            if session.Kind <> SessionKind.GithubViewer then
                 failwith "Failed owner refresh must atomically demote the browser to GitHub viewer.")
 
     let private runSensitiveLoggingChecks () =
@@ -485,10 +533,11 @@ module Program =
 
             withRunningHost application (fun client ->
                 callbackValues <- establishOwnerSession client
-                use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
-                let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                use sessionDocument = JsonDocument.Parse(sessionBody)
-                let csrfToken = sessionDocument.RootElement.GetProperty("csrfToken").GetString()
+
+                let session, _ =
+                    grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
+
+                let csrfToken = session.CsrfToken
                 use unlock = new HttpRequestMessage(HttpMethod.Post, "/api/auth/cv")
                 unlock.Headers.Add("Origin", "http://127.0.0.1")
                 unlock.Headers.Add(Auth.AntiforgeryHeaderName, csrfToken)
@@ -523,7 +572,7 @@ module Program =
             then
                 failwith "Host diagnostics retained a protected authentication or CV value."
 
-            if not (retained.Contains("HTTP: GET /api/session", StringComparison.Ordinal)) then
+            if not (retained.Contains("gRPC - /terminal.v1.SessionApi/ReadSession", StringComparison.Ordinal)) then
                 failwith "The logging boundary must preserve safe endpoint diagnostics."
         finally
             File.Delete(cvPath)
@@ -532,53 +581,46 @@ module Program =
         HostApplication.createWithContentClient [||] (freshContentClient ())
         |> fun application ->
             withRunningHost application (fun client ->
-                use response = client.GetAsync("/api/content/catalog").GetAwaiter().GetResult()
+                let response, headers =
+                    grpcWebUnary
+                        client
+                        "/terminal.v1.ContentApi/ReadCatalog"
+                        [ Auth.AntiforgeryHeaderName, "generated-antiforgery-metadata" ]
+                        CatalogResponse.Parser
 
-                if response.StatusCode <> HttpStatusCode.OK then
-                    failwithf "Expected fresh catalog response 200, but received %O." response.StatusCode
-
-                let cacheControl =
-                    match response.Headers.TryGetValues("Cache-Control") with
-                    | true, values -> values |> Seq.exactlyOne
-                    | false, _ -> failwith "Fresh content must set Cache-Control."
+                let cacheControl = headers["Cache-Control"] |> List.exactlyOne
 
                 if cacheControl <> "public, max-age=300" then
                     failwithf "Expected fresh content Cache-Control public, max-age=300, but received %s." cacheControl
 
-                let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-                use document = JsonDocument.Parse body
-                let root = document.RootElement
-                let entries = root.GetProperty("entries")
+                let entries = response.Entries
                 let directory = entries[0]
                 let file = entries[1]
                 let lockedFile = entries[2]
 
                 if
-                    entries.GetArrayLength() <> 3
-                    || directory.GetProperty("kind").GetString() <> "directory"
-                    || directory.GetProperty("size").GetInt32() <> 0
-                    || directory.TryGetProperty("documentHandle") |> fst
-                    || file.GetProperty("kind").GetString() <> "file"
-                    || file.GetProperty("documentHandle").GetString() <> "about"
-                    || lockedFile.GetProperty("kind").GetString() <> "locked-file"
-                    || lockedFile.TryGetProperty("documentHandle") |> fst
-                    || root.GetProperty("source").GetProperty("url").GetString()
+                    entries.Count <> 3
+                    || directory.Kind <> CatalogEntryKind.Directory
+                    || directory.Size <> 0
+                    || directory.DocumentHandle <> ""
+                    || file.Kind <> CatalogEntryKind.File
+                    || file.DocumentHandle <> "about"
+                    || lockedFile.Kind <> CatalogEntryKind.LockedFile
+                    || lockedFile.DocumentHandle <> ""
+                    || response.Source.Url
                        <> "https://github.com/example-owner/content/blob/main/content/catalog.json?left=1&right=2"
-                    || root.GetProperty("cache").GetProperty("freshUntil").GetString()
-                       <> "2026-07-15T00:05:00.000Z"
+                    || response.Cache.FreshUntil <> "2026-07-15T00:05:00.000Z"
                 then
-                    failwithf "Fresh catalog response shape changed: %O." root)
+                    failwithf "Fresh catalog response shape changed: %O." response)
 
     let private runStaleCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (staleContentClient ())
         |> fun application ->
             withRunningHost application (fun client ->
-                use response = client.GetAsync("/api/content/catalog").GetAwaiter().GetResult()
+                let response, headers =
+                    grpcWebUnary client "/terminal.v1.ContentApi/ReadCatalog" [] CatalogResponse.Parser
 
-                if response.StatusCode <> HttpStatusCode.OK then
-                    failwithf "Expected cached catalog response 200, but received %O." response.StatusCode
-
-                let cacheControl = response.Headers.CacheControl.ToString()
+                let cacheControl = headers["Cache-Control"] |> List.exactlyOne
 
                 if
                     not (cacheControl.Contains("public", StringComparison.Ordinal))
@@ -587,12 +629,10 @@ module Program =
                 then
                     failwith "Stale content must be marked must-revalidate."
 
-                if not (response.Headers.TryGetValues("Warning") |> fst) then
+                if not (headers.ContainsKey("Warning")) then
                     failwith "Stale content must be marked with a warning header."
 
-                let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                if not (body.Contains("\"state\":\"stale\"", StringComparison.Ordinal)) then
+                if response.Cache.State <> CacheState.Stale then
                     failwith "Stale content responses must serialize their stale cache state.")
 
     [<EntryPoint>]

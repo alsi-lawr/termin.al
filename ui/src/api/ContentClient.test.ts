@@ -1,15 +1,51 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
 import {
   resolveVirtualPath,
   virtualHomeDirectory,
 } from "../domain/filesystem/VirtualFilesystem.ts";
+import {
+  CacheMetadata,
+  CacheState,
+  CatalogEntry,
+  CatalogEntryKind,
+  CatalogResponse,
+} from "../generated/browser/browser.ts";
+import { BrowserGrpcContext, csrfToken } from "./BrowserGrpcContext.ts";
 import { HttpContentClient } from "./ContentClient.ts";
+
+function catalogResponse(): CatalogResponse {
+  const cache = CacheMetadata.create({
+    state: CacheState.FRESH,
+    fetchedAt: "2026-07-15T00:00:00.000Z",
+    freshUntil: "2026-07-15T00:05:00.000Z",
+    staleUntil: "2026-07-15T01:05:00.000Z",
+  });
+
+  const entries = [
+    [CatalogEntryKind.DIRECTORY, "home", "~", 0, ""],
+    [CatalogEntryKind.DIRECTORY, "projects", "~/projects", 0, ""],
+    [CatalogEntryKind.DIRECTORY, "blog", "~/blog", 0, ""],
+    [CatalogEntryKind.FILE, "about-document", "~/about.md", 42, "about"],
+    [CatalogEntryKind.FILE, "publication-document", "~/blog/validated-metadata.md", 128, "blog-validated-metadata"],
+  ] as const;
+
+  const catalogEntries = entries.map(([kind, id, path, size, documentHandle], index) =>
+    CatalogEntry.create({
+      kind,
+      id,
+      path,
+      updatedAt: `2026-07-15T00:00:0${index}.000Z`,
+      size,
+      documentHandle,
+    }));
+
+  return CatalogResponse.create({ entries: catalogEntries, cache });
+}
 
 function responseForPath(path: string): Response {
   switch (path) {
-    case "/api/content/catalog":
-      return Response.json({"entries":[{"kind":"directory","id":"home","path":"~","updatedAt":"2026-07-15T00:00:00.000Z","size":0,"browserEntryMetadata":"ignored"},{"kind":"directory","id":"projects","path":"~/projects","updatedAt":"2026-07-15T00:00:01.000Z","size":0},{"kind":"directory","id":"blog","path":"~/blog","updatedAt":"2026-07-15T00:00:02.000Z","size":0},{"kind":"file","id":"about-document","path":"~/about.md","updatedAt":"2026-07-15T00:00:03.000Z","size":42,"documentHandle":"about"},{"kind":"file","id":"publication-document","path":"~/blog/validated-metadata.md","updatedAt":"2026-07-15T00:00:04.000Z","size":128,"documentHandle":"blog-validated-metadata"}],"source":{"repository":"example-owner/content","path":"content/catalog.json","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/catalog.json"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"},"browserExtension":"ignored"});
     case "/api/content/projects":
       return Response.json({"projects":[{"id":"sample-project","slug":"sample-project","name":"Sample Project","summary":"A validated project fixture.","url":"https://github.com/example-owner/sample-project","repository":"example-owner/sample-project","collectionPath":"validated/core","updatedAt":"2026-07-15T00:00:03.000Z","tags":["fsharp","typescript"],"readme":"# Sample Project README\n\nThis is the supplied README body, not the project summary."},{"id":"second-project","slug":"second-project","name":"Second Project","summary":"A second validated project fixture.","url":"https://github.com/example-owner/second-project","repository":"example-owner/second-project","collectionPath":"validated/examples","updatedAt":"2026-07-15T00:00:04.000Z","tags":["typescript"],"readme":"# Second Project README\n\nThis is a second supplied README body."}],"source":{"repository":"example-owner/content","path":"content/projects.json","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/projects.json"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
     case "/api/content/now":
@@ -51,7 +87,23 @@ test("loads the same-origin content corpus and forwards cancellation", async () 
 
   try {
     const controller = new AbortController();
-    const client = new HttpContentClient();
+    const grpcContext = new BrowserGrpcContext();
+    const token = csrfToken("catalog-antiforgery-token");
+
+    if (token === undefined) {
+      assert.fail("Expected a valid catalog antiforgery fixture.");
+    }
+
+    grpcContext.recordCsrfToken(token);
+    const grpcMetadata: RpcMetadata[] = [];
+    const grpcSignals: Array<AbortSignal | undefined> = [];
+    const client = new HttpContentClient(grpcContext, {
+      readCatalog: (_request, options) => {
+        grpcMetadata.push(options.meta);
+        grpcSignals.push(options.abort);
+        return { response: Promise.resolve(catalogResponse()) };
+      },
+    });
     const result = await client.loadCorpus(controller.signal);
 
     if (result.kind !== "available") {
@@ -59,12 +111,13 @@ test("loads the same-origin content corpus and forwards cancellation", async () 
     }
 
     assert.deepEqual(new Set(paths), new Set([
-      "/api/content/catalog",
       "/api/content/projects",
       "/api/content/now",
       "/api/content/changelog",
     ]));
     assert.equal(signals.every((signal) => signal === controller.signal), true);
+    assert.deepEqual(grpcMetadata, [{ "X-CSRF-TOKEN": "catalog-antiforgery-token" }]);
+    assert.deepEqual(grpcSignals, [controller.signal]);
 
     const about = resolveVirtualPath(
       result.corpus.filesystem,

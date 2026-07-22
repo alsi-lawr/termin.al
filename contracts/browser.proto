@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package terminal.v1;
+
+option csharp_namespace = "Termin.Al.Contracts.V1";
+
+message EmptyRequest {}
+
+enum SessionKind {
+  SESSION_KIND_UNSPECIFIED = 0;
+  SESSION_KIND_ANONYMOUS = 1;
+  SESSION_KIND_GITHUB_VIEWER = 2;
+  SESSION_KIND_CV_VIEWER = 3;
+  SESSION_KIND_GITHUB_CV_VIEWER = 4;
+  SESSION_KIND_OWNER = 5;
+}
+
+message SessionResponse {
+  SessionKind kind = 1;
+  string login = 2;
+  string csrf_token = 3;
+}
+
+service SessionApi {
+  rpc ReadSession(EmptyRequest) returns (SessionResponse);
+}
+
+enum CacheState {
+  CACHE_STATE_UNSPECIFIED = 0;
+  CACHE_STATE_FRESH = 1;
+  CACHE_STATE_STALE = 2;
+}
+
+message CacheMetadata {
+  CacheState state = 1;
+  string fetched_at = 2;
+  string fresh_until = 3;
+  string stale_until = 4;
+}
+
+message ContentSource {
+  string repository = 1;
+  string path = 2;
+  string revision = 3;
+  string url = 4;
+}
+
+enum CatalogEntryKind {
+  CATALOG_ENTRY_KIND_UNSPECIFIED = 0;
+  CATALOG_ENTRY_KIND_DIRECTORY = 1;
+  CATALOG_ENTRY_KIND_FILE = 2;
+  CATALOG_ENTRY_KIND_LOCKED_FILE = 3;
+}
+
+message CatalogEntry {
+  CatalogEntryKind kind = 1;
+  string id = 2;
+  string path = 3;
+  string updated_at = 4;
+  int32 size = 5;
+  string document_handle = 6;
+}
+
+message CatalogResponse {
+  repeated CatalogEntry entries = 1;
+  ContentSource source = 2;
+  CacheMetadata cache = 3;
+}
+
+service ContentApi {
+  rpc ReadCatalog(EmptyRequest) returns (CatalogResponse);
+}

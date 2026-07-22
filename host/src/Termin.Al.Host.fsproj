@@ -12,9 +12,16 @@
     <Compile Include="Stats.fs" />
     <Compile Include="Auth.fs" />
     <Compile Include="Cv.fs" />
+    <Compile Include="BrowserGrpc.fs" />
     <Compile Include="Api.fs" />
     <Compile Include="HostApplication.fs" />
     <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../contracts/Termin.Al.Contracts.csproj" />
+    <PackageReference Include="Grpc.AspNetCore.Server" Version="2.80.0" />
+    <PackageReference Include="Grpc.AspNetCore.Web" Version="2.80.0" />
   </ItemGroup>
 
   <ItemGroup>

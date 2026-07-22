@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="../contracts/Termin.Al.Contracts.csproj" />
   <Project Path="src/Termin.Al.Host.fsproj" />
   <Project Path="test/Termin.Al.Host.Tests.fsproj" />
 </Solution>

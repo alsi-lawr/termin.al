@@ -10,6 +10,14 @@ import {
 } from "../domain/filesystem/VirtualFilesystem.ts";
 import { apiPathPrefix } from "./ApiPath.ts";
 import {
+  CacheState,
+  CatalogEntryKind,
+  type CatalogResponse,
+} from "../generated/browser/browser.ts";
+import { ContentApiClient } from "../generated/browser/browser.client.ts";
+import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
+import { BrowserGrpcContext, createBrowserGrpcTransport } from "./BrowserGrpcContext.ts";
+import {
   ContentId,
   type ContentValidation,
 } from "./ContentContracts.ts";
@@ -130,6 +138,40 @@ type DerivedDocument = Readonly<{
   updatedAt: string;
   text: string;
 }>;
+
+type ContentCatalogRpcClient = Readonly<{
+  readCatalog: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<CatalogResponse> }>;
+}>;
+
+function grpcCatalogEntryKind(kind: CatalogEntryKind): string {
+  switch (kind) {
+    case CatalogEntryKind.DIRECTORY:
+      return "directory";
+    case CatalogEntryKind.FILE:
+      return "file";
+    case CatalogEntryKind.LOCKED_FILE:
+      return "locked-file";
+    case CatalogEntryKind.UNSPECIFIED:
+    default:
+      return "unspecified";
+  }
+}
+
+function grpcCacheState(state: CacheState | undefined): string {
+  switch (state) {
+    case CacheState.FRESH:
+      return "fresh";
+    case CacheState.STALE:
+      return "stale";
+    case CacheState.UNSPECIFIED:
+    case undefined:
+    default:
+      return "unspecified";
+  }
+}
 
 const contentDocumentByteLimit = 1_048_576;
 const contentPageItemLimit = 100;
@@ -893,23 +935,52 @@ function freshness(
 }
 
 export class HttpContentClient implements ContentClient {
+  private readonly context: BrowserGrpcContext;
+  private readonly catalogClient: ContentCatalogRpcClient;
+
+  constructor(
+    context: BrowserGrpcContext = new BrowserGrpcContext(),
+    catalogClient: ContentCatalogRpcClient = new ContentApiClient(createBrowserGrpcTransport()),
+  ) {
+    this.context = context;
+    this.catalogClient = catalogClient;
+  }
+
   private async catalog(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentCatalog>> {
-    const response = await request(contentApiPath("catalog"), signal);
+    try {
+      const call = this.catalogClient.readCatalog(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      );
+      const response = await call.response;
+      const cache = response.cache;
+      const payload = {
+        entries: response.entries.map((entry) => ({
+          kind: grpcCatalogEntryKind(entry.kind),
+          id: entry.id,
+          path: entry.path,
+          updatedAt: entry.updatedAt,
+          size: entry.size,
+          documentHandle: entry.documentHandle,
+        })),
+        cache: {
+          state: grpcCacheState(cache?.state),
+          fetchedAt: cache?.fetchedAt,
+        },
+      };
+      const validation = decodeContentCatalog(payload);
 
-    switch (response.kind) {
-      case "payload": {
-        const validation = decodeContentCatalog(response.payload);
-
-        return validation.kind === "valid"
-          ? { kind: "available", value: validation.value }
-          : { kind: "failed", message: "The catalog response is invalid." };
+      return validation.kind === "valid"
+        ? { kind: "available", value: validation.value }
+        : { kind: "failed", message: "The catalog response is invalid." };
+    } catch (error: unknown) {
+      if (signal.aborted || isAbortError(error)) {
+        return { kind: "cancelled" };
       }
-      case "problem":
-      case "cancelled":
-      case "failed":
-        return response;
+
+      return { kind: "failed", message: "The content API could not be reached." };
     }
   }
 

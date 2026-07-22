@@ -6,6 +6,7 @@ open System.Net.Http
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 
 [<RequireQualifiedAccess>]
@@ -29,6 +30,7 @@ module HostApplication =
         : WebApplication =
         application.UseDefaultFiles() |> ignore
         application.UseStaticFiles() |> ignore
+        application.UseGrpcWeb() |> ignore
 
         application.MapGet(
             "/healthz",
@@ -49,6 +51,9 @@ module HostApplication =
 
         Auth.mapEndpoints application
         Cv.mapEndpoints application
+
+        application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<ContentGrpcService>().EnableGrpcWeb() |> ignore
 
         Api.mapEndpoints application contentClient
 
@@ -78,6 +83,9 @@ module HostApplication =
         : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
         let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
+
+        builder.Services.AddGrpc() |> ignore
+        builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
 
         Auth.configureServices
             builder.Services
@@ -132,6 +140,9 @@ module HostApplication =
         let now () = DateTimeOffset.UtcNow
         let statsStore = Stats.createStore builder.Configuration now
         let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
+
+        builder.Services.AddGrpc() |> ignore
+        builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
 
         Auth.configureServices
             builder.Services

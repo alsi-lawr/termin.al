@@ -16,33 +16,6 @@ module ContentWire =
           FreshUntil: string
           StaleUntil: string }
 
-    type CatalogDirectoryDto =
-        { Kind: string
-          Id: string
-          Path: string
-          UpdatedAt: string
-          Size: int }
-
-    type CatalogFileDto =
-        { Kind: string
-          Id: string
-          Path: string
-          UpdatedAt: string
-          Size: int
-          DocumentHandle: string }
-
-    type CatalogLockedFileDto =
-        { Kind: string
-          Id: string
-          Path: string
-          UpdatedAt: string
-          Size: int }
-
-    type CatalogDto =
-        { Entries: obj list
-          Source: SourceDto
-          Cache: CacheDto }
-
     type PageDocumentDto =
         { Kind: string
           Id: string
@@ -123,7 +96,6 @@ module ContentWire =
           Detail: string }
 
     type Response =
-        | CatalogResponse of CatalogDto
         | DocumentResponse of DocumentDto
         | ProjectsResponse of ProjectsDto
         | NowResponse of NowDto
@@ -141,39 +113,6 @@ module ContentWire =
           FetchedAt = cache |> ContentDomain.CacheMetadata.fetchedAt |> ContentDomain.Timestamp.value
           FreshUntil = cache |> ContentDomain.CacheMetadata.freshUntil |> ContentDomain.Timestamp.value
           StaleUntil = cache |> ContentDomain.CacheMetadata.staleUntil |> ContentDomain.Timestamp.value }
-
-    let private catalogEntry: ContentDomain.CatalogEntry -> obj =
-        function
-        | ContentDomain.Directory(id, path, updatedAt, size) ->
-            ({ Kind = "directory"
-               Id = id |> ContentDomain.CatalogId.value
-               Path = path |> ContentDomain.VirtualPath.value
-               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
-               Size = size |> ContentDomain.ByteSize.value }
-            : CatalogDirectoryDto)
-            :> obj
-        | ContentDomain.File(id, path, updatedAt, size, documentHandle) ->
-            ({ Kind = "file"
-               Id = id |> ContentDomain.CatalogId.value
-               Path = path |> ContentDomain.VirtualPath.value
-               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
-               Size = size |> ContentDomain.ByteSize.value
-               DocumentHandle = documentHandle |> ContentDomain.ContentId.value }
-            : CatalogFileDto)
-            :> obj
-        | ContentDomain.LockedFile(id, path, updatedAt, size) ->
-            ({ Kind = "locked-file"
-               Id = id |> ContentDomain.CatalogId.value
-               Path = path |> ContentDomain.VirtualPath.value
-               UpdatedAt = updatedAt |> ContentDomain.Timestamp.value
-               Size = size |> ContentDomain.ByteSize.value }
-            : CatalogLockedFileDto)
-            :> obj
-
-    let catalog (catalog: ContentDomain.Catalog) : CatalogDto =
-        { Entries = catalog |> ContentDomain.Catalog.entries |> List.map catalogEntry
-          Source = catalog |> ContentDomain.Catalog.source |> source
-          Cache = catalog |> ContentDomain.Catalog.cache |> cache }
 
     let document (document: ContentDomain.ContentDocument) : DocumentDto =
         let id = ContentDomain.ContentId.value (ContentDomain.ContentDocument.id document)
@@ -308,7 +247,6 @@ module ContentWire =
 
     let serialize response =
         match response with
-        | CatalogResponse value -> JsonSerializer.Serialize(value, jsonOptions)
         | DocumentResponse(PageDocument value) -> JsonSerializer.Serialize(value, jsonOptions)
         | DocumentResponse(PublicationDocument value) -> JsonSerializer.Serialize(value, jsonOptions)
         | ProjectsResponse value -> JsonSerializer.Serialize(value, jsonOptions)

@@ -10,7 +10,9 @@
   "scripts": {
     "dev": "bun --smol run vite --mode demo --port 5173 --strictPort",
     "dev:live": "bun --smol run vite --mode live --port 5173 --strictPort",
-    "build": "bun run manpages:check && bun run highlighting:check && bun run tsc -b && bun run vite build",
+    "build": "bun run grpc:check && bun run manpages:check && bun run highlighting:check && bun run tsc -b && bun run vite build",
+    "grpc:generate": "bun ../scripts/generate-browser-grpc.ts",
+    "grpc:check": "bun ../scripts/generate-browser-grpc.ts --check",
     "highlighting:check": "bun ../scripts/generate-highlighting-assets.ts --check",
     "lint": "bun run oxlint .",
     "manpages:generate": "bun ../scripts/generate-manpages.ts",
@@ -19,6 +21,9 @@
     "preview": "bun --smol run vite preview --port 5175 --strictPort"
   },
   "dependencies": {
+    "@protobuf-ts/grpcweb-transport": "2.11.1",
+    "@protobuf-ts/runtime": "2.11.1",
+    "@protobuf-ts/runtime-rpc": "2.11.1",
     "@tailwindcss/vite": "4.3.2",
     "react": "19.2.7",
     "react-dom": "19.2.7",
@@ -28,6 +33,7 @@
     "web-tree-sitter": "0.26.11"
   },
   "devDependencies": {
+    "@protobuf-ts/plugin": "2.11.1",
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",

@@ -31,15 +31,18 @@ async function createApplicationClientComposition(
       });
     }
     case "live": {
+      const { BrowserGrpcContext } = await import("./api/BrowserGrpcContext.ts");
       const { HttpContentClient } = await import("./api/ContentClient.ts");
       const { HttpStatsClient } = await import("./api/StatsClient.ts");
       const { HttpSessionClient } = await import("./api/SessionClient.ts");
       const { HttpCvClient } = await import("./api/CvClient.ts");
 
+      const grpcContext = new BrowserGrpcContext();
+
       return Object.freeze({
-        contentClient: new HttpContentClient(),
+        contentClient: new HttpContentClient(grpcContext),
         statsClient: new HttpStatsClient(),
-        sessionClient: new HttpSessionClient(),
+        sessionClient: new HttpSessionClient(grpcContext),
         cvClient: new HttpCvClient(),
       });
     }

@@ -57,6 +57,13 @@ module Auth =
         | GitHubCvViewer of ViewerIdentity * fingerprint: string
         | Owner of ViewerIdentity * OwnerTokens
 
+    type SessionView =
+        | AnonymousView
+        | GitHubViewerView of login: string
+        | CvViewerView
+        | GitHubCvViewerView of login: string
+        | OwnerView of login: string
+
     type GitHubToken =
         { AccessToken: string
           RefreshToken: string
@@ -91,13 +98,6 @@ module Auth =
     type private Correlation =
         { State: string
           ExpiresAt: DateTimeOffset }
-
-    type private SessionResponse =
-        | AnonymousResponse of csrfToken: string
-        | GitHubViewerResponse of csrfToken: string * login: string
-        | CvViewerResponse of csrfToken: string
-        | GitHubCvViewerResponse of csrfToken: string * login: string
-        | OwnerResponse of csrfToken: string * login: string
 
     let private base64UrlEncode (bytes: byte array) =
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
@@ -463,37 +463,6 @@ module Auth =
             member _.Refresh(_, _) = Task.FromResult(Error())
             member _.GetIdentity(_, _) = Task.FromResult(Error())
 
-    let private sessionJson response =
-        match response with
-        | AnonymousResponse csrf ->
-            Results.Json(
-                {| kind = "anonymous"
-                   csrfToken = csrf |}
-            )
-        | GitHubViewerResponse(csrf, login) ->
-            Results.Json(
-                {| kind = "github-viewer"
-                   csrfToken = csrf
-                   login = login |}
-            )
-        | CvViewerResponse csrf ->
-            Results.Json(
-                {| kind = "cv-viewer"
-                   csrfToken = csrf |}
-            )
-        | GitHubCvViewerResponse(csrf, login) ->
-            Results.Json(
-                {| kind = "github-cv-viewer"
-                   csrfToken = csrf
-                   login = login |}
-            )
-        | OwnerResponse(csrf, login) ->
-            Results.Json(
-                {| kind = "owner"
-                   csrfToken = csrf
-                   login = login |}
-            )
-
     let private genericProblem (status: int) =
         Results.Problem(statusCode = Nullable<int>(status), title = "Authentication failed.")
 
@@ -572,13 +541,13 @@ module Auth =
     let resolveSession (context: HttpContext) =
         readSession context |> refreshOwner context
 
-    let private responseForSession (csrf: string) (session: Session) =
-        match session with
-        | Anonymous -> AnonymousResponse csrf
-        | GitHubViewer viewer -> GitHubViewerResponse(csrf, viewer.Login)
-        | CvViewer _ -> CvViewerResponse csrf
-        | GitHubCvViewer(viewer, _) -> GitHubCvViewerResponse(csrf, viewer.Login)
-        | Owner(viewer, _) -> OwnerResponse(csrf, viewer.Login)
+    let sessionView =
+        function
+        | Anonymous -> AnonymousView
+        | GitHubViewer viewer -> GitHubViewerView viewer.Login
+        | CvViewer _ -> CvViewerView
+        | GitHubCvViewer(viewer, _) -> GitHubCvViewerView viewer.Login
+        | Owner(viewer, _) -> OwnerView viewer.Login
 
     let private serializeCorrelation (correlation: Correlation) =
         Encoding.UTF8.GetBytes($"1\n{correlation.ExpiresAt.ToUnixTimeSeconds()}\n{correlation.State}")
@@ -620,24 +589,6 @@ module Auth =
         let jsonOk = if ok then "true" else "false"
         let link = HtmlEncoder.Default.Encode(origin)
         $"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authentication</title></head><body><p>Authentication complete.</p><p><a href=\"{link}\">Return to termin.al</a></p><script>history.replaceState(null,'',location.pathname);if(window.opener){{window.opener.postMessage({{type:'termin.al.auth.complete',ok:{jsonOk}}},{jsonOrigin});window.close();}}</script></body></html>"
-
-    let private mapGetSession (application: WebApplication) =
-        application.MapGet(
-            "/api/session",
-            Func<HttpContext, Task<IResult>>(fun context ->
-                task {
-                    context.Response.Headers.CacheControl <- "no-store"
-                    let antiforgery = context.RequestServices.GetRequiredService<IAntiforgery>()
-                    let tokens = antiforgery.GetAndStoreTokens(context)
-
-                    if isNull tokens.RequestToken then
-                        return genericProblem StatusCodes.Status503ServiceUnavailable
-                    else
-                        let! session = resolveSession context
-                        return responseForSession tokens.RequestToken session |> sessionJson
-                })
-        )
-        |> ignore
 
     let private mapStart (application: WebApplication) =
         application.MapGet(
@@ -854,7 +805,6 @@ module Auth =
         |> ignore
 
     let mapEndpoints (application: WebApplication) =
-        mapGetSession application
         mapStart application
         mapCallback application
         mapLogout application

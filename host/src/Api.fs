@@ -33,24 +33,6 @@ module Api =
         setCacheHeaders context cache
         Results.Text(ContentWire.serialize response, "application/json", Encoding.UTF8, StatusCodes.Status200OK)
 
-    let private catalogEndpoint
-        (contentClient: ContentClient)
-        (context: HttpContext)
-        (cancellationToken: CancellationToken)
-        : Task<IResult> =
-        task {
-            let! result = contentClient.GetCatalog cancellationToken
-
-            return
-                match result with
-                | Ok catalog ->
-                    contentResult
-                        context
-                        (ContentDomain.Catalog.cache catalog)
-                        (ContentWire.CatalogResponse(ContentWire.catalog catalog))
-                | Error problem -> problemResult problem
-        }
-
     let private documentEndpoint
         (contentClient: ContentClient)
         (context: HttpContext)
@@ -132,12 +114,6 @@ module Api =
 
     let mapEndpoints (routes: IEndpointRouteBuilder) (contentClient: ContentClient) : unit =
         let api = routes.MapGroup("/api")
-
-        api.MapGet(
-            "/content/catalog",
-            Func<HttpContext, CancellationToken, Task<IResult>>(catalogEndpoint contentClient)
-        )
-        |> ignore
 
         api.MapGet(
             "/content/document/{id}",
