@@ -2341,27 +2341,6 @@ function createEchoCommand(): CommandDefinition {
   };
 }
 
-function createWhoamiCommand(): CommandDefinition {
-  return {
-    metadata: {
-      group: "gnu-like",
-      name: "whoami",
-      aliases: [],
-      summary: "Show the current development capability.",
-      usage: "whoami",
-      examples: ["whoami"],
-    },
-    pipeline: "text",
-    execute: async (invocation) => {
-      const parsed = parseNoOptionPaths(invocation, "whoami", 0, 0);
-
-      return parsed.kind === "invalid"
-        ? rejectedOutcome("whoami", parsed.message)
-        : succeededOutcome([textOutput("whoami-output", "anonymous")]);
-    },
-  };
-}
-
 export function createReadOnlyCommandDefinitions({
   filesystem,
   documents,
@@ -2388,6 +2367,5 @@ export function createReadOnlyCommandDefinitions({
     createHistoryCommand(),
     createManCommand(manpages),
     createEchoCommand(),
-    createWhoamiCommand(),
   ];
 }

@@ -8,7 +8,18 @@ import type {
 
 export type SecretPromptSubmissionHandler = (
   effect: Extract<SecretPromptEffect, { kind: "secret-submitted" }>,
-) => void | Promise<void>;
+) =>
+  | SecretPromptSubmissionResult
+  | undefined
+  | Promise<void>
+  | Promise<SecretPromptSubmissionResult | undefined>;
+
+export type SecretPromptSubmissionResult =
+  | Readonly<{ kind: "succeeded" }>
+  | Readonly<{
+      kind: "failed";
+      message: "CV access failed." | "Secret prompt delivery failed.";
+    }>;
 
 export type SecretPromptEffectGeneration = number & {
   readonly [secretPromptEffectGenerationBrand]: "SecretPromptEffectGeneration";
@@ -27,7 +38,7 @@ export type SecretPromptEffectConsumptionState =
 
 export type SecretPromptEffectConsumptionDiagnostic = Readonly<{
   kind: "secret-prompt-delivery-failed";
-  message: "Secret prompt delivery failed.";
+  message: "CV access failed." | "Secret prompt delivery failed.";
 }>;
 
 export type SecretPromptEffectConsumedAction = Readonly<{
@@ -83,10 +94,24 @@ function deliveryDiagnostic(
     return Promise.resolve(secretPromptDeliveryFailureDiagnostic);
   }
 
-  return Promise.resolve()
-    .then(() => submissionHandler(effect))
-    .then(() => undefined)
-    .catch(() => secretPromptDeliveryFailureDiagnostic);
+  const deliver = async (): Promise<SecretPromptEffectConsumptionDiagnostic | undefined> => {
+    try {
+      const result = await submissionHandler(effect);
+
+      if (result === undefined || result.kind === "succeeded") {
+        return undefined;
+      }
+
+      return {
+        kind: "secret-prompt-delivery-failed",
+        message: result.message,
+      };
+    } catch {
+      return secretPromptDeliveryFailureDiagnostic;
+    }
+  };
+
+  return deliver();
 }
 
 export function createSecretPromptEffectConsumptionState(): SecretPromptEffectConsumptionState {

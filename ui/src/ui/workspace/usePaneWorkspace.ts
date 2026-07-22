@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
 import {
+  isCvViewerContent,
+  type ViewerContent,
+  type ViewerOpenDisposition,
+} from "../../content/ViewerContent.ts";
+import {
   createWorkspaceVirtualFilesystem,
   type VirtualFilesystem,
   type VirtualFilesystemOverlay,
@@ -14,6 +19,8 @@ import {
   applyPaneOperation,
   createPaneWorkspace,
   createShellPaneContent,
+  createViewerPaneContent,
+  paneLeaves,
   type Pane,
   type PaneId,
   type PaneOperation,
@@ -27,6 +34,7 @@ import {
   hasPaneShellRuntime,
   reconcilePaneShellRuntimes,
   synchronizePaneCommandHistory,
+  showPaneShellViewer,
   type PaneShellRuntimes,
 } from "./PaneShellRuntimes.ts";
 import {
@@ -98,6 +106,12 @@ export type PaneWorkspaceController = Readonly<{
   ) => MobileCtrlInputResolution;
   confirmClose: () => void;
   dismissClose: () => void;
+  openProtectedViewer: (
+    paneId: PaneId,
+    viewer: ViewerContent,
+    disposition: ViewerOpenDisposition,
+  ) => void;
+  dropCvContent: () => void;
 }>;
 function browserCommandHistoryStorage(): CommandHistoryStorageBackend | undefined {
   try {
@@ -399,6 +413,61 @@ export function usePaneWorkspace(
     setShellRuntimes(nextShellRuntimes);
   }, []);
 
+  const openProtectedViewer = useCallback((
+    paneId: PaneId,
+    viewer: ViewerContent,
+    disposition: ViewerOpenDisposition,
+  ): void => {
+    if (disposition.kind === "split") {
+      applyOperation({
+        kind: "split",
+        paneId,
+        orientation: disposition.orientation,
+        content: createViewerPaneContent(viewer),
+      });
+      return;
+    }
+
+    const current = shellRuntimesRef.current;
+    const next = showPaneShellViewer(current, paneId, viewer);
+
+    if (next !== current) {
+      shellRuntimesRef.current = next;
+      setShellRuntimes(next);
+    }
+  }, [applyOperation]);
+
+  const dropCvContent = useCallback((): void => {
+    let nextRuntimes = shellRuntimesRef.current;
+
+    for (const [paneId, paneRuntime] of nextRuntimes) {
+      if (
+        paneRuntime.presentation.kind === "inline-viewer" &&
+        isCvViewerContent(paneRuntime.presentation.viewer)
+      ) {
+        nextRuntimes = closePaneShellPresentation(nextRuntimes, paneId);
+      }
+    }
+
+    if (nextRuntimes !== shellRuntimesRef.current) {
+      shellRuntimesRef.current = nextRuntimes;
+      setShellRuntimes(nextRuntimes);
+    }
+
+    const cvPaneIds = paneLeaves(workspaceRef.current.tree)
+      .filter(
+        (pane) =>
+          pane.content.kind === "viewer" &&
+          isCvViewerContent(pane.content.viewer),
+      )
+      .map((pane) => pane.id);
+
+    for (const paneId of cvPaneIds) {
+      applyOperation({ kind: "focus-pane", paneId });
+      applyOperation({ kind: "close" });
+    }
+  }, [applyOperation]);
+
   const hasShellRuntime = useCallback(
     (paneId: PaneId): boolean =>
       hasPaneShellRuntime(shellRuntimesRef.current, paneId),
@@ -472,5 +541,7 @@ export function usePaneWorkspace(
     resolveMobileCtrlInput,
     confirmClose,
     dismissClose,
+    openProtectedViewer,
+    dropCvContent,
   };
 }

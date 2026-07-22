@@ -1,28 +1,36 @@
 CV(1)                           termin.al Manual                           CV(1)
 
 NAME
-     cv - Open cv content.
+     cv - Unlock or open protected CV content.
 
 SYNOPSIS
-     cv
+     cv [--split horizontal|vertical]
+     cv lock
 
 DESCRIPTION
-     Requests  the  fixed  virtual  target ~/cv.md.  In the current browser-demo
-     corpus that entry is deliberately locked, so no viewer is opened.
+     Opens  protected  CV  Markdown  inline or in a split. When shared access is
+     locked, requests the viewer key through the non-echoing secret prompt. Own‐
+     ers bypass the shared key.
+
+     cv lock removes shared-CV capability  and  discards  open  CV  presentation
+     state.
 
 FAILURES
-     With no arguments, cv returns  the  stable  diagnostic  Access  is  locked:
-     ~/cv.md.   Extra arguments are rejected before target resolution. Cancella‐
-     tion opens nothing.
+     Positional  keys  and unsupported options are rejected. Invalid, throttled,
+     unavailable or missing CV access reports CV access failed..
 
 NOTES
-     The command does not authenticate, unlock, download or expose  CV  content.
-     The virtual corpus remains read-only.
+     The viewer key is never accepted as a positional argument, retained in com‐
+     mand history, echoed to assistive technology, persisted or logged. CV  con‐
+     tent  is  memory-only  and uncounted by statistics. The offline demo serves
+     synthetic CV content only.
 
 EXAMPLES
      $ cv
+     $ cv --split vertical
+     $ cv lock
 
 SEE ALSO
-     about(1), login(1), open(1)
+     login(1), logout(1), open(1)
 
 termin.al                                                                  CV(1)

@@ -47,6 +47,10 @@ import type {
   ViewerCollectionNode,
 } from "../../content/ViewerContent.ts";
 import type { PortfolioStatsReader } from "./PortfolioCommands.ts";
+import { createAuthenticationCommandDefinitions } from "./AuthenticationCommands.ts";
+import { AuthenticationController } from "../../auth/Authentication.ts";
+import { DemoSessionClient } from "../../api/SessionClient.ts";
+import { DemoCvClient } from "../../api/CvClient.ts";
 
 const generatedManifestUrl = new URL(
   "../../generated/manpages-manifest.json",
@@ -129,6 +133,12 @@ function createRegistry(
         themes,
         readStats,
       }),
+      ...createAuthenticationCommandDefinitions(
+        new AuthenticationController(
+          new DemoSessionClient(),
+          new DemoCvClient(),
+        ),
+      ),
       createPaneCommandDefinition(createPaneId("pane-1"), () => ({
         kind: "rejected",
         reason: "close-last-pane",
@@ -670,18 +680,13 @@ test("keeps theme changes usable when browser persistence fails", async () => {
   }]);
 });
 
-test("provides discoverable navigation commands and remaining unavailable-feature diagnostics", async () => {
+test("provides discoverable public navigation and the remaining unavailable editor diagnostic", async () => {
   const registry = createRegistry();
   const about = succeeded(await execute("about", registry));
   const projects = succeeded(await execute("projects", registry));
-  const cv = await execute("cv", registry);
   const invalidOpen = await execute("open --split diagonal about.md", registry);
   const stats = succeeded(await execute("stats", registry));
-  const unavailable = await Promise.all(
-    ["login", "logout", "edit about.md"].map(
-      async (source) => execute(source, registry),
-    ),
-  );
+  const unavailable = await execute("edit about.md", registry);
 
   const aboutEffect = about.effects[0];
   const projectsEffect = projects.effects[0];
@@ -696,13 +701,9 @@ test("provides discoverable navigation commands and remaining unavailable-featur
 
   assert.equal(aboutEffect.viewer.kind, "document");
   assert.equal(projectsEffect.viewer.kind, "collection");
-  assert.equal(cv.kind, "failed");
   assert.equal(invalidOpen.kind, "failed");
   assert.equal(stats.outputs[0]?.kind, "text");
-  assert.deepEqual(
-    unavailable.map((outcome) => outcome.kind),
-    ["failed", "failed", "failed"],
-  );
+  assert.equal(unavailable.kind, "failed");
 });
 
 test("reads changing statistics through the stable command dependency", async () => {

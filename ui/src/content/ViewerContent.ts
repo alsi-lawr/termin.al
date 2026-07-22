@@ -84,6 +84,13 @@ export type ViewerOpenDisposition =
       orientation: "horizontal" | "vertical";
     }>;
 
+export function isCvViewerContent(viewer: ViewerContent): boolean {
+  return (
+    viewer.kind === "document" &&
+    viewer.document.source.path === "~/cv.md"
+  );
+}
+
 export type CreateDocumentViewerContentOptions = Readonly<{
   title: string;
   presentation: DocumentViewerPresentation;

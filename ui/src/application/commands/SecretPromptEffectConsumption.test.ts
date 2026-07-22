@@ -293,6 +293,25 @@ test("reports a secret-free diagnostic when a submission handler fails", async (
   assert.equal(JSON.stringify(consumption.state).includes(secret), false);
 });
 
+test("preserves the approved generic CV failure without retaining the submitted value", async () => {
+  const submission = createSecretSubmission("synthetic-viewer-key");
+  const result = consumePendingSecretPromptEffect({
+    state: createSecretPromptEffectConsumptionState(),
+    effect: submission.effect,
+    submissionHandler: () => ({ kind: "failed", message: "CV access failed." }),
+  });
+
+  if (result.kind !== "consumed") {
+    assert.fail("Expected the CV secret submission to be consumed.");
+  }
+
+  assert.deepEqual(await result.diagnostic, {
+    kind: "secret-prompt-delivery-failed",
+    message: "CV access failed.",
+  });
+  assert.equal(JSON.stringify(result).includes("synthetic-viewer-key"), false);
+});
+
 test("suppresses a stale failed secret delivery after a later success with the same request ID", async () => {
   const olderSecret = "older-sensitive-value";
   const newerSecret = "newer-sensitive-value";

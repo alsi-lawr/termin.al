@@ -1,29 +1,32 @@
 .\" termin.al-name: cv
-.\" termin.al-usage: cv
-.\" termin.al-summary: Open cv content.
+.\" termin.al-usage: cv [--split horizontal|vertical] | cv lock
+.\" termin.al-summary: Unlock or open protected CV content.
 .TH CV 1 "" "termin.al" "termin.al Manual"
 .ftr B R
 .ftr I R
 .ftr BI R
 .SH NAME
-cv \- Open cv content.
+cv \- Unlock or open protected CV content.
 .SH SYNOPSIS
 .nf
-cv
+cv [--split horizontal|vertical]
+cv lock
 .fi
 .SH DESCRIPTION
-Requests the fixed virtual target
-.BR ~/cv.md .
-In the current browser-demo corpus that entry is deliberately locked, so no viewer is opened.
+Opens protected CV Markdown inline or in a split. When shared access is locked, requests the viewer key through the non-echoing secret prompt. Owners bypass the shared key.
+.PP
+.B cv lock
+removes shared-CV capability and discards open CV presentation state.
 .SH FAILURES
-With no arguments, cv returns the stable diagnostic
-.BR "Access is locked: ~/cv.md" .
-Extra arguments are rejected before target resolution. Cancellation opens nothing.
+Positional keys and unsupported options are rejected. Invalid, throttled, unavailable or missing CV access reports
+.BR "CV access failed." .
 .SH NOTES
-The command does not authenticate, unlock, download or expose CV content. The virtual corpus remains read-only.
+The viewer key is never accepted as a positional argument, retained in command history, echoed to assistive technology, persisted or logged. CV content is memory-only and uncounted by statistics. The offline demo serves synthetic CV content only.
 .SH EXAMPLES
 .nf
 $ cv
+$ cv --split vertical
+$ cv lock
 .fi
 .SH SEE ALSO
-about(1), login(1), open(1)
+login(1), logout(1), open(1)

@@ -31,6 +31,9 @@ import { Terminal } from "../terminal/Terminal";
 import { ViewerPane } from "./ViewerPane";
 import { VimEditorPane } from "./VimEditorPane";
 import type { VimSessionBinding } from "./VimSessionState.ts";
+import type { AuthenticationController } from "../../auth/Authentication.ts";
+import type { ViewerContent, ViewerOpenDisposition } from "../../content/ViewerContent.ts";
+import { submitCvSecret } from "../../application/commands/AuthenticationCommands.ts";
 
 type PaneTreeViewProps = Readonly<{
   tree: PaneTree;
@@ -62,6 +65,13 @@ type PaneTreeViewProps = Readonly<{
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
   onAcceptedContentOpen: (contentId: ContentId) => void;
+  authentication: AuthenticationController;
+  promptIdentity: string;
+  openProtectedViewer: (
+    paneId: PaneId,
+    viewer: ViewerContent,
+    disposition: ViewerOpenDisposition,
+  ) => void;
 }>;
 
 const firstPaneBasisClass = {
@@ -135,6 +145,9 @@ function PaneLeaf({
   projectReadmes,
   readStats,
   onAcceptedContentOpen,
+  authentication,
+  promptIdentity,
+  openProtectedViewer,
 }: Omit<PaneTreeViewProps, "zoom"> & Readonly<{ tree: Extract<PaneTree, { kind: "leaf" }> }>): ReactElement {
   const { pane } = tree;
   const isActive = pane.id === activePaneId;
@@ -178,6 +191,12 @@ function PaneLeaf({
             projectReadmes={projectReadmes}
             readStats={readStats}
             onAcceptedContentOpen={onAcceptedContentOpen}
+            authentication={authentication}
+            promptIdentity={promptIdentity}
+            secretPromptSubmissionHandler={(effect) =>
+              submitCvSecret(effect, authentication, (viewer, disposition) => {
+                openProtectedViewer(pane.id, viewer, disposition);
+              })}
           />
         </div>
       );
@@ -255,6 +274,9 @@ export function PaneTreeView({
   projectReadmes,
   readStats,
   onAcceptedContentOpen,
+  authentication,
+  promptIdentity,
+  openProtectedViewer,
 }: PaneTreeViewProps): ReactElement {
   if (tree.kind === "leaf") {
     return (
@@ -280,6 +302,9 @@ export function PaneTreeView({
         projectReadmes={projectReadmes}
         readStats={readStats}
         onAcceptedContentOpen={onAcceptedContentOpen}
+        authentication={authentication}
+        promptIdentity={promptIdentity}
+        openProtectedViewer={openProtectedViewer}
       />
     );
   }
@@ -333,6 +358,9 @@ export function PaneTreeView({
           projectReadmes={projectReadmes}
           readStats={readStats}
           onAcceptedContentOpen={onAcceptedContentOpen}
+          authentication={authentication}
+          promptIdentity={promptIdentity}
+          openProtectedViewer={openProtectedViewer}
         />
       </div>
       <div
@@ -366,6 +394,9 @@ export function PaneTreeView({
           projectReadmes={projectReadmes}
           readStats={readStats}
           onAcceptedContentOpen={onAcceptedContentOpen}
+          authentication={authentication}
+          promptIdentity={promptIdentity}
+          openProtectedViewer={openProtectedViewer}
         />
       </div>
     </div>

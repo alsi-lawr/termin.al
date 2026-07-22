@@ -12,6 +12,7 @@ import { synchronizeTerminalViewport } from "./TerminalViewportScroll.ts";
 
 type TerminalViewportProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
+  promptIdentity: string;
   currentDirectory: VirtualDirectoryPath;
   promptLabel: string | undefined;
   currentInput: string;
@@ -24,6 +25,7 @@ type TerminalViewportProps = Readonly<{
 
 type TerminalTranscriptProps = Readonly<{
   rows: ReadonlyArray<ShellHistoryEntry>;
+  promptIdentity: string;
   transientDiagnostic: string | undefined;
 }>;
 
@@ -33,6 +35,7 @@ function scrollToLatestOutput(element: HTMLDivElement): void {
 
 function TerminalTranscriptContent({
   rows,
+  promptIdentity,
   transientDiagnostic,
 }: TerminalTranscriptProps): ReactElement {
   return (
@@ -45,7 +48,7 @@ function TerminalTranscriptContent({
         aria-atomic="false"
       >
         {rows.map((row) => (
-          <TerminalHistoryRow key={row.id} entry={row} />
+          <TerminalHistoryRow key={row.id} entry={row} promptIdentity={promptIdentity} />
         ))}
       </div>
       {transientDiagnostic === undefined ? null : (
@@ -64,6 +67,7 @@ function TerminalTranscriptContent({
 
 export function TerminalViewportContent({
   rows,
+  promptIdentity,
   currentDirectory,
   promptLabel,
   currentInput,
@@ -77,11 +81,13 @@ export function TerminalViewportContent({
     <div className="flex flex-col">
       <TerminalTranscriptContent
         rows={rows}
+        promptIdentity={promptIdentity}
         transientDiagnostic={transientDiagnostic}
       />
 
       <div>
         <TerminalPrompt
+          promptIdentity={promptIdentity}
           currentDirectory={currentDirectory}
           promptLabel={promptLabel}
           currentInput={currentInput}
@@ -97,6 +103,7 @@ export function TerminalViewportContent({
 
 export function TerminalTranscript({
   rows,
+  promptIdentity,
   transientDiagnostic,
 }: TerminalTranscriptProps): ReactElement {
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -119,6 +126,7 @@ export function TerminalTranscript({
       >
         <TerminalTranscriptContent
           rows={rows}
+          promptIdentity={promptIdentity}
           transientDiagnostic={transientDiagnostic}
         />
       </div>
@@ -128,6 +136,7 @@ export function TerminalTranscript({
 
 export function TerminalViewport({
   rows,
+  promptIdentity,
   currentDirectory,
   promptLabel,
   currentInput,
@@ -152,6 +161,7 @@ export function TerminalViewport({
     currentInput,
     cursorColumn,
     promptLabel,
+    promptIdentity,
     rows,
     status,
     transientDiagnostic,
@@ -183,6 +193,7 @@ export function TerminalViewport({
       >
         <TerminalViewportContent
           rows={rows}
+          promptIdentity={promptIdentity}
           currentDirectory={currentDirectory}
           promptLabel={promptLabel}
           currentInput={currentInput}

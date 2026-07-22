@@ -12,6 +12,7 @@ import { TerminalStatus } from "./TerminalStatus";
 
 type TerminalPromptProps = Readonly<{
   currentDirectory: VirtualDirectoryPath;
+  promptIdentity: string;
   promptLabel: string | undefined;
   currentInput: string;
   cursorColumn: number;
@@ -22,6 +23,7 @@ type TerminalPromptProps = Readonly<{
 
 export function TerminalPrompt({
   currentDirectory,
+  promptIdentity,
   promptLabel,
   currentInput,
   cursorColumn,
@@ -40,6 +42,7 @@ export function TerminalPrompt({
   return (
     <div className="pb-2">
       <ShellContextLine
+        promptIdentity={promptIdentity}
         currentDirectory={currentDirectory}
         promptLabel={promptLabel}
       />

@@ -357,7 +357,6 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
       "history",
       "man",
       "echo",
-      "whoami",
     ],
   );
   assert.equal(resolveCommand(registry, "list").kind, "missing");
@@ -523,7 +522,6 @@ test("implements line readers, terminal history, manual pages, and pager effects
   const head = outputText(await execute("head -n 1 about.md", registry));
   const tail = outputText(await execute("tail -n 1 about.md", registry));
   const echo = outputText(await execute('echo "hello terminal"', registry));
-  const whoami = outputText(await execute("whoami", registry));
   const history = outputText(
     await execute("history", registry, virtualHomeDirectory(), [
       "echo first",
@@ -542,7 +540,6 @@ test("implements line readers, terminal history, manual pages, and pager effects
     "This is a deterministic offline demonstration of a terminal workspace. It contains synthetic content only.",
   );
   assert.equal(echo, "hello terminal");
-  assert.equal(whoami, "anonymous");
 
   assert.equal(history, "1  echo first\n2  echo 😀 second\n3  history");
   assert.deepEqual(historyClear.effects, [{ kind: "clear-command-history" }]);

@@ -12,18 +12,14 @@ whoami \- Show the current development capability.
 whoami
 .fi
 .SH DESCRIPTION
-Prints the fixed capability identity used by the public browser demo.
-.SH OUTPUT
-The exact output is
-.BR anonymous .
-It describes the current unauthenticated development capability, not an operating-system account, GitHub identity or browser profile.
+Refreshes and prints the current anonymous, GitHub-viewer, owner and CV-viewer capability state. GitHub states include the authenticated login.
 .SH FAILURES
-Any argument is rejected.
+Arguments are rejected. When authentication is unavailable, public browsing continues and the command reports anonymous authentication-unavailable status.
 .SH NOTES
-The value is not read from credentials or browser storage and is unchanged by the unavailable login and logout commands.
+Identity is shown only in the terminal session and is not sent to site statistics.
 .SH EXAMPLES
 .nf
 $ whoami
 .fi
 .SH SEE ALSO
-login(1), logout(1), stats(1)
+login(1), logout(1), cv(1), stats(1)

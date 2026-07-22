@@ -682,7 +682,7 @@ function createOpenCommand(
 }
 
 function createUnavailableCommand(
-  name: "theme" | "login" | "logout" | "edit",
+  name: "edit",
   summary: string,
   usage: string,
   example: string,
@@ -853,8 +853,7 @@ function createNavigationCommand(
     | "projects"
     | "blog"
     | "notes"
-    | "changelog"
-    | "cv",
+    | "changelog",
   targetPath: string,
   filesystem: VirtualFilesystem,
   documents: VirtualDocumentSupplier,
@@ -918,20 +917,6 @@ export function createPortfolioCommandDefinitions({
     createThemeCommand(themes),
     createStatsCommand(readStats),
     createUnavailableCommand(
-      "login",
-      "Authenticate with GitHub.",
-      "login",
-      "login",
-      "Authentication is unavailable until the host authentication work is implemented.",
-    ),
-    createUnavailableCommand(
-      "logout",
-      "End the authenticated session.",
-      "logout",
-      "logout",
-      "Authentication is unavailable until the host authentication work is implemented.",
-    ),
-    createUnavailableCommand(
       "edit",
       "Edit published content.",
       "edit <path>",
@@ -946,6 +931,5 @@ export function createPortfolioCommandDefinitions({
     createNavigationCommand("blog", "~/blog", filesystem, documents, projectReadmes),
     createNavigationCommand("notes", "~/notes", filesystem, documents, projectReadmes),
     createNavigationCommand("changelog", "~/changelog.md", filesystem, documents, projectReadmes),
-    createNavigationCommand("cv", "~/cv.md", filesystem, documents, projectReadmes),
   ];
 }

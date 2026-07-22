@@ -57,8 +57,6 @@ module Cv =
           GlobalGate: obj
           mutable GlobalWindow: AttemptWindow }
 
-    type private KeyRequest = { Key: string }
-
     let private base64UrlEncode (bytes: byte array) =
         Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 
@@ -219,23 +217,29 @@ module Cv =
         let state = runtime context
         let now = state.Now()
 
-        state.Attempts.AddOrUpdate(
-            attempt,
-            (fun _ -> { StartedAt = now; Failures = 1 }),
-            (fun _ existing ->
-                let current = currentWindow now (Some existing)
+        let browser =
+            state.Attempts.AddOrUpdate(
+                attempt,
+                (fun _ -> { StartedAt = now; Failures = 1 }),
+                (fun _ existing ->
+                    let current = currentWindow now (Some existing)
 
-                { current with
-                    Failures = current.Failures + 1 })
-        )
-        |> ignore
+                    { current with
+                        Failures = current.Failures + 1 })
+            )
 
-        lock state.GlobalGate (fun () ->
-            let current = currentWindow now (Some state.GlobalWindow)
+        let processWindow =
+            lock state.GlobalGate (fun () ->
+                let current = currentWindow now (Some state.GlobalWindow)
 
-            state.GlobalWindow <-
-                { current with
-                    Failures = current.Failures + 1 })
+                let next =
+                    { current with
+                        Failures = current.Failures + 1 }
+
+                state.GlobalWindow <- next
+                next)
+
+        browser.Failures > 5 || processWindow.Failures > 100
 
     let private clearAttempt context (attempt: string) =
         let state = runtime context
@@ -357,8 +361,10 @@ module Cv =
                                     | None -> false
 
                                 if not accepted then
-                                    recordFailure context attempt
-                                    return genericProblem StatusCodes.Status403Forbidden
+                                    if recordFailure context attempt then
+                                        return genericProblem StatusCodes.Status429TooManyRequests
+                                    else
+                                        return genericProblem StatusCodes.Status403Forbidden
                                 else
                                     clearAttempt context attempt
 

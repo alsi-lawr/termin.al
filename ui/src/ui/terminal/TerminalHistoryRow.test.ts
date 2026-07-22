@@ -83,7 +83,10 @@ test("does not render secret-bearing execution errors from shell history", () =>
     assert.fail("Expected a stored history entry.");
   }
 
-  const markup = renderToStaticMarkup(TerminalHistoryRow({ entry }));
+  const markup = renderToStaticMarkup(TerminalHistoryRow({
+    entry,
+    promptIdentity: "anonymous@termin.al",
+  }));
 
   for (const secret of [
     messageSecret,

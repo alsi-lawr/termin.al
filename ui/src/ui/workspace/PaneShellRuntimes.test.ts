@@ -573,6 +573,43 @@ function contentId(value: string): ContentId {
   return validation.value;
 }
 
+test("keeps protected CV bytes out of retained shell history", () => {
+  const workspace = createPaneWorkspace({ initialContent: createShellPaneContent() });
+  const paneId = workspace.activePaneId;
+  const initial = createPaneShellRuntimes({
+    workspace,
+    currentDirectory: virtualHomeDirectory(),
+    commandHistory: [],
+  });
+  const runningRuntimes = submitRunningCommand(initial, paneId);
+  const running = stateFor(runningRuntimes, paneId).lifecycle;
+
+  if (running.kind !== "running") {
+    assert.fail("Expected the protected viewer command to be running.");
+  }
+
+  const viewer = createDocumentViewerContent({
+    title: "cv.md",
+    presentation: "inline",
+    document: { text: "synthetic protected content", source: { path: "~/cv.md" } },
+    statsIdentity: { kind: "uncounted" },
+  });
+  const settled = applyPaneShellAction({
+    workspace,
+    runtimes: runningRuntimes,
+    paneId,
+    action: {
+      kind: "command.settled",
+      commandId: running.command.id,
+      outcome: viewerCommandOutcome(viewer, "inline"),
+    },
+  });
+  const runtime = paneShellRuntime(settled.runtimes, paneId);
+
+  assert.deepEqual(runtime.presentation, { kind: "inline-viewer", viewer });
+  assert.deepEqual(runtime.state.history[0]?.outcome.events, []);
+});
+
 function deferredCommandOutcome(): Readonly<{
   promise: Promise<CommandLineOutcome>;
   resolve: (outcome: CommandLineOutcome) => void;

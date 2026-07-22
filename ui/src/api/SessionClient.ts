@@ -48,6 +48,16 @@ function authenticatedLogin(value: unknown): AuthenticatedLogin | undefined {
   return value as AuthenticatedLogin;
 }
 
+function demoLogin(): AuthenticatedLogin {
+  const login = authenticatedLogin("demo-viewer");
+
+  if (login === undefined) {
+    throw new Error("The synthetic demo login is invalid.");
+  }
+
+  return login;
+}
+
 function csrfToken(value: unknown): CsrfToken | undefined {
   if (typeof value !== "string" || value.length < 16 || value.length > 4096) {
     return undefined;
@@ -231,22 +241,46 @@ export class HttpSessionClient implements SessionClient {
 }
 
 export class DemoSessionClient implements SessionClient {
-  private session: Session = { kind: "anonymous" };
+  private readonly state: DemoCapabilityState;
+
+  constructor(state: DemoCapabilityState = new DemoCapabilityState()) {
+    this.state = state;
+  }
 
   read(_signal: AbortSignal): Promise<SessionResult> {
-    return Promise.resolve({ kind: "available", session: this.session });
+    return Promise.resolve({ kind: "available", session: this.state.current() });
   }
 
   login(_signal: AbortSignal): Promise<SessionResult> {
-    this.session = {
-      kind: "owner",
-      login: "demo-owner" as AuthenticatedLogin,
-    };
-    return Promise.resolve({ kind: "available", session: this.session });
+    const current = this.state.current();
+    const session: Session = current.kind === "cv-viewer"
+      ? {
+          kind: "github-cv-viewer",
+          login: demoLogin(),
+        }
+      : {
+          kind: "github-viewer",
+          login: demoLogin(),
+        };
+    this.state.replace(session);
+    return Promise.resolve({ kind: "available", session });
   }
 
   logout(_signal: AbortSignal): Promise<SessionResult> {
-    this.session = { kind: "anonymous" };
-    return Promise.resolve({ kind: "available", session: this.session });
+    const session = { kind: "anonymous" } as const satisfies Session;
+    this.state.replace(session);
+    return Promise.resolve({ kind: "available", session });
+  }
+}
+
+export class DemoCapabilityState {
+  private session: Session = { kind: "anonymous" };
+
+  current(): Session {
+    return this.session;
+  }
+
+  replace(session: Session): void {
+    this.session = session;
   }
 }

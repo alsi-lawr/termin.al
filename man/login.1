@@ -12,15 +12,14 @@ login \- Authenticate with GitHub.
 login
 .fi
 .SH DESCRIPTION
-Identifies the authentication command name, but host authentication is unavailable in the current browser demo. No GitHub or other authentication flow begins.
+Opens the GitHub authentication flow in a popup. Any GitHub identity receives viewer capability; the configured numeric owner identity receives owner and CV capabilities.
+.SH OUTPUT
+On success, prints the authenticated GitHub login and capability. Authentication failures use one generic diagnostic.
 .SH FAILURES
-Every invocation returns the stable command-rejected diagnostic:
-.PP
-Authentication is unavailable until the host authentication work is implemented.
-.PP
-Arguments do not change this outcome.
+Arguments are rejected. A blocked popup, invalid or expired correlation, unavailable configuration, failed token exchange, or five-second completion timeout reports
+.BR "Authentication failed." .
 .SH NOTES
-No credential, token, cookie, session or browser-storage value is created. This manual makes no promise about a future authentication protocol.
+Tokens are never placed in terminal output, browser-visible URLs or popup messages. The offline demo changes only its synthetic in-memory session and performs no OAuth or network operation.
 .SH EXAMPLES
 .nf
 $ login

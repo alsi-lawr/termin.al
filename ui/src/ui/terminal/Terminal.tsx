@@ -60,6 +60,8 @@ import { HierarchicalCollectionPane } from "../workspace/HierarchicalCollectionP
 import { ThemeSelectorPane } from "../workspace/ThemeSelectorPane.tsx";
 import { generatedManpageCorpus } from "../../content/ManpageCorpusVite.ts";
 import type { VimSessionBinding } from "../workspace/VimSessionState.ts";
+import type { AuthenticationController } from "../../auth/Authentication.ts";
+import { createAuthenticationCommandDefinitions } from "../../application/commands/AuthenticationCommands.ts";
 
 type TerminalProps = Readonly<{
   paneId: PaneId;
@@ -94,6 +96,8 @@ type TerminalProps = Readonly<{
   readStats: PortfolioStatsReader;
   onAcceptedContentOpen: (contentId: ContentId) => void;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
+  authentication: AuthenticationController;
+  promptIdentity: string;
 }>;
 
 export function Terminal({
@@ -122,6 +126,8 @@ export function Terminal({
   readStats,
   onAcceptedContentOpen,
   secretPromptSubmissionHandler,
+  authentication,
+  promptIdentity,
 }: TerminalProps): ReactElement {
   const inputRef = useRef<InputCaptureHandle>(null);
   const dispatchShellAction = useCallback(
@@ -158,6 +164,7 @@ export function Terminal({
           themes: themeController,
           readStats,
         }),
+        ...createAuthenticationCommandDefinitions(authentication),
         createPaneCommandDefinition(paneId, paneCommandHandler),
       ],
     });
@@ -280,6 +287,7 @@ export function Terminal({
           transcript: (
             <TerminalTranscript
               rows={shell.state.history}
+              promptIdentity={promptIdentity}
               transientDiagnostic={shell.transientDiagnostic?.message}
             />
           ),
@@ -322,6 +330,7 @@ export function Terminal({
         transcript={(
           <TerminalTranscript
             rows={shell.state.history}
+            promptIdentity={promptIdentity}
             transientDiagnostic={shell.transientDiagnostic?.message}
           />
         )}
@@ -346,6 +355,7 @@ export function Terminal({
       <div className="min-h-0 flex-1">
         <TerminalViewport
           rows={shell.state.history}
+          promptIdentity={promptIdentity}
           currentDirectory={shell.state.currentDirectory}
           promptLabel={promptLabel}
           currentInput={displayInput}

@@ -7,26 +7,24 @@ SYNOPSIS
      logout
 
 DESCRIPTION
-     Identifies  the session-ending command name, but authentication is unavail‐
-     able in the current browser demo. There is no authenticated session for lo‐
-     gout to end.
+     Ends  the  protected  browser  session and removes owner, GitHub-viewer and
+     shared-CV capabilities. Open CV presentation  state  is  discarded.  Editor
+     drafts are not changed.
+
+OUTPUT
+     Prints Logged out.  on success.
 
 FAILURES
-     Every invocation returns the stable command-rejected diagnostic:
-
-     Authentication is unavailable until the host authentication work is  imple‐
-     mented.
-
-     Arguments do not change this outcome.
+     Arguments  are rejected. Session, origin or request-forgery failures report
+     Authentication failed..
 
 NOTES
-     No shell, pane, theme preference, cookie, token or browser-storage value is
-     cleared.
+     The offline demo clears only its synthetic in-memory capability state.
 
 EXAMPLES
      $ logout
 
 SEE ALSO
-     login(1), whoami(1)
+     login(1), whoami(1), cv(1)
 
 termin.al                                                              LOGOUT(1)

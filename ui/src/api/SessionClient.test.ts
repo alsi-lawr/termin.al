@@ -13,7 +13,7 @@ describe("DemoSessionClient", () => {
     });
     assert.deepEqual(await client.login(signal), {
       kind: "available",
-      session: { kind: "owner", login: "demo-owner" },
+      session: { kind: "github-viewer", login: "demo-viewer" },
     });
     assert.deepEqual(await client.logout(signal), {
       kind: "available",

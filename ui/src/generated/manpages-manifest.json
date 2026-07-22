@@ -69,13 +69,13 @@
     {
       "name": "cv",
       "section": 1,
-      "usage": "cv",
-      "summary": "Open cv content.",
+      "usage": "cv [--split horizontal|vertical] | cv lock",
+      "summary": "Unlock or open protected CV content.",
       "sourcePath": "man/cv.1",
       "artifactPath": "ui/src/generated/manpages/cv.txt",
-      "byteCount": 772,
-      "lineCount": 28,
-      "sha256": "8f8277fdafc67a188445ac38cc97456ab1d4edf8229cfc84c50ab1e140b8a910"
+      "byteCount": 1128,
+      "lineCount": 36,
+      "sha256": "fdf8efd3924d6f4811e5f74dec09ee18c10376eea80af8f7a66bb6175489257e"
     },
     {
       "name": "echo",
@@ -172,9 +172,9 @@
       "summary": "Authenticate with GitHub.",
       "sourcePath": "man/login.1",
       "artifactPath": "ui/src/generated/manpages/login.txt",
-      "byteCount": 873,
-      "lineCount": 32,
-      "sha256": "b514a524004e80ebf9f6bc3ab69b12674f43b0569138cca4419feee8cf48e54c"
+      "byteCount": 1075,
+      "lineCount": 34,
+      "sha256": "311a2fe9aee702a0554648fd994bb42aadf567b5b72a05efbd72f9dcd512dcdb"
     },
     {
       "name": "logout",
@@ -183,9 +183,9 @@
       "summary": "End the authenticated session.",
       "sourcePath": "man/logout.1",
       "artifactPath": "ui/src/generated/manpages/logout.txt",
-      "byteCount": 815,
-      "lineCount": 32,
-      "sha256": "f695d17f4dc039f832da2953b68a8bc657a911e66d1d09bd9b739ddf5dfcf059"
+      "byteCount": 754,
+      "lineCount": 30,
+      "sha256": "3c3f6a7a85ba7c8e725451ccdb3939dd4745d6e68ba99e22e0d15f1137c03452"
     },
     {
       "name": "ls",
@@ -359,9 +359,9 @@
       "summary": "Show the current development capability.",
       "sourcePath": "man/whoami.1",
       "artifactPath": "ui/src/generated/manpages/whoami.txt",
-      "byteCount": 775,
-      "lineCount": 30,
-      "sha256": "2a2744f0fa10d8b7bcec2238be2810dbdae26596ecae9741967e12f22a28ddf1"
+      "byteCount": 781,
+      "lineCount": 28,
+      "sha256": "33acf27d06e97f2949d5ebd476fe77fdba3260b7f003aa6b291c4d3ddb69b699"
     }
   ]
 }

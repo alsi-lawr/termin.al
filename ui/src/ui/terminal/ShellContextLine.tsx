@@ -4,15 +4,17 @@ import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesy
 type ShellContextLineProps = Readonly<{
   currentDirectory: VirtualDirectoryPath;
   promptLabel: string | undefined;
+  promptIdentity: string;
 }>;
 
 export function ShellContextLine({
   currentDirectory,
   promptLabel,
+  promptIdentity,
 }: ShellContextLineProps): ReactElement {
   return (
     <div className="text-text-muted">
-      <span className="text-ui-accent">anonymous@termin.al</span>
+      <span className="text-ui-accent">{promptIdentity}</span>
       <span> {currentDirectory}</span>
       {promptLabel === undefined ? null : <span> · {promptLabel}</span>}
     </div>

@@ -19,7 +19,6 @@ open Microsoft.AspNetCore.DataProtection
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
-open Microsoft.Extensions.Hosting
 
 [<RequireQualifiedAccess>]
 module Auth =
@@ -273,8 +272,6 @@ module Auth =
         context.Response.Cookies.Delete(name, cookieOptions allowLocalHttp)
 
     let private readSession (context: HttpContext) =
-        let runtime = context.RequestServices.GetRequiredService<Runtime>()
-
         match context.Request.Cookies.TryGetValue(SessionCookieName) with
         | true, value ->
             let provider = context.RequestServices.GetRequiredService<IDataProtectionProvider>()
@@ -618,7 +615,7 @@ module Auth =
         let jsonOrigin = JsonSerializer.Serialize(origin)
         let jsonOk = if ok then "true" else "false"
         let link = HtmlEncoder.Default.Encode(origin)
-        $"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authentication</title></head><body><p>Authentication complete.</p><p><a href=\"{link}\">Return to termin.al</a></p><script>if(window.opener){{window.opener.postMessage({{type:'termin.al.auth.complete',ok:{jsonOk}}},{jsonOrigin});window.close();}}</script></body></html>"
+        $"<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Authentication</title></head><body><p>Authentication complete.</p><p><a href=\"{link}\">Return to termin.al</a></p><script>history.replaceState(null,'',location.pathname);if(window.opener){{window.opener.postMessage({{type:'termin.al.auth.complete',ok:{jsonOk}}},{jsonOrigin});window.close();}}</script></body></html>"
 
     let private mapGetSession (application: WebApplication) =
         application.MapGet(
@@ -797,7 +794,6 @@ module Auth =
     let configureServices
         (services: IServiceCollection)
         (configuration: IConfiguration)
-        (environment: IHostEnvironment)
         (allowLocalHttpCookie: bool)
         (httpClient: HttpClient)
         (now: unit -> DateTimeOffset)

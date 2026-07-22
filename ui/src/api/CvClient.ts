@@ -1,4 +1,5 @@
 import { apiPathPrefix } from "./ApiPath.ts";
+import { DemoCapabilityState } from "./SessionClient.ts";
 
 export type CvViewerKey = string & { readonly __brand: "CvViewerKey" };
 
@@ -165,21 +166,59 @@ const syntheticCv = [
 ].join("\n");
 
 export class DemoCvClient implements CvClient {
-  private unlocked = false;
+  private readonly state: DemoCapabilityState;
+
+  constructor(state: DemoCapabilityState = new DemoCapabilityState()) {
+    this.state = state;
+  }
 
   unlock(_key: CvViewerKey, _signal: AbortSignal): Promise<CvAccessResult> {
-    this.unlocked = true;
+    const session = this.state.current();
+
+    switch (session.kind) {
+      case "anonymous":
+        this.state.replace({ kind: "cv-viewer" });
+        break;
+      case "github-viewer":
+        this.state.replace({ kind: "github-cv-viewer", login: session.login });
+        break;
+      case "cv-viewer":
+      case "github-cv-viewer":
+      case "owner":
+        break;
+    }
+
     return Promise.resolve({ kind: "unlocked" });
   }
 
   lock(_signal: AbortSignal): Promise<CvAccessResult> {
-    this.unlocked = false;
+    const session = this.state.current();
+
+    switch (session.kind) {
+      case "cv-viewer":
+        this.state.replace({ kind: "anonymous" });
+        break;
+      case "github-cv-viewer":
+        this.state.replace({ kind: "github-viewer", login: session.login });
+        break;
+      case "anonymous":
+      case "github-viewer":
+      case "owner":
+        break;
+    }
+
     return Promise.resolve({ kind: "locked" });
   }
 
   read(_signal: AbortSignal): Promise<CvDocumentResult> {
+    const session = this.state.current();
+    const available =
+      session.kind === "cv-viewer" ||
+      session.kind === "github-cv-viewer" ||
+      session.kind === "owner";
+
     return Promise.resolve(
-      this.unlocked
+      available
         ? { kind: "available", markdown: syntheticCv }
         : { kind: "locked" },
     );

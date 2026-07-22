@@ -12,18 +12,19 @@ logout \- End the authenticated session.
 logout
 .fi
 .SH DESCRIPTION
-Identifies the session-ending command name, but authentication is unavailable in the current browser demo. There is no authenticated session for logout to end.
+Ends the protected browser session and removes owner, GitHub-viewer and shared-CV capabilities. Open CV presentation state is discarded. Editor drafts are not changed.
+.SH OUTPUT
+Prints
+.BR "Logged out."
+on success.
 .SH FAILURES
-Every invocation returns the stable command-rejected diagnostic:
-.PP
-Authentication is unavailable until the host authentication work is implemented.
-.PP
-Arguments do not change this outcome.
+Arguments are rejected. Session, origin or request-forgery failures report
+.BR "Authentication failed." .
 .SH NOTES
-No shell, pane, theme preference, cookie, token or browser-storage value is cleared.
+The offline demo clears only its synthetic in-memory capability state.
 .SH EXAMPLES
 .nf
 $ logout
 .fi
 .SH SEE ALSO
-login(1), whoami(1)
+login(1), whoami(1), cv(1)

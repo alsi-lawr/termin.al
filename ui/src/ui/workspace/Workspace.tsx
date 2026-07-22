@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useEffect, type ReactElement } from "react";
 import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { StatsClient } from "../../api/StatsClient.ts";
@@ -10,31 +10,52 @@ import { PaneTreeView } from "./PaneTreeView";
 import { usePaneWorkspace } from "./usePaneWorkspace";
 import { WorkspaceStatusLine } from "./WorkspaceStatusLine";
 import { useWorkspaceStats } from "./useWorkspaceStats.ts";
+import type { AuthenticationBinding } from "../../auth/useAuthentication.ts";
+import {
+  authenticationCapabilityLabel,
+  authenticationPromptIdentity,
+} from "../../auth/Authentication.ts";
 
 type WorkspaceProps = Readonly<{
   applicationMode: ApplicationMode;
   corpus: ContentCorpus;
   statsClient: StatsClient;
+  authentication: AuthenticationBinding;
 }>;
 
 export function Workspace({
   applicationMode,
   corpus,
   statsClient,
+  authentication,
 }: WorkspaceProps): ReactElement {
   const stats = useWorkspaceStats(statsClient, applicationMode);
   const controller = usePaneWorkspace(corpus, stats.recordAcceptedOpen);
+  const dropCvContent = controller.dropCvContent;
   const theme = useTheme();
   const panes = paneLeaves(controller.workspace.tree);
   const closeConfirmationOpen =
     controller.closeConfirmation.kind === "requested";
+
+  useEffect(() => {
+    if (authentication.state.sensitiveRevision > 0) {
+      dropCvContent();
+    }
+  }, [
+    authentication.state.sensitiveRevision,
+    dropCvContent,
+  ]);
 
   return (
     <main
       className="flex h-dvh min-w-0 flex-col overflow-hidden bg-surface-deepest"
       data-theme={theme.status.theme}
     >
-      <WorkspaceStatusLine applicationMode={applicationMode} stats={stats.status} />
+      <WorkspaceStatusLine
+        applicationMode={applicationMode}
+        capability={authenticationCapabilityLabel(authentication.state)}
+        stats={stats.status}
+      />
       <div className="flex min-h-0 flex-1 flex-col" inert={closeConfirmationOpen}>
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <PaneTreeView
@@ -60,6 +81,9 @@ export function Workspace({
             projectReadmes={corpus.projectReadmes}
             readStats={stats.readStats}
             onAcceptedContentOpen={stats.recordAcceptedOpen}
+            authentication={authentication.controller}
+            promptIdentity={authenticationPromptIdentity(authentication.state)}
+            openProtectedViewer={controller.openProtectedViewer}
           />
         </div>
         <MobilePaneSwitcher

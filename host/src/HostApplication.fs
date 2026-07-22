@@ -82,7 +82,6 @@ module HostApplication =
         Auth.configureServices
             builder.Services
             builder.Configuration
-            builder.Environment
             allowLocalHttpStatsCookie
             authHttpClient
             now
@@ -130,7 +129,6 @@ module HostApplication =
         Auth.configureServices
             builder.Services
             builder.Configuration
-            builder.Environment
             (builder.Environment.IsDevelopment())
             authHttpClient
             now

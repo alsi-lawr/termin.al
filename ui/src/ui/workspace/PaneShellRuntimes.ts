@@ -1,6 +1,7 @@
 import type { VirtualDirectoryPath } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   countableViewerContentIds,
+  isCvViewerContent,
   type ViewerContent,
 } from "../../content/ViewerContent.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
@@ -404,10 +405,25 @@ export function applyPaneShellAction({
   paneId,
   action,
 }: ApplyPaneShellActionOptions): PaneShellActionResult {
+  const retainedAction: ShellAction =
+    action.kind === "command.settled"
+      ? {
+          ...action,
+          outcome: {
+            ...action.outcome,
+            events: action.outcome.events.filter(
+              (event) =>
+                event.kind !== "effect" ||
+                event.effect.kind !== "open-viewer" ||
+                !isCvViewerContent(event.effect.viewer),
+            ),
+          },
+        }
+      : action;
   const reducedRuntimes = reducePaneShellRuntime({
     runtimes,
     paneId,
-    action,
+    action: retainedAction,
   });
 
   if (

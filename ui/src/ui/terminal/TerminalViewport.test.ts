@@ -7,7 +7,8 @@ import { TerminalViewportContent } from "./TerminalViewport.tsx";
 test("grows the transcript and active prompt naturally from the top", () => {
   const markup = renderToStaticMarkup(
     TerminalViewportContent({
-      rows: [],
+    rows: [],
+    promptIdentity: "anonymous@termin.al",
       currentDirectory: virtualHomeDirectory(),
       promptLabel: undefined,
       currentInput: "",

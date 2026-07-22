@@ -8,6 +8,7 @@ import { ShellContextLine } from "./ShellContextLine";
 
 type TerminalHistoryRowProps = Readonly<{
   entry: ShellHistoryEntry;
+  promptIdentity: string;
 }>;
 
 const outcomeClassMap = {
@@ -41,6 +42,7 @@ function TerminalHistoryOutcome({
 
 export function TerminalHistoryRow({
   entry,
+  promptIdentity,
 }: TerminalHistoryRowProps): ReactElement {
   const commandLabelId = `${entry.id}-command`;
 
@@ -51,6 +53,7 @@ export function TerminalHistoryRow({
     >
       <div id={commandLabelId}>
         <ShellContextLine
+          promptIdentity={promptIdentity}
           currentDirectory={entry.command.currentDirectory}
           promptLabel={undefined}
         />
