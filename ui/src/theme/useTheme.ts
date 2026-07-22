@@ -88,15 +88,8 @@ function initialTheme(): InitialTheme {
   };
 }
 
-function requiredThemeState(state: ThemeState | undefined): ThemeState {
-  if (state === undefined) {
-    throw new Error("Theme state must be initialized before commands run.");
-  }
-  return state;
-}
-
 function createThemeController(
-  stateRef: Readonly<{ current: ThemeState | undefined }>,
+  stateRef: Readonly<{ current: ThemeState }>,
   publishRef: Readonly<{ current: ThemeStatePublisher }>,
   initialStorageFailure: boolean,
 ): ThemeController {
@@ -106,7 +99,7 @@ function createThemeController(
     return state;
   };
   const commit = (preference: ThemePreference): ThemeChange => {
-    const current = requiredThemeState(stateRef.current);
+    const current = stateRef.current;
     const storage = browserThemeStorage();
     const storageFailed = storage === undefined ||
       persistStoredThemePreference(storage, preference);
@@ -118,16 +111,16 @@ function createThemeController(
 
   return {
     list: () => themeNames,
-    current: () => themeStatus(requiredThemeState(stateRef.current)),
-    state: () => requiredThemeState(stateRef.current),
+    current: () => themeStatus(stateRef.current),
+    state: () => stateRef.current,
     set: (theme) => commit({ kind: "explicit", theme }),
     followSystem: () => commit(systemThemePreference),
     preview: (preference) => publish(withThemePreview(
-      requiredThemeState(stateRef.current),
+      stateRef.current,
       preference,
     )),
     restore: (preference, previewRevision) => {
-      const current = requiredThemeState(stateRef.current);
+      const current = stateRef.current;
       const restored = restoreThemePreview(current, preference, previewRevision);
       if (restored !== current) {
         publish(restored);
@@ -149,7 +142,7 @@ export type UseThemeResult = Readonly<{
 export function useTheme(): UseThemeResult {
   const [initial] = useState<InitialTheme>(initialTheme);
   const [state, setState] = useState(initial.state);
-  const stateRef = useRef<ThemeState | undefined>(initial.state);
+  const stateRef = useRef<ThemeState>(initial.state);
   const publishRef = useRef<ThemeStatePublisher>(() => undefined);
   const [controller] = useState<ThemeController>(() => createThemeController(
     stateRef,
@@ -166,7 +159,7 @@ export function useTheme(): UseThemeResult {
     const query = window.matchMedia("(prefers-color-scheme: dark)");
     const update = (event: MediaQueryListEvent): void => {
       publishRef.current(withSystemThemeAppearance(
-        requiredThemeState(stateRef.current),
+        stateRef.current,
         event.matches ? "dark" : "light",
       ));
     };
