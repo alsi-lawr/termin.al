@@ -76,7 +76,7 @@ export type CreateCommandRegistryOptions = Readonly<{
   commands: ReadonlyArray<CommandDefinition>;
   filesystem: VirtualFilesystem;
   documents: VirtualDocumentSupplier;
-  onFilesystemChange?: (overlay: VirtualFilesystemOverlay) => void;
+  onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
 }>;
 
 function assertCommandName(name: string): void {
@@ -89,7 +89,7 @@ export function createCommandRegistry({
   commands,
   filesystem,
   documents,
-  onFilesystemChange = () => {},
+  onFilesystemChange,
 }: CreateCommandRegistryOptions): CommandRegistry {
   const registeredNames = new Set<string>();
 

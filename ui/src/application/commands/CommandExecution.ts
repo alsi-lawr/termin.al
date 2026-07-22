@@ -656,7 +656,8 @@ type RedirectionSetupResult =
     }>
   | Readonly<{
       kind: "failed";
-      outcome: CommandOutcome;
+      outcome: Extract<CommandOutcome, { kind: "failed" }>;
+      descriptors: ReadonlyArray<DescriptorTarget>;
     }>
   | Readonly<{ kind: "cancelled" }>;
 
@@ -672,9 +673,14 @@ type ReadRedirectionFileResult =
 
 type FileWriteResult =
   | Readonly<{ kind: "written"; path: VirtualAbsolutePath }>
-  | Readonly<{ kind: "failed"; outcome: CommandOutcome }>;
+  | Readonly<{
+      kind: "failed";
+      outcome: Extract<CommandOutcome, { kind: "failed" }>;
+    }>;
 
-function redirectionFailure(message: string): CommandOutcome {
+function redirectionFailure(
+  message: string,
+): Extract<CommandOutcome, { kind: "failed" }> {
   return {
     kind: "failed",
     failure: { kind: "redirection-error", message },
@@ -858,6 +864,7 @@ async function applyRedirections(
           outcome: redirectionFailure(
             `File descriptor ${redirection.operand} is not compatible with ${redirection.operator}.`,
           ),
+          descriptors,
         };
       }
 
@@ -878,7 +885,7 @@ async function applyRedirections(
       );
 
       if (opened.kind === "failed") {
-        return opened;
+        return { ...opened, descriptors };
       }
 
       descriptors = withDescriptor(descriptors, redirection.descriptor, {
@@ -915,7 +922,7 @@ async function applyRedirections(
       );
 
       if (opened.kind === "failed") {
-        return opened;
+        return { ...opened, descriptors };
       }
 
       const destination: OutputDestination = {
@@ -942,7 +949,11 @@ async function applyRedirections(
       const message = read.kind === "not-found"
         ? `Redirection file does not exist: ${redirection.operand}`
         : read.message;
-      return { kind: "failed", outcome: redirectionFailure(message) };
+      return {
+        kind: "failed",
+        outcome: redirectionFailure(message),
+        descriptors,
+      };
     }
 
     if (redirection.operator === ">>") {
@@ -1009,6 +1020,48 @@ function redirectedOutputText(output: RedirectableOutput): string {
   }
 }
 
+function redirectedFileText(
+  destination: Extract<OutputDestination, { kind: "file" }>,
+  text: string,
+): string {
+  return destination.write === "append"
+    ? destination.initialText + text
+    : text + destination.initialText.slice(text.length);
+}
+
+function routeFailureThroughStandardError(
+  outcome: Extract<CommandOutcome, { kind: "failed" }>,
+  descriptors: ReadonlyArray<DescriptorTarget>,
+  currentDirectory: VirtualDirectoryPath,
+  events: CommandLineEvent[],
+  options: ExecuteCommandLineOptions,
+): string {
+  const destination = descriptorOutput(descriptors, 2);
+
+  if (destination === undefined) {
+    return "";
+  }
+
+  if (destination.kind === "terminal") {
+    appendOutcome(events, outcome);
+    return "";
+  }
+
+  const text = outcome.diagnostics.map((diagnostic) => diagnostic.message).join("\n");
+
+  if (destination.kind === "pipeline") {
+    return text;
+  }
+
+  void applyFileWrite(
+    options,
+    currentDirectory,
+    destination.path,
+    redirectedFileText(destination, text),
+  );
+  return "";
+}
+
 async function routeOutcome(
   outcome: CommandOutcome,
   descriptors: ReadonlyArray<DescriptorTarget>,
@@ -1017,26 +1070,24 @@ async function routeOutcome(
   options: ExecuteCommandLineOptions,
 ): Promise<Readonly<{ outcome: CommandOutcome; pipelineText: string }>> {
   const redirected = new Map<OutputDestination, string[]>();
-  let outputFailure: CommandOutcome | undefined;
-  const route = (output: RedirectableOutput, descriptor: number): void => {
+  let outputFailure: Extract<CommandOutcome, { kind: "failed" }> | undefined;
+  const route = (output: RedirectableOutput, descriptor: number): boolean => {
     const destination = descriptorOutput(descriptors, descriptor);
 
     if (destination === undefined) {
-      outputFailure = redirectionFailure(
-        `File descriptor ${descriptor} is not writable.`,
-      );
-      return;
+      return false;
     }
 
     if (destination.kind === "terminal") {
       events.push(outputEvent(output, events.length + 1));
-      return;
+      return true;
     }
 
     const text = redirectedOutputText(output);
     const pieces = redirected.get(destination) ?? [];
     pieces.push(text);
     redirected.set(destination, pieces);
+    return true;
   };
 
   if (outcome.kind === "succeeded") {
@@ -1044,7 +1095,13 @@ async function routeOutcome(
       if (output.kind === "prompt") {
         events.push(outputEvent(output, events.length + 1));
       } else {
-        route(output, output.kind === "diagnostic" ? 2 : 1);
+        const descriptor = output.kind === "diagnostic" ? 2 : 1;
+
+        if (!route(output, descriptor) && descriptor === 1) {
+          outputFailure = redirectionFailure(
+            "File descriptor 1 is not writable.",
+          );
+        }
       }
     }
 
@@ -1057,7 +1114,7 @@ async function routeOutcome(
       : [outcome.diagnostic];
 
     for (const diagnostic of diagnostics) {
-      route({
+      void route({
         kind: "diagnostic",
         id: createShellOutputId("redirected-diagnostic"),
         diagnostic,
@@ -1066,8 +1123,15 @@ async function routeOutcome(
   }
 
   if (outputFailure !== undefined) {
-    appendOutcome(events, outputFailure);
-    return { outcome: outputFailure, pipelineText: "" };
+    redirected.clear();
+    const pipelineText = routeFailureThroughStandardError(
+      outputFailure,
+      descriptors,
+      currentDirectory,
+      events,
+      options,
+    );
+    return { outcome: outputFailure, pipelineText };
   }
 
   let pipelineText = "";
@@ -1084,19 +1148,22 @@ async function routeOutcome(
       throw new Error("Terminal output must be emitted before redirection flush.");
     }
 
-    const writtenText = destination.write === "append"
-      ? destination.initialText + text
-      : text + destination.initialText.slice(text.length);
     const write = applyFileWrite(
       options,
       currentDirectory,
       destination.path,
-      writtenText,
+      redirectedFileText(destination, text),
     );
 
     if (write.kind === "failed") {
-      appendOutcome(events, write.outcome);
-      return { outcome: write.outcome, pipelineText: "" };
+      const failurePipelineText = routeFailureThroughStandardError(
+        write.outcome,
+        descriptors,
+        currentDirectory,
+        events,
+        options,
+      );
+      return { outcome: write.outcome, pipelineText: failurePipelineText };
     }
   }
 
@@ -1142,8 +1209,23 @@ async function executePipeline(
     }
 
     if (setup.kind === "failed") {
-      appendOutcome(events, setup.outcome);
-      return setup.outcome;
+      outcome = setup.outcome;
+      pipelineInput = {
+        kind: "text",
+        text: routeFailureThroughStandardError(
+          setup.outcome,
+          setup.descriptors,
+          currentDirectory,
+          events,
+          options,
+        ),
+      };
+
+      if (isFinal) {
+        return setup.outcome;
+      }
+
+      continue;
     }
 
     if (entry.resolution.kind === "null") {

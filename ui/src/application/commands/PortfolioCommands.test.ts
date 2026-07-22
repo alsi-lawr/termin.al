@@ -114,6 +114,7 @@ function createRegistry(
   return createCommandRegistry({
     filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: [
       ...createReadOnlyCommandDefinitions({
         filesystem,

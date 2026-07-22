@@ -720,7 +720,7 @@ export function virtualHomeDirectory(): VirtualDirectoryPath {
   return canonicalHomeDirectoryPath;
 }
 
-export function createVirtualFilesystemWritableFiles(
+function createVirtualFilesystemWritableFiles(
   initial: VirtualFilesystemOverlay = { files: [] },
 ): VirtualFilesystemWritableFiles {
   let overlay = initial;

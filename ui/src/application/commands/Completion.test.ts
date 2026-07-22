@@ -26,6 +26,7 @@ test("completes registry command names and aliases", async () => {
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands: [
       {
         metadata: {

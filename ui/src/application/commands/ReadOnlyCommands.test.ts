@@ -65,6 +65,7 @@ function createRegistry(
   return createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents,
@@ -126,6 +127,7 @@ function createGrepFixture(
   const registry = createCommandRegistry({
     filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -381,6 +383,7 @@ test("derives explicit credential-argument persistence policy from parsed comman
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands,
   });
 
@@ -635,6 +638,7 @@ test("uses one canonical artifact for default less, explicit less, vi, and alias
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands: definitions.map((command) =>
       command.metadata.name === "ls"
         ? {
@@ -695,6 +699,7 @@ test("reports stable diagnostics for malformed and unavailable manual requests",
   const noManuals = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents: demoContentCorpus.documents,
@@ -764,6 +769,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   const registry = createCommandRegistry({
     filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -781,6 +787,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   const boundedRegistry = createCommandRegistry({
     filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -1057,6 +1064,7 @@ test("rejects every invalid sed option and script before reading or emitting", a
   const registry = createCommandRegistry({
     filesystem: guarded.filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem: guarded.filesystem,
       documents,
@@ -1188,6 +1196,7 @@ test("cancellation discards accumulated grep and sed output", async () => {
   const registry = createCommandRegistry({
     filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -1336,6 +1345,7 @@ test("applies ordered redirections through the shared virtual reader boundary", 
   const registry = createCommandRegistry({
     filesystem,
     documents,
+    onFilesystemChange: () => {},
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -1411,8 +1421,24 @@ test("applies ordered redirections through the shared virtual reader boundary", 
     "> > escaped",
   );
 
-  const closedOutput = await execute("echo lost 1>&-", registry);
+  const closedOutput = await execute("echo lost 2> output-error 1>&-", registry);
   assert.equal(closedOutput.kind, "failed");
+  assert.deepEqual(failureMessages(closedOutput), []);
+  assert.equal(
+    outputText(await execute("cat output-error", registry)),
+    "File descriptor 1 is not writable.",
+  );
+
+  const laterSetupFailure = await execute(
+    "echo lost 2> setup-error > missing/child",
+    registry,
+  );
+  assert.equal(laterSetupFailure.kind, "failed");
+  assert.deepEqual(failureMessages(laterSetupFailure), []);
+  assert.equal(
+    outputText(await execute("cat setup-error", registry)),
+    "Redirection parent does not exist: ~/missing/child",
+  );
 
   const controller = new AbortController();
   controller.abort();

@@ -60,6 +60,7 @@ test("executes parsed pane operations through the existing command registry cont
     commands: [command],
     filesystem: demoContentCorpus.filesystem,
     documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
   });
   const outcome = await command.execute(
     {
