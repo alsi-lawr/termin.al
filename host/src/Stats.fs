@@ -7,7 +7,6 @@ open System.Security.Cryptography
 open System.Text
 open System.Text.Json
 open System.Threading
-open System.Threading.Channels
 open System.Threading.Tasks
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
@@ -54,11 +53,6 @@ module Stats =
         | RateLimited
         | Unavailable
 
-    type SubscriptionResult =
-        | Subscribed of ChannelReader<string> * Guid * Snapshot
-        | SubscriptionUnavailable
-        | SubscriptionStopped
-
     type private PersistedState =
         { TotalSessions: int64
           TotalPageViews: int64
@@ -78,14 +72,11 @@ module Stats =
           SeenSessions: Set<string>
           SeenContentBySession: Map<string, Set<string>>
           SessionRates: Map<string, RateWindow>
-          ProcessRate: RateWindow option
-          Subscribers: Map<Guid, ChannelWriter<string>> }
+          ProcessRate: RateWindow option }
 
     type private Message =
         | GetSnapshot of AsyncReplyChannel<Snapshot option>
         | RecordView of string * string * Set<string> * DateTimeOffset * AsyncReplyChannel<RecordResult>
-        | Subscribe of Guid * ChannelWriter<string> * AsyncReplyChannel<Snapshot option>
-        | Unsubscribe of Guid
         | Flush of AsyncReplyChannel<unit>
         | Stop of AsyncReplyChannel<unit>
 
@@ -152,42 +143,6 @@ module Stats =
         writer.WriteEndArray()
         writer.WriteEndObject()
         writer.Flush()
-
-    let private snapshotJson (value: Snapshot) =
-        use stream = new MemoryStream()
-        use writer = new Utf8JsonWriter(stream)
-        writer.WriteStartObject()
-        writer.WriteNumber("totalSessions", value.TotalSessions)
-        writer.WriteNumber("totalPageViews", value.TotalPageViews)
-        writer.WritePropertyName("pageViewsByContent")
-        writer.WriteStartObject()
-
-        value.PageViewsByContent
-        |> Map.iter (fun contentId count -> writer.WriteNumber(contentId, count))
-
-        writer.WriteEndObject()
-        writer.WritePropertyName("daily")
-        writer.WriteStartArray()
-
-        for day in value.Daily do
-            writer.WriteStartObject()
-            writer.WriteString("date", day.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
-            writer.WriteNumber("sessions", day.Sessions)
-            writer.WriteNumber("pageViews", day.PageViews)
-            writer.WriteEndObject()
-
-        writer.WriteEndArray()
-
-        writer.WriteString(
-            "storageState",
-            match value.StorageState with
-            | Writable -> "writable"
-            | ReadOnly -> "read-only"
-        )
-
-        writer.WriteEndObject()
-        writer.Flush()
-        Encoding.UTF8.GetString(stream.ToArray())
 
     let private tryProperty (name: string) (element: JsonElement) =
         match element.TryGetProperty name with
@@ -409,9 +364,6 @@ module Stats =
         | Some window when window.Minute = minute -> true, { window with Count = window.Count + 1 }
         | _ -> true, { Minute = minute; Count = 1 }
 
-    let private broadcast (subscribers: Map<Guid, ChannelWriter<string>>) (message: string) =
-        subscribers |> Map.filter (fun _ writer -> writer.TryWrite message)
-
     type Store private (dataPath: string option, now: unit -> DateTimeOffset) =
         let mainPath =
             dataPath |> Option.map (fun path -> Path.Combine(path, "statistics.json"))
@@ -432,24 +384,21 @@ module Stats =
                   SeenSessions = Set.empty
                   SeenContentBySession = Map.empty
                   SessionRates = Map.empty
-                  ProcessRate = None
-                  Subscribers = Map.empty }
+                  ProcessRate = None }
             | LoadedReadOnly persisted ->
                 { Persisted = Some persisted
                   Writable = false
                   SeenSessions = Set.empty
                   SeenContentBySession = Map.empty
                   SessionRates = Map.empty
-                  ProcessRate = None
-                  Subscribers = Map.empty }
+                  ProcessRate = None }
             | NeverValid ->
                 { Persisted = None
                   Writable = false
                   SeenSessions = Set.empty
                   SeenContentBySession = Map.empty
                   SessionRates = Map.empty
-                  ProcessRate = None
-                  Subscribers = Map.empty }
+                  ProcessRate = None }
 
         let agent =
             MailboxProcessor.Start(fun (inbox: MailboxProcessor<Message>) ->
@@ -461,28 +410,10 @@ module Stats =
                         | GetSnapshot reply ->
                             state.Persisted |> Option.map (snapshot state.Writable) |> reply.Reply
                             return! loop state
-                        | Subscribe(id, writer, reply) ->
-                            match state.Persisted with
-                            | Some persisted ->
-                                snapshot state.Writable persisted |> Some |> reply.Reply
-
-                                return!
-                                    loop
-                                        { state with
-                                            Subscribers = Map.add id writer state.Subscribers }
-                            | None ->
-                                reply.Reply None
-                                return! loop state
-                        | Unsubscribe id ->
-                            return!
-                                loop
-                                    { state with
-                                        Subscribers = Map.remove id state.Subscribers }
                         | Flush reply ->
                             reply.Reply()
                             return! loop state
                         | Stop reply ->
-                            state.Subscribers |> Map.iter (fun _ writer -> writer.TryComplete() |> ignore)
                             reply.Reply()
                         | RecordView(sessionId, contentId, allowedContentIds, timestamp, reply) ->
                             match state.Persisted with
@@ -533,9 +464,6 @@ module Stats =
                                             persist (Option.get mainPath) (Option.get temporaryPath) updated
                                             let updatedSnapshot = snapshot true updated
 
-                                            let subscribers =
-                                                broadcast ratedState.Subscribers (snapshotJson updatedSnapshot)
-
                                             reply.Reply(Accepted updatedSnapshot)
 
                                             return!
@@ -547,21 +475,13 @@ module Stats =
                                                             Map.add
                                                                 sessionId
                                                                 (Set.add contentId seenContent)
-                                                                ratedState.SeenContentBySession
-                                                        Subscribers = subscribers }
+                                                                ratedState.SeenContentBySession }
                                         with _ ->
-                                            let readOnlySnapshot = snapshot false persisted
-
-                                            let subscribers =
-                                                broadcast ratedState.Subscribers (snapshotJson readOnlySnapshot)
-
                                             reply.Reply Unavailable
 
                                             return!
                                                 loop
-                                                    { ratedState with
-                                                        Writable = false
-                                                        Subscribers = subscribers }
+                                                    { ratedState with Writable = false }
                     }
 
                 loop initialState)
@@ -583,36 +503,6 @@ module Stats =
             agent.PostAndAsyncReply(fun reply -> RecordView(sessionId, contentId, allowedContentIds, timestamp, reply))
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-        member _.Subscribe() : Task<SubscriptionResult> =
-            task {
-                let registration =
-                    lock lifecycleGate (fun () ->
-                        if stopped then
-                            None
-                        else
-                            let id = Guid.NewGuid()
-                            let options = BoundedChannelOptions(1)
-                            options.FullMode <- BoundedChannelFullMode.DropOldest
-                            let channel = Channel.CreateBounded<string>(options)
-
-                            let work =
-                                agent.PostAndAsyncReply(fun reply -> Subscribe(id, channel.Writer, reply))
-                                |> Async.StartImmediateAsTask
-
-                            Some(channel.Reader, id, work))
-
-                match registration with
-                | None -> return SubscriptionStopped
-                | Some(reader, id, work) ->
-                    let! initial = work
-
-                    match initial with
-                    | Some snapshot -> return Subscribed(reader, id, snapshot)
-                    | None -> return SubscriptionUnavailable
-            }
-
-        member _.Unsubscribe(id: Guid) = agent.Post(Unsubscribe id)
-
         member _.Flush(cancellationToken: CancellationToken) : Task =
             agent.PostAndAsyncReply Flush
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
@@ -626,32 +516,23 @@ module Stats =
                     | None ->
                         stopped <- true
 
-                        let work =
-                            agent.PostAndAsyncReply Stop
-                            |> Async.StartImmediateAsTask
+                        let work = agent.PostAndAsyncReply Stop |> Async.StartImmediateAsTask
 
                         shutdownTask <- Some work
                         work)
 
             work.GetAwaiter().GetResult()
 
-    let private sameOrigin (context: HttpContext) (requireOrigin: bool) =
-        let origin = context.Request.Headers.Origin.ToString()
+    type BrowserRuntime =
+        { Store: Store
+          ContentClient: ContentClient
+          AllowLocalHttpCookie: bool
+          RandomBytes: int -> byte array
+          Now: unit -> DateTimeOffset }
 
-        if String.IsNullOrEmpty origin then
-            not requireOrigin
-        else
-            String.Equals(origin, $"{context.Request.Scheme}://{context.Request.Host.Value}", StringComparison.Ordinal)
-
-    let private problem (context: HttpContext) (status: int) (code: string) (title: string) : IResult =
-        context.Response.Headers.CacheControl <- "no-store"
-
-        Results.Text(
-            $"{{\"title\":{JsonSerializer.Serialize title},\"status\":{status},\"code\":\"{code}\"}}",
-            "application/problem+json",
-            Encoding.UTF8,
-            status
-        )
+    type SnapshotResult =
+        | SnapshotAvailable of Snapshot
+        | SnapshotUnavailable
 
     let private setSessionCookie allowLocalHttp (randomBytes: int -> byte array) (context: HttpContext) =
         let existing = context.Request.Cookies[SessionCookieName]
@@ -720,237 +601,41 @@ module Stats =
                 | _ -> None
         }
 
-    let private tryReadContentId (context: HttpContext) (cancellationToken: CancellationToken) =
+    let readSnapshot (runtime: BrowserRuntime) (context: HttpContext) cancellationToken =
         task {
-            try
-                use! document = JsonDocument.ParseAsync(context.Request.Body, cancellationToken = cancellationToken)
-                let root = document.RootElement
+            let! current = runtime.Store.GetSnapshot cancellationToken
 
-                let properties =
-                    if root.ValueKind = JsonValueKind.Object then
-                        root.EnumerateObject() |> Seq.toList
-                    else
-                        []
+            return
+                match current with
+                | Some snapshot ->
+                    setSessionCookie runtime.AllowLocalHttpCookie runtime.RandomBytes context
+                    |> ignore
 
-                match properties with
-                | [ property ] when
-                    property.NameEquals("contentId")
-                    && property.Value.ValueKind = JsonValueKind.String
-                    ->
-                    let value = property.Value.GetString()
-
-                    match ContentDomain.ContentId.tryCreate "contentId" value with
-                    | Ok _ -> return Some value
-                    | Error _ -> return None
-                | _ -> return None
-            with :? JsonException ->
-                return None
+                    SnapshotAvailable snapshot
+                | None -> SnapshotUnavailable
         }
 
-    let private getStats
-        (store: Store)
-        (allowLocalHttp: bool)
-        (randomBytes: int -> byte array)
-        (context: HttpContext)
-        (cancellationToken: CancellationToken)
-        : Task<IResult> =
+    let recordView (runtime: BrowserRuntime) (context: HttpContext) (contentId: string) cancellationToken =
         task {
-            if not (sameOrigin context false) then
-                return
-                    problem
-                        context
-                        StatusCodes.Status403Forbidden
-                        "origin-mismatch"
-                        "The request origin is not allowed."
+            let! validMutation = Auth.validateMutation context
+
+            if not validMutation then
+                return InvalidContent
             else
-                let! current = store.GetSnapshot cancellationToken
+                match ContentDomain.ContentId.tryCreate "contentId" contentId with
+                | Error _ -> return InvalidContent
+                | Ok _ ->
+                    let sessionId =
+                        setSessionCookie runtime.AllowLocalHttpCookie runtime.RandomBytes context
 
-                return
-                    match current with
-                    | Some value ->
-                        setSessionCookie allowLocalHttp randomBytes context |> ignore
-                        context.Response.Headers.CacheControl <- "no-store"
-                        Results.Text(snapshotJson value, "application/json", Encoding.UTF8, StatusCodes.Status200OK)
-                    | None ->
-                        problem
-                            context
-                            StatusCodes.Status503ServiceUnavailable
-                            "stats-unavailable"
-                            "Statistics are unavailable."
-        }
-
-    let private postView
-        (store: Store)
-        (contentClient: ContentClient)
-        (allowLocalHttp: bool)
-        (randomBytes: int -> byte array)
-        (now: unit -> DateTimeOffset)
-        (context: HttpContext)
-        (cancellationToken: CancellationToken)
-        : Task<IResult> =
-        task {
-            if not (sameOrigin context true) then
-                return
-                    problem
-                        context
-                        StatusCodes.Status403Forbidden
-                        "origin-mismatch"
-                        "The request origin is not allowed."
-            else
-                let! contentId = tryReadContentId context cancellationToken
-
-                match contentId with
-                | None ->
-                    return
-                        problem
-                            context
-                            StatusCodes.Status400BadRequest
-                            "invalid-request"
-                            "The statistics request is invalid."
-                | Some validContentId ->
-                    let sessionId = setSessionCookie allowLocalHttp randomBytes context
-                    let! allowed = contentAllowlist contentClient cancellationToken
+                    let! allowed = contentAllowlist runtime.ContentClient cancellationToken
 
                     match allowed with
-                    | None ->
-                        return
-                            problem
-                                context
-                                StatusCodes.Status503ServiceUnavailable
-                                "stats-unavailable"
-                                "Statistics are unavailable."
+                    | None -> return Unavailable
                     | Some allowedIds ->
-                        let! result = store.RecordView(sessionId, validContentId, allowedIds, now (), cancellationToken)
-
-                        return
-                            match result with
-                            | Accepted value
-                            | Duplicate value ->
-                                context.Response.Headers.CacheControl <- "no-store"
-
-                                Results.Text(
-                                    snapshotJson value,
-                                    "application/json",
-                                    Encoding.UTF8,
-                                    StatusCodes.Status200OK
-                                )
-                            | RateLimited ->
-                                problem
-                                    context
-                                    StatusCodes.Status429TooManyRequests
-                                    "stats-rate-limited"
-                                    "Statistics submissions are rate limited."
-                            | InvalidContent ->
-                                problem
-                                    context
-                                    StatusCodes.Status400BadRequest
-                                    "invalid-content"
-                                    "The content identifier is not countable."
-                            | Unavailable ->
-                                problem
-                                    context
-                                    StatusCodes.Status503ServiceUnavailable
-                                    "stats-unavailable"
-                                    "Statistics are unavailable."
+                        return!
+                            runtime.Store.RecordView(sessionId, contentId, allowedIds, runtime.Now(), cancellationToken)
         }
-
-    let private events
-        (store: Store)
-        (allowLocalHttp: bool)
-        (randomBytes: int -> byte array)
-        (heartbeatInterval: TimeSpan)
-        (context: HttpContext)
-        (cancellationToken: CancellationToken)
-        : Task =
-        task {
-            if not (sameOrigin context false) then
-                context.Response.StatusCode <- StatusCodes.Status403Forbidden
-                context.Response.ContentType <- "application/problem+json"
-
-                do!
-                    context.Response.WriteAsync(
-                        "{\"title\":\"The request origin is not allowed.\",\"status\":403,\"code\":\"origin-mismatch\"}",
-                        cancellationToken
-                    )
-            else
-                match! store.Subscribe() with
-                | SubscriptionUnavailable
-                | SubscriptionStopped ->
-                    context.Response.StatusCode <- StatusCodes.Status503ServiceUnavailable
-                    context.Response.ContentType <- "application/problem+json"
-
-                    do!
-                        context.Response.WriteAsync(
-                            "{\"title\":\"Statistics are unavailable.\",\"status\":503,\"code\":\"stats-unavailable\"}",
-                            cancellationToken
-                        )
-                | Subscribed(reader, subscriptionId, initial) ->
-                    try
-                        setSessionCookie allowLocalHttp randomBytes context |> ignore
-                        context.Response.StatusCode <- StatusCodes.Status200OK
-                        context.Response.ContentType <- "text/event-stream"
-                        context.Response.Headers.CacheControl <- "no-store"
-                        context.Response.Headers.Append("X-Accel-Buffering", "no")
-
-                        try
-                            do! context.Response.WriteAsync("retry: 5000\n", cancellationToken)
-
-                            do! context.Response.WriteAsync($"data: {snapshotJson initial}\n\n", cancellationToken)
-
-                            do! context.Response.Body.FlushAsync(cancellationToken)
-                            let mutable connected = true
-
-                            while connected && not cancellationToken.IsCancellationRequested do
-                                let available = reader.WaitToReadAsync(cancellationToken).AsTask()
-                                let heartbeat = Task.Delay(heartbeatInterval, cancellationToken)
-                                let! completed = Task.WhenAny(available, heartbeat)
-
-                                if Object.ReferenceEquals(completed, heartbeat) then
-                                    do! context.Response.WriteAsync(": heartbeat\n\n", cancellationToken)
-                                    do! context.Response.Body.FlushAsync(cancellationToken)
-                                elif available.Result then
-                                    let mutable payload = Unchecked.defaultof<string>
-
-                                    while reader.TryRead(&payload) do
-                                        do! context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken)
-
-                                    do! context.Response.Body.FlushAsync(cancellationToken)
-                                else
-                                    connected <- false
-                        with :? OperationCanceledException ->
-                            ()
-                    finally
-                        store.Unsubscribe subscriptionId
-        }
-        :> Task
-
-    let mapEndpoints
-        (routes: IEndpointRouteBuilder)
-        (store: Store)
-        (contentClient: ContentClient)
-        (allowLocalHttp: bool)
-        (randomBytes: int -> byte array)
-        (now: unit -> DateTimeOffset)
-        (heartbeatInterval: TimeSpan)
-        : unit =
-        let api = routes.MapGroup("/api/stats")
-
-        api.MapGet("", Func<HttpContext, CancellationToken, Task<IResult>>(getStats store allowLocalHttp randomBytes))
-        |> ignore
-
-        api.MapPost(
-            "/view",
-            Func<HttpContext, CancellationToken, Task<IResult>>(
-                postView store contentClient allowLocalHttp randomBytes now
-            )
-        )
-        |> ignore
-
-        api.MapGet(
-            "/events",
-            Func<HttpContext, CancellationToken, Task>(events store allowLocalHttp randomBytes heartbeatInterval)
-        )
-        |> ignore
 
     let createStore (configuration: IConfiguration) (now: unit -> DateTimeOffset) =
         let configuredPath = configuration["Stats:DataPath"]

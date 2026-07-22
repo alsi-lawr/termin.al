@@ -272,29 +272,6 @@ module Cv =
         | Auth.Anonymous
         | Auth.GitHubViewer _ -> false
 
-    let private tryReadKeyRequest (context: HttpContext) =
-        task {
-            try
-                use! document =
-                    JsonDocument.ParseAsync(context.Request.Body, cancellationToken = context.RequestAborted)
-
-                let root = document.RootElement
-                let mutable key = Unchecked.defaultof<JsonElement>
-
-                if root.ValueKind = JsonValueKind.Object && root.TryGetProperty("key", &key) then
-                    let value = key.GetString()
-
-                    if not (isNull value) && value.Length >= 32 && value.Length <= 256 then
-                        return Some value
-                    else
-                        return None
-                else
-                    return None
-            with
-            | :? JsonException
-            | :? InvalidOperationException -> return None
-        }
-
     let private readCv path =
         task {
             let bytes = Array.zeroCreate<byte> (maximumCvBytes + 1)
@@ -328,98 +305,95 @@ module Cv =
                 CryptographicOperations.ZeroMemory(bytes)
         }
 
-    let private mapUnlock (application: WebApplication) =
-        application.MapPost(
-            "/api/auth/cv",
-            Func<HttpContext, Task<IResult>>(fun context ->
-                task {
-                    context.Response.Headers.CacheControl <- "no-store"
-                    let state = runtime context
-                    let! validMutation = Auth.validateMutation context
+    type AccessResult =
+        | Changed
+        | Rejected
+        | RateLimited
+        | Unavailable
 
-                    if not validMutation || not state.KeyRingReady then
-                        return genericProblem StatusCodes.Status400BadRequest
-                    else
-                        match state.ViewerHash with
-                        | None -> return genericProblem StatusCodes.Status503ServiceUnavailable
-                        | Some configured ->
-                            let attempt = attemptId context
+    type DocumentResult =
+        | Available of string
+        | Locked
+        | DocumentUnavailable
 
-                            if throttled context attempt then
-                                return genericProblem StatusCodes.Status429TooManyRequests
+    let unlock (context: HttpContext) (key: string) =
+        task {
+            context.Response.Headers.CacheControl <- "no-store, no-cache"
+            let! validMutation = Auth.validateMutation context
+
+            if not validMutation then
+                return Rejected
+            else
+                let state = runtime context
+
+                if not state.KeyRingReady then
+                    return Unavailable
+                else
+                    match state.ViewerHash with
+                    | None -> return Unavailable
+                    | Some configured ->
+                        let attempt = attemptId context
+
+                        if throttled context attempt then
+                            return RateLimited
+                        elif isNull key || key.Length < 32 || key.Length > 256 then
+                            if recordFailure context attempt then
+                                return RateLimited
                             else
-                                let! request = tryReadKeyRequest context
-
-                                let accepted =
-                                    match request with
-                                    | Some key ->
-                                        let actual = derive key configured.Salt
-
-                                        try
-                                            CryptographicOperations.FixedTimeEquals(actual, configured.DerivedKey)
-                                        finally
-                                            CryptographicOperations.ZeroMemory(actual)
-                                    | None -> false
-
-                                if not accepted then
-                                    if recordFailure context attempt then
-                                        return genericProblem StatusCodes.Status429TooManyRequests
-                                    else
-                                        return genericProblem StatusCodes.Status403Forbidden
-                                else
-                                    clearAttempt context attempt
-
-                                    Auth.currentSession context
-                                    |> fun session -> withCvFingerprint session configured.Fingerprint
-                                    |> Auth.setSession context
-
-                                    return Results.NoContent()
-                })
-        )
-        |> ignore
-
-    let private mapLock (application: WebApplication) =
-        application.MapDelete(
-            "/api/auth/cv",
-            Func<HttpContext, Task<IResult>>(fun context ->
-                task {
-                    context.Response.Headers.CacheControl <- "no-store"
-                    let! validMutation = Auth.validateMutation context
-
-                    if not validMutation then
-                        return genericProblem StatusCodes.Status400BadRequest
-                    else
-                        Auth.currentSession context |> withoutCv |> Auth.setSession context
-                        return Results.NoContent()
-                })
-        )
-        |> ignore
-
-    let private mapRead (application: WebApplication) =
-        application.MapGet(
-            "/api/cv",
-            Func<HttpContext, Task<IResult>>(fun context ->
-                task {
-                    context.Response.Headers.CacheControl <- "no-store"
-                    let state = runtime context
-
-                    match state.KeyRingReady, state.ViewerHash with
-                    | false, _
-                    | _, None -> return genericProblem StatusCodes.Status503ServiceUnavailable
-                    | true, Some configured ->
-                        let! session = Auth.resolveSession context
-
-                        if not (hasCvAccess session configured.Fingerprint) then
-                            return genericProblem StatusCodes.Status403Forbidden
+                                return Rejected
                         else
-                            let! content = readCv state.CvPath
+                            let actual = derive key configured.Salt
 
-                            match content with
-                            | Some markdown -> return Results.Text(markdown, "text/markdown", Encoding.UTF8)
-                            | None -> return genericProblem StatusCodes.Status503ServiceUnavailable
-                })
-        )
-        |> ignore
+                            let accepted =
+                                try
+                                    CryptographicOperations.FixedTimeEquals(actual, configured.DerivedKey)
+                                finally
+                                    CryptographicOperations.ZeroMemory(actual)
+
+                            if not accepted then
+                                if recordFailure context attempt then
+                                    return RateLimited
+                                else
+                                    return Rejected
+                            else
+                                clearAttempt context attempt
+
+                                Auth.currentSession context
+                                |> fun session -> withCvFingerprint session configured.Fingerprint
+                                |> Auth.setSession context
+
+                                return Changed
+        }
+
+    let lock (context: HttpContext) =
+        task {
+            context.Response.Headers.CacheControl <- "no-store, no-cache"
+            let! validMutation = Auth.validateMutation context
+
+            if not validMutation then
+                return Rejected
+            else
+                Auth.currentSession context |> withoutCv |> Auth.setSession context
+                return Changed
+        }
+
+    let read (context: HttpContext) =
+        task {
+            context.Response.Headers.CacheControl <- "no-store, no-cache"
+            let state = runtime context
+
+            match state.KeyRingReady, state.ViewerHash with
+            | false, _
+            | _, None -> return DocumentUnavailable
+            | true, Some configured ->
+                let! session = Auth.resolveSession context
+
+                if not (hasCvAccess session configured.Fingerprint) then
+                    return Locked
+                else
+                    let! content = readCv state.CvPath
+                    return content |> Option.map Available |> Option.defaultValue DocumentUnavailable
+        }
 
     let configureServices
         (services: IServiceCollection)
@@ -447,8 +421,3 @@ module Cv =
               GlobalWindow = { StartedAt = now (); Failures = 0 } }
         )
         |> ignore
-
-    let mapEndpoints application =
-        mapUnlock application
-        mapLock application
-        mapRead application

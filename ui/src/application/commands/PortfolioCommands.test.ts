@@ -369,18 +369,18 @@ test("builds blog and note listings with document-open data", async () => {
     assert.deepEqual(
       blogEntries.map((entry) => ({
         title: entry.title,
-        publishedAt: entry.metadata,
+        updatedAt: entry.metadata,
         tags: entry.tags,
       })),
       [
         {
           title: "Deterministic Demos",
-          publishedAt: "2026-01-12",
+          updatedAt: "2026-01-12",
           tags: ["demo", "offline"],
         },
         {
           title: "Stable Interfaces",
-          publishedAt: "2026-01-05",
+          updatedAt: "2026-01-05",
           tags: ["typescript", "interfaces"],
         },
       ],
@@ -475,7 +475,7 @@ test("bounds recursive publication loading at the existing traversal limit", asy
           slug: handle,
           title: handle,
           summary: `Summary for ${handle}`,
-          publishedAt: createVirtualTimestamp(timestamp),
+          updatedAt: createVirtualTimestamp(timestamp),
           tags: [],
         },
       });

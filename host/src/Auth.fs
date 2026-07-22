@@ -729,23 +729,6 @@ module Auth =
         )
         |> ignore
 
-    let private mapLogout (application: WebApplication) =
-        application.MapPost(
-            "/api/auth/logout",
-            Func<HttpContext, Task<IResult>>(fun context ->
-                task {
-                    context.Response.Headers.CacheControl <- "no-store"
-                    let! valid = validateMutation context
-
-                    if not valid then
-                        return genericProblem StatusCodes.Status400BadRequest
-                    else
-                        clearSession context
-                        return Results.NoContent()
-                })
-        )
-        |> ignore
-
     let configureServices
         (services: IServiceCollection)
         (configuration: IConfiguration)
@@ -804,9 +787,8 @@ module Auth =
         )
         |> ignore
 
-    let mapEndpoints (application: WebApplication) =
+    let mapOAuthEndpoints (application: WebApplication) =
         mapStart application
         mapCallback application
-        mapLogout application
 
     let randomBytes length = RandomNumberGenerator.GetBytes(length)

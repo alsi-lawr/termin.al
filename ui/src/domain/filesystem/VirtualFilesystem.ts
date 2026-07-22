@@ -225,7 +225,7 @@ export type VirtualDocumentClassification =
       slug: string;
       title: string;
       summary: string;
-      publishedAt: VirtualTimestamp;
+      updatedAt: VirtualTimestamp;
       tags: ReadonlyArray<string>;
     }>;
 

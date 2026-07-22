@@ -386,7 +386,7 @@ function publicationLeaf(rootPath: string, {
       title: publication.title,
       path: relativePath,
       summary: publication.summary,
-      metadata: publication.publishedAt.slice(0, 10),
+      metadata: publication.updatedAt.slice(0, 10),
       repositoryUrl: undefined,
       tags: publication.tags,
       documentTitle: publication.title,
@@ -540,8 +540,8 @@ async function openTarget(
         documentPublicationKind === "blog" ? "blog" : "notes";
       const leaves = [...loaded.documents]
         .sort((left, right) =>
-          right.publication.publishedAt.localeCompare(
-            left.publication.publishedAt,
+          right.publication.updatedAt.localeCompare(
+            left.publication.updatedAt,
           ),
         )
         .map((entry) => publicationLeaf(resolution.node.path, entry));

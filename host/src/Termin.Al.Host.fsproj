@@ -6,14 +6,13 @@
 
   <ItemGroup>
     <Compile Include="ContentDomain.fs" />
-    <Compile Include="ContentWire.fs" />
     <Compile Include="ContentClient.fs" />
     <Compile Include="GitHubContentClient.fs" />
-    <Compile Include="Stats.fs" />
+    <Compile Include="ContentCacheRefresh.fs" />
     <Compile Include="Auth.fs" />
+    <Compile Include="Stats.fs" />
     <Compile Include="Cv.fs" />
     <Compile Include="BrowserGrpc.fs" />
-    <Compile Include="Api.fs" />
     <Compile Include="HostApplication.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>

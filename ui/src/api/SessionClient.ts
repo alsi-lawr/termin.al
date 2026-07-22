@@ -1,5 +1,6 @@
 import { apiPathPrefix } from "./ApiPath.ts";
 import {
+  type EmptyRequest,
   SessionKind,
   type SessionResponse,
 } from "../generated/browser/browser.ts";
@@ -137,6 +138,10 @@ type SessionRpcClient = Readonly<{
     request: Readonly<Record<string, never>>,
     options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
   ) => Readonly<{ response: Promise<SessionResponse> }>;
+  logout: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<EmptyRequest> }>;
 }>;
 
 async function readEnvelope(
@@ -155,8 +160,8 @@ async function readEnvelope(
 
     return parsed;
   } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
+    if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+      throw new DOMException("The operation was aborted.", "AbortError");
     }
 
     return { kind: "invalid" };
@@ -251,21 +256,15 @@ export class HttpSessionClient implements SessionClient {
     }
 
     try {
-      const response = await fetch(`${apiPathPrefix}/auth/logout`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "X-CSRF-TOKEN": current.envelope.csrfToken },
-        signal,
-      });
-
-      if (!response.ok) {
-        return authenticationFailed;
-      }
+      await this.client.logout(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
 
       return { kind: "available", session: { kind: "anonymous" } };
     } catch (error: unknown) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw error;
+      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new DOMException("The operation was aborted.", "AbortError");
       }
 
       return authenticationFailed;

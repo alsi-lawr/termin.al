@@ -16,6 +16,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Google.Protobuf
+open Grpc.Core
 open Termin.Al.Contracts.V1
 open Termin.Al.Host
 
@@ -147,6 +148,97 @@ module Program =
         |> Seq.map (fun pair -> pair.Key, Seq.toList pair.Value)
         |> Map.ofSeq
 
+    let private grpcWebUnaryMessage
+        (client: HttpClient)
+        (path: string)
+        (headers: (string * string) list)
+        (message: IMessage)
+        (parser: MessageParser<'response>)
+        =
+        let payload = message.ToByteArray()
+        let frame = Array.zeroCreate<byte> (payload.Length + 5)
+        frame[1] <- byte (payload.Length >>> 24)
+        frame[2] <- byte (payload.Length >>> 16)
+        frame[3] <- byte (payload.Length >>> 8)
+        frame[4] <- byte payload.Length
+        Array.Copy(payload, 0, frame, 5, payload.Length)
+        use request = new HttpRequestMessage(HttpMethod.Post, path)
+        request.Headers.Add("X-Grpc-Web", "1")
+
+        for name, value in headers do
+            request.Headers.Add(name, value)
+
+        request.Content <- new ByteArrayContent(frame)
+
+        request.Content.Headers.ContentType <-
+            System.Net.Http.Headers.MediaTypeHeaderValue("application/grpc-web+proto")
+
+        use response = client.Send(request)
+        let bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+
+        if bytes.Length < 5 || bytes[0] <> 0uy then
+            failwith "Expected a binary gRPC-Web unary data frame."
+
+        let length =
+            (int bytes[1] <<< 24)
+            ||| (int bytes[2] <<< 16)
+            ||| (int bytes[3] <<< 8)
+            ||| int bytes[4]
+
+        parser.ParseFrom(bytes[5 .. 4 + length])
+
+    let private grpcWebFailureStatus
+        (client: HttpClient)
+        (path: string)
+        (headers: (string * string) list)
+        (message: IMessage)
+        =
+        let payload = message.ToByteArray()
+        let frame = Array.zeroCreate<byte> (payload.Length + 5)
+        frame[1] <- byte (payload.Length >>> 24)
+        frame[2] <- byte (payload.Length >>> 16)
+        frame[3] <- byte (payload.Length >>> 8)
+        frame[4] <- byte payload.Length
+        Array.Copy(payload, 0, frame, 5, payload.Length)
+        use request = new HttpRequestMessage(HttpMethod.Post, path)
+        request.Headers.Add("X-Grpc-Web", "1")
+
+        for name, value in headers do
+            request.Headers.Add(name, value)
+
+        request.Content <- new ByteArrayContent(frame)
+
+        request.Content.Headers.ContentType <-
+            System.Net.Http.Headers.MediaTypeHeaderValue("application/grpc-web+proto")
+
+        use response = client.Send(request)
+        let headerStatus =
+            [ response.Headers :> seq<_>
+              response.TrailingHeaders :> seq<_>
+              response.Content.Headers :> seq<_> ]
+            |> Seq.concat
+            |> Seq.tryPick (fun header ->
+                if String.Equals(header.Key, "grpc-status", StringComparison.OrdinalIgnoreCase) then
+                    header.Value |> Seq.tryHead |> Option.map Int32.Parse
+                else
+                    None)
+
+        let bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        let text = Encoding.ASCII.GetString(bytes)
+        let matched =
+            Text.RegularExpressions.Regex.Match(
+                text,
+                "grpc-status:\\s*(?<status>[0-9]+)",
+                Text.RegularExpressions.RegexOptions.IgnoreCase
+            )
+
+        match headerStatus with
+        | Some status -> status
+        | None when matched.Success ->
+            Int32.Parse(matched.Groups["status"].Value)
+        | None ->
+            failwithf "Expected a failed gRPC-Web trailer status in %A." bytes
+
     let private assertProblem (response: HttpResponseMessage) expectedStatus expectedCode =
         if response.StatusCode <> expectedStatus then
             failwithf "Expected API response %O, but received %O." expectedStatus response.StatusCode
@@ -166,14 +258,15 @@ module Program =
         if not (body.Contains($"\"code\":\"{expectedCode}\"", StringComparison.Ordinal)) then
             failwithf "Expected problem code '%s', but received %s." expectedCode body
 
-    let private catalogWithCacheState cacheState =
-        let requireValid (result: ContentDomain.ValidationResult<'value>) : 'value =
-            match result with
-            | Ok value -> value
-            | Error failure -> failwithf "%s: %s" failure.Field failure.Message
+    let private requireValid (result: ContentDomain.ValidationResult<'value>) : 'value =
+        match result with
+        | Ok value -> value
+        | Error failure -> failwithf "%s: %s" failure.Field failure.Message
 
-        let timestamp value =
-            ContentDomain.Timestamp.tryCreate "test.timestamp" value |> requireValid
+    let private timestamp value =
+        ContentDomain.Timestamp.tryCreate "test.timestamp" value |> requireValid
+
+    let private catalogWithCacheState cacheState =
 
         let source =
             ContentDomain.ContentSource.create
@@ -243,6 +336,39 @@ module Program =
     let private freshContentClient () =
         contentClientWithCacheState ContentDomain.Fresh
 
+    let private changelogContentClient () : ContentClient =
+        let catalog = catalogWithCacheState ContentDomain.Fresh
+        let publishedAt = timestamp "2026-07-14T09:30:00.000Z"
+
+        let release =
+            ContentDomain.Release.tryCreate
+                (ContentDomain.ContentTag.tryCreate "test.tag" "v1.0.0" |> requireValid)
+                (ContentDomain.ContentTitle.tryCreate "test.name" "Version 1.0.0" |> requireValid)
+                publishedAt
+                "Release body"
+                (ContentDomain.ContentUrl.tryCreate "test.url" "https://github.com/example/repository/releases/v1.0.0"
+                 |> requireValid)
+                []
+            |> requireValid
+
+        let changelog =
+            ContentDomain.Changelog.tryCreate
+                (ContentDomain.Catalog.source catalog)
+                (ContentDomain.Catalog.cache catalog)
+                []
+                [ release ]
+            |> requireValid
+
+        { new ContentClient with
+            member _.GetCatalog _ = Task.FromResult(Ok catalog)
+            member _.GetDocument(_, _) =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+            member _.GetProjects _ =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+            member _.GetNow _ =
+                Task.FromResult(Error(ContentDomain.Problem.create ContentDomain.NotFound "Missing."))
+            member _.GetChangelog _ = Task.FromResult(Ok changelog) }
+
     let private runHostContractChecks () =
         HostApplication.create [||]
         |> fun application ->
@@ -272,23 +398,23 @@ module Program =
                         "Expected conditional static GET to return 304 Not Modified, but received %O."
                         conditionalIndex.StatusCode
 
-                use removedCatalogEndpoint =
-                    client.GetAsync("/api/content/catalog").GetAwaiter().GetResult()
+                for path in
+                    [ "/api/session"
+                      "/api/content/catalog"
+                      "/api/content/document/about"
+                      "/api/content/projects"
+                      "/api/content/now"
+                      "/api/content/changelog"
+                      "/api/stats"
+                      "/api/stats/view"
+                      "/api/stats/events"
+                      "/api/auth/logout"
+                      "/api/auth/cv"
+                      "/api/cv" ] do
+                    use removed = client.GetAsync(path).GetAwaiter().GetResult()
 
-                assertProblem removedCatalogEndpoint HttpStatusCode.NotFound "not-found"
-
-                use removedSessionEndpoint =
-                    client.GetAsync("/api/session").GetAwaiter().GetResult()
-
-                assertProblem removedSessionEndpoint HttpStatusCode.NotFound "not-found"
-
-                use invalidDocument =
-                    client.GetAsync("/api/content/document/%21invalid").GetAwaiter().GetResult()
-
-                assertProblem invalidDocument HttpStatusCode.BadRequest "invalid-request"
-
-                use unknownApiRoute = client.GetAsync("/api/not-here").GetAwaiter().GetResult()
-                assertProblem unknownApiRoute HttpStatusCode.NotFound "not-found")
+                    if removed.StatusCode <> HttpStatusCode.NotFound then
+                        failwithf "Superseded application route %s must be absent." path)
 
     let private runAuthenticationContractChecks () =
         let now () =
@@ -303,7 +429,6 @@ module Program =
             true
             (fun length -> Array.zeroCreate<byte> length)
             now
-            (TimeSpan.FromSeconds(30.0))
         |> fun application ->
             withRunningHost application (fun client ->
                 let session, sessionHeaders =
@@ -345,26 +470,21 @@ module Program =
                 if not (unavailableBody.Contains("Authentication failed.", StringComparison.Ordinal)) then
                     failwith "Auth configuration failures must remain generic."
 
-                use logout = new HttpRequestMessage(HttpMethod.Post, "/api/auth/logout")
-                logout.Headers.Add(Auth.AntiforgeryHeaderName, csrfToken)
-                use rejectedLogout = client.Send(logout)
+                let rejectedLogout =
+                    grpcWebFailureStatus
+                        client
+                        "/terminal.v1.SessionApi/Logout"
+                        [ Auth.AntiforgeryHeaderName, csrfToken ]
+                        (EmptyRequest())
 
-                if rejectedLogout.StatusCode <> HttpStatusCode.BadRequest then
+                if rejectedLogout <> int StatusCode.InvalidArgument then
                     failwith "Logout without the exact configured Origin must be rejected."
 
-                use unavailableCv = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+                let unavailableCv =
+                    grpcWebFailureStatus client "/terminal.v1.CvApi/Read" [] (EmptyRequest())
 
-                if unavailableCv.StatusCode <> HttpStatusCode.ServiceUnavailable then
-                    failwith "Missing CV hash configuration must fail CV delivery closed."
-
-                if not unavailableCv.Headers.CacheControl.NoStore then
-                    failwith "CV responses must not be cached."
-
-                let unavailableCvBody =
-                    unavailableCv.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                if not (unavailableCvBody.Contains("CV access failed.", StringComparison.Ordinal)) then
-                    failwith "CV configuration failures must remain generic.")
+                if unavailableCv <> int StatusCode.Unavailable then
+                    failwith "Missing CV hash configuration must fail CV delivery closed.")
 
     let private runCvCryptographyChecks () =
         let generated = Cv.generateViewerKey ()
@@ -404,8 +524,20 @@ module Program =
         builder.Logging.AddProvider(new CapturingLoggerProvider(capturedLogs)) |> ignore
         let githubHandler = new GitHubHandler(now, expiredAccess)
         let githubClient = new HttpClient(githubHandler, true)
+        let statsStore = Stats.unavailableStore now
+        let contentClient = freshContentClient ()
 
         builder.Services.AddGrpc() |> ignore
+        builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+
+        let statsRuntime: Stats.BrowserRuntime =
+            { Store = statsStore
+              ContentClient = contentClient
+              AllowLocalHttpCookie = true
+              RandomBytes = Stats.randomBytes
+              Now = now }
+
+        builder.Services.AddSingleton<Stats.BrowserRuntime>(statsRuntime) |> ignore
         Auth.configureServices builder.Services builder.Configuration true githubClient now Auth.randomBytes
 
         Cv.configureServices
@@ -422,11 +554,56 @@ module Program =
         application.Lifetime.ApplicationStopping.Register(Action(githubClient.Dispose))
         |> ignore
 
+        application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
+        |> ignore
+
         application.UseGrpcWeb() |> ignore
-        Auth.mapEndpoints application
-        Cv.mapEndpoints application
+        Auth.mapOAuthEndpoints application
         application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<CvGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<StatisticsGrpcService>().EnableGrpcWeb() |> ignore
         application, githubHandler, capturedLogs
+
+    let private runMutationBoundaryChecks () =
+        let now () =
+            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+
+        let viewer = Cv.generateViewerKey ()
+
+        authenticationApplication (Some viewer.CanonicalHash) true false now Cv.SecretFilePath
+        |> fun (application, _, capturedLogs) ->
+            withRunningHost application (fun client ->
+                let session, _ =
+                    grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
+
+                let mutations: (string * IMessage * int) list =
+                    [ "/terminal.v1.SessionApi/Logout", EmptyRequest(), int StatusCode.InvalidArgument
+                      "/terminal.v1.CvApi/Unlock",
+                      UnlockCvRequest(Key = String('x', 32)),
+                      int StatusCode.PermissionDenied
+                      "/terminal.v1.CvApi/Lock", EmptyRequest(), int StatusCode.PermissionDenied
+                      "/terminal.v1.StatisticsApi/RecordView",
+                      RecordViewRequest(ContentId = "about"),
+                      int StatusCode.InvalidArgument ]
+
+                let rejectedHeaders =
+                    [ [ Auth.AntiforgeryHeaderName, session.CsrfToken ]
+                      [ "Origin", "https://wrong.example"
+                        Auth.AntiforgeryHeaderName, session.CsrfToken ]
+                      [ "Origin", "http://127.0.0.1" ]
+                      [ "Origin", "http://127.0.0.1"; Auth.AntiforgeryHeaderName, String('w', 32) ] ]
+
+                for path, request, expectedStatus in mutations do
+                    for headers in rejectedHeaders do
+                        let status = grpcWebFailureStatus client path headers request
+
+                        if status <> expectedStatus then
+                            failwithf "Mutation boundary %s accepted invalid Origin or antiforgery metadata." path)
+
+            let retained = String.Join("\n", capturedLogs)
+
+            if retained.Contains(String('w', 32), StringComparison.Ordinal) then
+                failwith "Rejected antiforgery metadata must not be logged."
 
     let private establishOwnerSession (client: HttpClient) =
         use start = client.GetAsync("/api/auth/github/start").GetAwaiter().GetResult()
@@ -453,24 +630,6 @@ module Program =
 
         [ callbackCode; state ]
 
-    let private assertGenericCvFailure (response: HttpResponseMessage) expectedStatus =
-        if response.StatusCode <> expectedStatus then
-            failwithf "Expected CV response %O, but received %O." expectedStatus response.StatusCode
-
-        if
-            isNull response.Headers.CacheControl
-            || not response.Headers.CacheControl.NoStore
-        then
-            failwith "Denied CV responses must not be cached."
-
-        let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-        if not (body.Contains("CV access failed.", StringComparison.Ordinal)) then
-            failwith "Denied CV responses must remain generic."
-
-        if body.Contains("private CV", StringComparison.OrdinalIgnoreCase) then
-            failwith "Denied CV responses must not contain CV bytes."
-
     let private runOwnerCvFailClosedChecks () =
         let now () =
             DateTimeOffset.Parse("2026-07-22T12:00:00Z")
@@ -481,33 +640,38 @@ module Program =
         |> fun (application, _, _) ->
             withRunningHost application (fun client ->
                 establishOwnerSession client |> ignore
-                use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
-                assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
+
+                let status =
+                    grpcWebFailureStatus client "/terminal.v1.CvApi/Read" [] (EmptyRequest())
+
+                if status <> int StatusCode.Unavailable then
+                    failwith "Unavailable CV storage must fail closed.")
 
         authenticationApplication (Some viewerHash) false false now Cv.SecretFilePath
         |> fun (application, _, _) ->
             withRunningHost application (fun client ->
                 establishOwnerSession client |> ignore
-                use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
-                assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
+
+                let status =
+                    grpcWebFailureStatus client "/terminal.v1.CvApi/Read" [] (EmptyRequest())
+
+                if status <> int StatusCode.Unavailable then
+                    failwith "Unavailable CV storage must fail closed.")
 
         let application, githubHandler, _ =
             authenticationApplication (Some viewerHash) true true now Cv.SecretFilePath
 
         withRunningHost application (fun client ->
             establishOwnerSession client |> ignore
-            use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
-            assertGenericCvFailure response HttpStatusCode.Forbidden
+
+            let status =
+                grpcWebFailureStatus client "/terminal.v1.CvApi/Read" [] (EmptyRequest())
+
+            if status <> int StatusCode.PermissionDenied then
+                failwith "Demoted owners must lose CV access."
 
             if githubHandler.RefreshAttempts <> 1 then
                 failwith "Expired owner CV access must attempt one token refresh."
-
-            let replacementCookie =
-                response.Headers.GetValues("Set-Cookie")
-                |> Seq.tryFind (fun value -> value.StartsWith(Auth.SessionCookieName + "=", StringComparison.Ordinal))
-
-            if replacementCookie.IsNone then
-                failwith "Failed owner refresh must emit the demoted replacement session."
 
             let session, _ =
                 grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
@@ -524,7 +688,7 @@ module Program =
         let cvPath = Path.GetTempFileName()
 
         try
-            File.WriteAllText(cvPath, cvBytes, Encoding.UTF8)
+            File.WriteAllText(cvPath, cvBytes, UTF8Encoding(false))
 
             let application, githubHandler, capturedLogs =
                 authenticationApplication (Some viewerKey.CanonicalHash) true false now cvPath
@@ -538,28 +702,20 @@ module Program =
                     grpcWebUnary client "/terminal.v1.SessionApi/ReadSession" [] SessionResponse.Parser
 
                 let csrfToken = session.CsrfToken
-                use unlock = new HttpRequestMessage(HttpMethod.Post, "/api/auth/cv")
-                unlock.Headers.Add("Origin", "http://127.0.0.1")
-                unlock.Headers.Add(Auth.AntiforgeryHeaderName, csrfToken)
 
-                unlock.Content <-
-                    new StringContent(
-                        JsonSerializer.Serialize({| key = viewerKey.Plaintext |}),
-                        Encoding.UTF8,
-                        "application/json"
-                    )
+                grpcWebUnaryMessage
+                    client
+                    "/terminal.v1.CvApi/Unlock"
+                    [ "Origin", "http://127.0.0.1"; Auth.AntiforgeryHeaderName, csrfToken ]
+                    (UnlockCvRequest(Key = viewerKey.Plaintext))
+                    EmptyRequest.Parser
+                |> ignore
 
-                use unlocked = client.Send(unlock)
+                let cv =
+                    grpcWebUnary client "/terminal.v1.CvApi/Read" [] CvDocumentResponse.Parser
+                    |> fst
 
-                if unlocked.StatusCode <> HttpStatusCode.NoContent then
-                    failwith "Expected logging contract CV unlock to succeed."
-
-                use cv = client.GetAsync("/api/cv").GetAwaiter().GetResult()
-
-                if cv.StatusCode <> HttpStatusCode.OK then
-                    failwith "Expected logging contract CV read to succeed."
-
-                if cv.Content.ReadAsStringAsync().GetAwaiter().GetResult() <> cvBytes then
+                if cv.Markdown <> cvBytes then
                     failwith "Expected logging contract CV bytes to reach the authorized caller.")
 
             let retained = String.Join("\n", capturedLogs)
@@ -635,6 +791,18 @@ module Program =
                 if response.Cache.State <> CacheState.Stale then
                     failwith "Stale content responses must serialize their stale cache state.")
 
+    let private runChangelogReleaseWireCheck () =
+        HostApplication.createWithContentClient [||] (changelogContentClient ())
+        |> fun application ->
+            withRunningHost application (fun client ->
+                let response, _ =
+                    grpcWebUnary client "/terminal.v1.ContentApi/ReadChangelog" [] ChangelogResponse.Parser
+
+                let release = response.Releases |> Seq.exactlyOne
+
+                if release.Tag <> "v1.0.0" || release.PublishedAt <> "2026-07-14T09:30:00.000Z" then
+                    failwithf "Changelog release chronology changed across the generated wire contract: %O." release)
+
     [<EntryPoint>]
     let main _ =
         try
@@ -643,10 +811,12 @@ module Program =
             runHostContractChecks ()
             runAuthenticationContractChecks ()
             runCvCryptographyChecks ()
+            runMutationBoundaryChecks ()
             runOwnerCvFailClosedChecks ()
             runSensitiveLoggingChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
+            runChangelogReleaseWireCheck ()
             0
         with error ->
             eprintfn "Host health check failed: %s" error.Message

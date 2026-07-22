@@ -514,22 +514,19 @@ module ContentDomain =
             { Kind: PublicationKind
               Slug: ContentSlug
               Summary: ContentSummary
-              PublishedAt: Timestamp
               Tags: ContentTag list }
 
     [<RequireQualifiedAccess>]
     module PublicationMetadata =
-        let create kind slug summary publishedAt tags =
+        let create kind slug summary tags =
             { Kind = kind
               Slug = slug
               Summary = summary
-              PublishedAt = publishedAt
               Tags = tags }
 
         let kind metadata = metadata.Kind
         let slug metadata = metadata.Slug
         let summary metadata = metadata.Summary
-        let publishedAt metadata = metadata.PublishedAt
         let tags metadata = metadata.Tags
 
     [<RequireQualifiedAccess>]
@@ -548,54 +545,72 @@ module ContentDomain =
             | PagePath
             | PublicationPath of PublicationKind * ContentSlug
 
-        let private tryProperty (name: string) (element: JsonElement) =
-            element.EnumerateObject()
-            |> Seq.tryFind (fun (property: JsonProperty) -> property.NameEquals(name))
-            |> Option.map (fun property -> property.Value)
+        let private parseFields (value: string) : ValidationResult<Map<string, string>> =
+            let lines = value.Split([| '\n' |], StringSplitOptions.None)
 
-        let private validateProperties allowed (element: JsonElement) : ValidationResult<unit> =
-            if element.ValueKind <> JsonValueKind.Object then
-                invalid "frontmatter" "Front matter JSON must be an object."
-            else
-                let names =
-                    element.EnumerateObject()
-                    |> Seq.map (fun property -> property.Name)
-                    |> Seq.toList
+            let rec parse pending fields =
+                match pending with
+                | [] -> Ok fields
+                | line :: remaining when String.IsNullOrWhiteSpace line -> parse remaining fields
+                | line :: remaining ->
+                    let separator = line.IndexOf('=')
 
-                if names |> Set.ofList |> Set.count <> List.length names then
-                    invalid "frontmatter" "Front matter fields must not be duplicated."
-                elif names |> List.exists (fun name -> not (Set.contains name allowed)) then
-                    invalid "frontmatter" "Front matter contains an unsupported field."
-                else
-                    Ok()
-
-        let private tryString name (element: JsonElement) : ValidationResult<string> =
-            match tryProperty name element with
-            | Some property when property.ValueKind = JsonValueKind.String -> Ok(property.GetString())
-            | _ -> invalid $"frontmatter.{name}" $"Front matter field '{name}' must be a string."
-
-        let private tryTags (element: JsonElement) : ValidationResult<ContentTag list> =
-            match tryProperty "tags" element with
-            | Some property when property.ValueKind = JsonValueKind.Array ->
-                let rec validate (pending: JsonElement list) (accumulated: ContentTag list) =
-                    match pending with
-                    | [] -> Ok(List.rev accumulated)
-                    | value :: remaining when value.ValueKind = JsonValueKind.String ->
-                        ContentTag.tryCreate "frontmatter.tags" (value.GetString())
-                        |> Result.bind (fun tag -> validate remaining (tag :: accumulated))
-                    | _ -> invalid "frontmatter.tags" "Front matter tags must be strings."
-
-                property.EnumerateArray()
-                |> Seq.toList
-                |> fun values -> validate values []
-                |> Result.bind (fun tags ->
-                    let values = tags |> List.map ContentTag.value
-
-                    if values |> Set.ofList |> Set.count <> List.length values then
-                        invalid "frontmatter.tags" "Front matter tags must not contain duplicates."
+                    if separator <= 0 then
+                        invalid "frontmatter" "Front matter fields must use key = value syntax."
                     else
-                        Ok tags)
-            | _ -> invalid "frontmatter.tags" "Front matter tags must be an array."
+                        let name = line.Substring(0, separator).Trim()
+                        let fieldValue = line.Substring(separator + 1).Trim()
+
+                        if name <> "title" && name <> "summary" && name <> "tags" then
+                            invalid "frontmatter" "Front matter contains an unsupported field."
+                        elif Map.containsKey name fields then
+                            invalid "frontmatter" "Front matter fields must not be duplicated."
+                        else
+                            parse remaining (Map.add name fieldValue fields)
+
+            parse (Array.toList lines) Map.empty
+
+        let private tryString (name: string) (fields: Map<string, string>) : ValidationResult<string> =
+            match Map.tryFind name fields with
+            | None -> invalid $"frontmatter.{name}" $"Front matter field '{name}' is required."
+            | Some value ->
+                try
+                    match JsonSerializer.Deserialize<string>(value) with
+                    | null -> invalid $"frontmatter.{name}" $"Front matter field '{name}' must be a quoted string."
+                    | parsed -> Ok parsed
+                with :? JsonException ->
+                    invalid $"frontmatter.{name}" $"Front matter field '{name}' must be a quoted string."
+
+        let private tryTags (fields: Map<string, string>) : ValidationResult<ContentTag list> =
+            match Map.tryFind "tags" fields with
+            | None -> invalid "frontmatter.tags" "Front matter field 'tags' is required."
+            | Some value ->
+                try
+                    use document = JsonDocument.Parse value
+
+                    if document.RootElement.ValueKind <> JsonValueKind.Array then
+                        invalid "frontmatter.tags" "Front matter tags must be an array of quoted strings."
+                    else
+                        let rec validate pending accumulated =
+                            match pending with
+                            | [] -> Ok(List.rev accumulated)
+                            | (candidate: JsonElement) :: remaining when candidate.ValueKind = JsonValueKind.String ->
+                                ContentTag.tryCreate "frontmatter.tags" (candidate.GetString())
+                                |> Result.bind (fun tag -> validate remaining (tag :: accumulated))
+                            | _ -> invalid "frontmatter.tags" "Front matter tags must be quoted strings."
+
+                        document.RootElement.EnumerateArray()
+                        |> Seq.toList
+                        |> fun values -> validate values []
+                        |> Result.bind (fun tags ->
+                            let values = tags |> List.map ContentTag.value
+
+                            if values |> Set.ofList |> Set.count <> List.length values then
+                                invalid "frontmatter.tags" "Front matter tags must not contain duplicates."
+                            else
+                                Ok tags)
+                with :? JsonException ->
+                    invalid "frontmatter.tags" "Front matter tags must be an array of quoted strings."
 
         let private documentPathKind (path: RepositoryPath) : ValidationResult<DocumentPathKind> =
             let value = RepositoryPath.value path
@@ -603,12 +618,9 @@ module ContentDomain =
             let publicationPath directory kind =
                 let prefix = directory + "/"
                 let relativePath = value.Substring(prefix.Length)
-                let fileName =
-                    relativePath.Substring(relativePath.LastIndexOf('/') + 1)
+                let fileName = relativePath.Substring(relativePath.LastIndexOf('/') + 1)
 
-                if
-                    not (fileName.EndsWith(".md", StringComparison.Ordinal))
-                then
+                if not (fileName.EndsWith(".md", StringComparison.Ordinal)) then
                     invalid "document.path" $"{directory} documents must end with a canonical slug.md path."
                 else
                     fileName.Substring(0, fileName.Length - 3)
@@ -622,42 +634,34 @@ module ContentDomain =
             else
                 Ok PagePath
 
-        let private parseJsonMetadata
+        let private parseMetadata
             (path: RepositoryPath)
             (value: string)
             : ValidationResult<ContentTitle * ContentDocumentMetadata> =
-            try
-                use document = JsonDocument.Parse value
-                let root = document.RootElement
-
+            parseFields value
+            |> Result.bind (fun fields ->
                 documentPathKind path
                 |> Result.bind (fun pathKind ->
                     match pathKind with
                     | PagePath ->
-                        validateProperties (Set.ofList [ "title" ]) root
-                        |> Result.bind (fun () ->
-                            tryString "title" root
+                        if fields |> Map.toSeq |> Seq.exists (fun (name, _) -> name <> "title") then
+                            invalid "frontmatter" "Page front matter contains an unsupported field."
+                        else
+                            tryString "title" fields
                             |> Result.bind (ContentTitle.tryCreate "frontmatter.title")
-                            |> Result.map (fun title -> title, ContentDocumentMetadata.Page))
+                            |> Result.map (fun title -> title, ContentDocumentMetadata.Page)
                     | PublicationPath(kind, slug) ->
-                        validateProperties (Set.ofList [ "title"; "summary"; "publishedAt"; "tags" ]) root
-                        |> Result.bind (fun () ->
-                            tryString "title" root
-                            |> Result.bind (ContentTitle.tryCreate "frontmatter.title")
-                            |> Result.bind (fun title ->
-                                tryString "summary" root
-                                |> Result.bind (ContentSummary.tryCreate "frontmatter.summary")
-                                |> Result.bind (fun summary ->
-                                    tryString "publishedAt" root
-                                    |> Result.bind (Timestamp.tryCreate "frontmatter.publishedAt")
-                                    |> Result.bind (fun publishedAt ->
-                                        tryTags root
-                                        |> Result.map (fun tags ->
-                                            title,
-                                            PublicationMetadata.create kind slug summary publishedAt tags
-                                            |> ContentDocumentMetadata.Publication))))))
-            with :? JsonException ->
-                invalid "frontmatter" "Front matter must be valid JSON."
+                        tryString "title" fields
+                        |> Result.bind (ContentTitle.tryCreate "frontmatter.title")
+                        |> Result.bind (fun title ->
+                            tryString "summary" fields
+                            |> Result.bind (ContentSummary.tryCreate "frontmatter.summary")
+                            |> Result.bind (fun summary ->
+                                tryTags fields
+                                |> Result.map (fun tags ->
+                                    title,
+                                    PublicationMetadata.create kind slug summary tags
+                                    |> ContentDocumentMetadata.Publication)))))
 
         let tryParse (path: RepositoryPath) (markdown: string) : ValidationResult<ParsedFrontMatter> =
             if
@@ -681,7 +685,7 @@ module ContentDomain =
                         let metadata = lines.[1 .. closing - 1] |> String.concat "\n"
                         let body = lines.[closing + 1 ..] |> String.concat "\n"
 
-                        parseJsonMetadata path metadata
+                        parseMetadata path metadata
                         |> Result.bind (fun (title, parsedMetadata) ->
                             MarkdownBody.tryCreate "document.body" body
                             |> Result.map (fun validBody ->
@@ -902,7 +906,16 @@ module ContentDomain =
 
         let private tryProject (element: JsonElement) : ValidationResult<Project> =
             let allowed =
-                Set.ofList [ "id"; "slug"; "name"; "summary"; "url"; "repository"; "collectionPath"; "updatedAt"; "tags" ]
+                Set.ofList
+                    [ "id"
+                      "slug"
+                      "name"
+                      "summary"
+                      "url"
+                      "repository"
+                      "collectionPath"
+                      "updatedAt"
+                      "tags" ]
 
             if element.ValueKind <> JsonValueKind.Object then
                 invalid "projects" "Each project manifest entry must be an object."

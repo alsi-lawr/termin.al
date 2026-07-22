@@ -1,4 +1,13 @@
-import { apiPathPrefix } from "./ApiPath.ts";
+import { RpcError, type RpcMetadata } from "@protobuf-ts/runtime-rpc";
+import {
+  StatsStorageState,
+  type StatsSnapshot as StatsSnapshotMessage,
+} from "../generated/browser/browser.ts";
+import { StatisticsApiClient } from "../generated/browser/browser.client.ts";
+import {
+  BrowserGrpcContext,
+  createBrowserGrpcTransport,
+} from "./BrowserGrpcContext.ts";
 import { ContentId, type ContentValidation } from "./ContentContracts.ts";
 
 export type StatsValidation<Value> = ContentValidation<Value>;
@@ -35,12 +44,12 @@ export type StatsRecordResult =
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "failed"; message: string }>;
 
-export type StatsStreamEvent =
+export type StatsPollEvent =
   | Readonly<{ kind: "snapshot"; snapshot: StatsSnapshot }>
-  | Readonly<{ kind: "disconnected" }>
+  | Readonly<{ kind: "unavailable" }>
   | Readonly<{ kind: "invalid" }>;
 
-export type StatsSubscription = Readonly<{
+export type StatsPolling = Readonly<{
   close: () => void;
 }>;
 
@@ -50,23 +59,30 @@ export type StatsClient = Readonly<{
     contentId: ContentId,
     signal: AbortSignal,
   ) => Promise<StatsRecordResult>;
-  subscribe: (listener: (event: StatsStreamEvent) => void) => StatsSubscription;
+  startPolling: (listener: (event: StatsPollEvent) => void) => StatsPolling;
 }>;
 
-type StatsEventSource = {
-  onmessage: ((event: MessageEvent<string>) => void) | null;
-  onerror: ((event: Event) => void) | null;
-  close: () => void;
+type StatsRpcClient = Readonly<{
+  readSnapshot: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<StatsSnapshotMessage> }>;
+  recordView: (
+    request: Readonly<{ contentId: string }>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<StatsSnapshotMessage> }>;
+}>;
+
+type PollScheduler = Readonly<{
+  set: (callback: () => void, milliseconds: number) => ReturnType<typeof setTimeout>;
+  clear: (timer: ReturnType<typeof setTimeout>) => void;
+}>;
+
+const pollIntervalMilliseconds = 30_000;
+const liveScheduler: PollScheduler = {
+  set: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+  clear: (timer) => globalThis.clearTimeout(timer),
 };
-
-export type HttpStatsClientDependencies = Readonly<{
-  fetch: typeof fetch;
-  openEventSource: (path: string) => StatsEventSource;
-}>;
-
-function statsApiPath(path: string): string {
-  return `${apiPathPrefix}/stats${path}`;
-}
 
 function isAbortError(value: unknown): boolean {
   return value instanceof Error && value.name === "AbortError";
@@ -220,53 +236,69 @@ export function validateStatsSnapshot(
   };
 }
 
-type ResponsePayload =
-  | Readonly<{ kind: "payload"; value: unknown }>
-  | Readonly<{ kind: "invalid" }>;
-
-async function responsePayload(response: Response): Promise<ResponsePayload> {
-  try {
-    return { kind: "payload", value: await response.json() };
-  } catch {
-    return { kind: "invalid" };
-  }
+function safeCount(value: bigint): number | undefined {
+  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : undefined;
 }
 
-const liveDependencies: HttpStatsClientDependencies = {
-  fetch: (input, init) => globalThis.fetch(input, init),
-  openEventSource: (path) => new EventSource(path),
-};
+function decodedSnapshot(message: StatsSnapshotMessage): StatsValidation<StatsSnapshot> {
+  const pageViewsByContent: Record<string, number> = {};
+
+  for (const count of message.pageViewsByContent) {
+    const pageViews = safeCount(count.pageViews);
+
+    if (pageViews === undefined || Object.hasOwn(pageViewsByContent, count.contentId)) {
+      return { kind: "invalid", message: "The statistics snapshot is invalid." };
+    }
+
+    pageViewsByContent[count.contentId] = pageViews;
+  }
+
+  const daily = message.daily.map((count) => ({
+    date: count.date,
+    sessions: safeCount(count.sessions),
+    pageViews: safeCount(count.pageViews),
+  }));
+  const totalSessions = safeCount(message.totalSessions);
+  const totalPageViews = safeCount(message.totalPageViews);
+  const storageState = message.storageState === StatsStorageState.WRITABLE
+    ? "writable"
+    : message.storageState === StatsStorageState.READ_ONLY
+    ? "read-only"
+    : "invalid";
+
+  return validateStatsSnapshot({
+    totalSessions,
+    totalPageViews,
+    pageViewsByContent,
+    daily,
+    storageState,
+  });
+}
 
 export class HttpStatsClient implements StatsClient {
-  private readonly dependencies: HttpStatsClientDependencies;
+  private readonly context: BrowserGrpcContext;
+  private readonly client: StatsRpcClient;
+  private readonly scheduler: PollScheduler;
 
-  constructor(dependencies: HttpStatsClientDependencies = liveDependencies) {
-    this.dependencies = dependencies;
+  constructor(
+    context: BrowserGrpcContext,
+    client: StatsRpcClient = new StatisticsApiClient(createBrowserGrpcTransport()),
+    scheduler: PollScheduler = liveScheduler,
+  ) {
+    this.context = context;
+    this.client = client;
+    this.scheduler = scheduler;
   }
 
   async loadSnapshot(signal: AbortSignal): Promise<StatsLoadResult> {
     try {
-      const response = await this.dependencies.fetch(statsApiPath(""), {
-        signal,
-        headers: { Accept: "application/json" },
-      });
-
-      if (response.status === 503) {
-        return { kind: "unavailable" };
-      }
-
-      const payload = await responsePayload(response);
-
-      if (!response.ok) {
-        return { kind: "failed", message: "The statistics API rejected the request." };
-      }
-
-      if (payload.kind === "invalid") {
-        return { kind: "failed", message: "The statistics API returned invalid JSON." };
-      }
-
-      const validation = validateStatsSnapshot(payload.value);
-
+      const response = await this.client.readSnapshot(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodedSnapshot(response);
       return validation.kind === "valid"
         ? { kind: "available", snapshot: validation.value }
         : { kind: "failed", message: "The statistics API returned an invalid snapshot." };
@@ -275,45 +307,19 @@ export class HttpStatsClient implements StatsClient {
         return { kind: "cancelled" };
       }
 
-      return { kind: "failed", message: "The statistics API could not be reached." };
+      return error instanceof RpcError && error.code === "UNAVAILABLE"
+        ? { kind: "unavailable" }
+        : { kind: "failed", message: "The statistics API could not be reached." };
     }
   }
 
-  async recordView(
-    contentId: ContentId,
-    signal: AbortSignal,
-  ): Promise<StatsRecordResult> {
+  async recordView(contentId: ContentId, signal: AbortSignal): Promise<StatsRecordResult> {
     try {
-      const response = await this.dependencies.fetch(statsApiPath("/view"), {
-        method: "POST",
-        signal,
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ contentId: contentId.value }),
-      });
-
-      if (response.status === 429) {
-        return { kind: "rate-limited" };
-      }
-
-      if (response.status === 503) {
-        return { kind: "unavailable" };
-      }
-
-      const payload = await responsePayload(response);
-
-      if (!response.ok) {
-        return { kind: "failed", message: "The statistics view was rejected." };
-      }
-
-      if (payload.kind === "invalid") {
-        return { kind: "failed", message: "The statistics API returned invalid JSON." };
-      }
-
-      const validation = validateStatsSnapshot(payload.value);
-
+      const response = await this.client.recordView(
+        { contentId: contentId.value },
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodedSnapshot(response);
       return validation.kind === "valid"
         ? { kind: "recorded", snapshot: validation.value }
         : { kind: "failed", message: "The statistics API returned an invalid snapshot." };
@@ -322,33 +328,47 @@ export class HttpStatsClient implements StatsClient {
         return { kind: "cancelled" };
       }
 
-      return { kind: "failed", message: "The statistics view could not be recorded." };
+      if (error instanceof RpcError && error.code === "RESOURCE_EXHAUSTED") {
+        return { kind: "rate-limited" };
+      }
+
+      return error instanceof RpcError && error.code === "UNAVAILABLE"
+        ? { kind: "unavailable" }
+        : { kind: "failed", message: "The statistics view could not be recorded." };
     }
   }
 
-  subscribe(listener: (event: StatsStreamEvent) => void): StatsSubscription {
-    const source = this.dependencies.openEventSource(statsApiPath("/events"));
+  startPolling(listener: (event: StatsPollEvent) => void): StatsPolling {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let closed = false;
 
-    source.onmessage = (event) => {
-      try {
-        const validation = validateStatsSnapshot(JSON.parse(event.data));
+    const poll = async (): Promise<void> => {
+      const result = await this.loadSnapshot(controller.signal);
 
-        listener(
-          validation.kind === "valid"
-            ? { kind: "snapshot", snapshot: validation.value }
-            : { kind: "invalid" },
-        );
-      } catch {
-        listener({ kind: "invalid" });
+      if (closed) {
+        return;
       }
+
+      if (result.kind === "available") {
+        listener({ kind: "snapshot", snapshot: result.snapshot });
+      } else if (result.kind !== "cancelled") {
+        listener({ kind: "unavailable" });
+      }
+
+      timer = this.scheduler.set(() => void poll(), pollIntervalMilliseconds);
     };
-    source.onerror = () => listener({ kind: "disconnected" });
+
+    void poll();
 
     return {
       close: () => {
-        source.onmessage = null;
-        source.onerror = null;
-        source.close();
+        closed = true;
+        controller.abort();
+
+        if (timer !== undefined) {
+          this.scheduler.clear(timer);
+        }
       },
     };
   }
@@ -415,7 +435,7 @@ export class DemoStatsClient implements StatsClient {
     );
   }
 
-  subscribe(listener: (event: StatsStreamEvent) => void): StatsSubscription {
+  startPolling(listener: (event: StatsPollEvent) => void): StatsPolling {
     listener({ kind: "snapshot", snapshot: demoStatsSnapshot });
 
     return { close: () => undefined };

@@ -588,7 +588,7 @@ module GitHubContentClientTests =
                             (Some "\"content-v1\"")
                     | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
                     | path when path = documentPath ->
-                        response HttpStatusCode.OK "---\n{\"title\":\"About\"}\n---\n# About\n" (Some "\"about-v1\"")
+                        response HttpStatusCode.OK "---\ntitle = \"About\"\n---\n# About\n" (Some "\"about-v1\"")
                     | path when path = projectsPath ->
                         response HttpStatusCode.OK emptyProjectsManifest (Some "\"projects-v1\"")
                     | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
@@ -642,7 +642,7 @@ module GitHubContentClientTests =
             "{\"entries\":[{\"kind\":\"directory\",\"id\":\"home\",\"path\":\"~\",\"updatedAt\":\"2026-07-15T00:00:00.000Z\",\"size\":0},{\"kind\":\"directory\",\"id\":\"blog\",\"path\":\"~/blog\",\"updatedAt\":\"2026-07-15T00:00:01.000Z\",\"size\":0},{\"kind\":\"file\",\"id\":\"validated-metadata-document\",\"path\":\"~/blog/validated-metadata.md\",\"updatedAt\":\"2026-07-15T00:00:04.000Z\",\"size\":256,\"documentHandle\":\"blog-validated-metadata\",\"sourcePath\":\"blog/validated-metadata.md\"}]}"
 
         let markdown =
-            "---\n{\"title\":\"Validated Metadata\",\"summary\":\"The supplied publication summary.\",\"publishedAt\":\"2026-07-10T00:00:00.000Z\",\"tags\":[\"fsharp\",\"content\"]}\n---\n# Body Heading\n\nThis body paragraph is not the supplied summary."
+            "---\ntitle = \"Validated Metadata\"\nsummary = \"The supplied publication summary.\"\ntags = [\"fsharp\", \"content\"]\n---\n# Body Heading\n\nThis body paragraph is not the supplied summary."
 
         let handler =
             new FakeHandler(fun request ->
@@ -681,11 +681,6 @@ module GitHubContentClientTests =
                 |> ContentDomain.PublicationMetadata.summary
                 |> ContentDomain.ContentSummary.value
 
-            let publishedAt =
-                metadata
-                |> ContentDomain.PublicationMetadata.publishedAt
-                |> ContentDomain.Timestamp.value
-
             let tags =
                 metadata
                 |> ContentDomain.PublicationMetadata.tags
@@ -694,10 +689,93 @@ module GitHubContentClientTests =
             if
                 updatedAt <> "2026-07-15T00:00:04.000Z"
                 || summary <> "The supplied publication summary."
-                || publishedAt <> "2026-07-10T00:00:00.000Z"
                 || tags <> [ "fsharp"; "content" ]
             then
                 failwith "The live supplier must preserve validated publication metadata and update time."
+
+    let private testPublicationFrontMatterContract () =
+        let path =
+            match ContentDomain.RepositoryPath.tryCreate "test.path" "blog/nested/example.md" with
+            | Ok value -> value
+            | Error failure -> failwith failure.Message
+
+        let valid =
+            "---\ntitle = \"Example\"\nsummary = \"Example summary.\"\ntags = [\"fsharp\", \"grpc\"]\n---\n# Body"
+
+        match ContentDomain.FrontMatter.tryParse path valid with
+        | Ok _ -> ()
+        | Error failure -> failwith failure.Message
+
+        [ "---\ntitle = \"Example\"\ntags = [\"grpc\"]\n---\n# Body"
+          "---\ntitle = \"Example\"\nsummary = \"Summary\"\ntags = []\ntitle = \"Duplicate\"\n---\n# Body"
+          "---\ntitle = \"Example\"\nsummary = \"Summary\"\ntags = []\nunknown = \"value\"\n---\n# Body"
+          "---\n{\"title\":\"Old JSON\"}\n---\n# Body" ]
+        |> List.iter (fun markdown ->
+            match ContentDomain.FrontMatter.tryParse path markdown with
+            | Error _ -> ()
+            | Ok _ -> failwith "Invalid, duplicate, unknown, and legacy JSON front matter must be rejected.")
+
+    let private testContentCacheGeneration () =
+        let generation = ContentCacheGeneration()
+
+        let probe value =
+            { new ContentHeadProbe with
+                member _.Read _ = Task.FromResult value }
+
+        let first =
+            ContentCacheRefresh.observe (probe (Some(String('a', 40)))) generation CancellationToken.None
+            |> fun task -> task.GetAwaiter().GetResult()
+
+        let failed =
+            ContentCacheRefresh.observe (probe None) generation CancellationToken.None
+            |> fun task -> task.GetAwaiter().GetResult()
+
+        let changed =
+            ContentCacheRefresh.observe (probe (Some(String('b', 40)))) generation CancellationToken.None
+            |> fun task -> task.GetAwaiter().GetResult()
+
+        if first || failed || not changed || generation.Current <> 1L then
+            failwith "Only a changed observed repository head may advance the content-cache generation."
+
+        let catalogPath = "/repos/example-owner/content/contents/content/catalog.json?ref=main"
+        let gate = RequestGate()
+
+        let handler =
+            new GatedHandler(
+                (fun request ->
+                    if request.PathAndQuery = catalogPath then Some gate else None),
+                (fun request ->
+                    match request.PathAndQuery with
+                    | "/repos/example-owner/content" ->
+                        response
+                            HttpStatusCode.OK
+                            (repositoryJson "example-owner/content" "\"Content repository\"")
+                            (Some "\"content-v1\"")
+                    | path when path = catalogPath ->
+                        response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | _ -> response HttpStatusCode.NotFound "" None)
+            )
+
+        use httpClient = new HttpClient(handler)
+        let isolatedGeneration = ContentCacheGeneration()
+        isolatedGeneration.Observe(String('a', 40)) |> ignore
+
+        let contentClient =
+            GitHubContentClient.createWithGeneration
+                httpClient
+                (githubConfiguration ())
+                (fun () -> DateTimeOffset.Parse("2026-07-22T12:00:00Z"))
+                isolatedGeneration
+
+        let generationZeroRead = contentClient.GetCatalog CancellationToken.None
+        gate.WaitForRequest().GetAwaiter().GetResult()
+        isolatedGeneration.Observe(String('b', 40)) |> ignore
+        gate.Release()
+        generationZeroRead.GetAwaiter().GetResult() |> expectOk |> ignore
+        contentClient.GetCatalog(CancellationToken.None).GetAwaiter().GetResult() |> expectOk |> ignore
+
+        if countRequests catalogPath handler.Requests <> 2 then
+            failwith "A completed old-generation fetch must not repopulate the current content cache."
 
     let private testPayloadCacheRetention () =
         let cacheDocumentId index = sprintf "cache-document-%03d" index
@@ -728,7 +806,7 @@ module GitHubContentClientTests =
                 let id = cacheDocumentId index
                 let path = cacheDocumentPath index
 
-                let body = $"---\n{{\"title\":\"Cache document {index}\"}}\n---\n# {id}\n"
+                let body = $"---\ntitle = \"Cache document {index}\"\n---\n# {id}\n"
 
                 id, path, body)
 
@@ -1598,6 +1676,8 @@ module GitHubContentClientTests =
         testFailedSharedFetchCanRetryImmediately ()
         testDifferentKeysRemainParallel ()
         testPublicationMetadata ()
+        testPublicationFrontMatterContract ()
+        testContentCacheGeneration ()
         testPayloadCacheRetention ()
         testRateMalformedAndTimeoutFailures ()
         testFractionalCatalogSize ()

@@ -74,6 +74,25 @@ module GitHubContentConfiguration =
     let profileRepository (configuration: GitHubContentConfiguration) =
         configuration.ConfiguredProfileRepository
 
+type ContentCacheGeneration() =
+    let gate = obj ()
+    let mutable generation = 0L
+    let mutable observedHead: string option = None
+
+    member _.Current = lock gate (fun () -> generation)
+
+    member _.Observe(head: string) =
+        lock gate (fun () ->
+            match observedHead with
+            | None ->
+                observedHead <- Some head
+                false
+            | Some current when String.Equals(current, head, StringComparison.Ordinal) -> false
+            | Some _ ->
+                observedHead <- Some head
+                generation <- generation + 1L
+                true)
+
 [<RequireQualifiedAccess>]
 module GitHubContentClient =
     type private CachedPayload =
@@ -309,10 +328,11 @@ module GitHubContentClient =
         else
             result.Substring(0, 64).TrimEnd('-')
 
-    let create
+    let createWithGeneration
         (httpClient: HttpClient)
         (configuration: GitHubContentConfiguration)
         (clock: unit -> DateTimeOffset)
+        (generation: ContentCacheGeneration)
         : ContentClient =
         let cache = ConcurrentDictionary<string, CachedPayload>(StringComparer.Ordinal)
         let cacheLock = obj ()
@@ -541,7 +561,7 @@ module GitHubContentClient =
             : Task<Result<GitHubPayload, FetchFailure>> =
             task {
                 let now = clock ()
-                let cacheKey = $"{accept}|{uri.AbsoluteUri}"
+                let cacheKey = $"{generation.Current}|{accept}|{uri.AbsoluteUri}"
 
                 let cached, sharedFetch, shouldStart = findCachedPayloadOrStartFetch now cacheKey
 
@@ -1839,7 +1859,7 @@ module GitHubContentClient =
                                     | Error failure -> return Error(mapValidationFailure failure)
                                     | Ok profilePath ->
                                         let profileMarkdown =
-                                            String.concat "\n" [ "---"; "{\"title\":\"About\"}"; "---"; profileBody ]
+                                            String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
 
                                         return
                                             buildDocument
@@ -1859,3 +1879,6 @@ module GitHubContentClient =
 
             member _.GetChangelog cancellationToken =
                 getChangelogFromGitHub cancellationToken }
+
+    let create httpClient configuration clock =
+        createWithGeneration httpClient configuration clock (ContentCacheGeneration())

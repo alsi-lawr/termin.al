@@ -23,6 +23,7 @@ message SessionResponse {
 
 service SessionApi {
   rpc ReadSession(EmptyRequest) returns (SessionResponse);
+  rpc Logout(EmptyRequest) returns (EmptyRequest);
 }
 
 enum CacheState {
@@ -67,6 +68,124 @@ message CatalogResponse {
   CacheMetadata cache = 3;
 }
 
+enum DocumentKind {
+  DOCUMENT_KIND_UNSPECIFIED = 0;
+  DOCUMENT_KIND_PAGE = 1;
+  DOCUMENT_KIND_BLOG = 2;
+  DOCUMENT_KIND_NOTE = 3;
+}
+
+message DocumentRequest { string id = 1; }
+
+message DocumentResponse {
+  DocumentKind kind = 1;
+  string id = 2;
+  string slug = 3;
+  string path = 4;
+  string title = 5;
+  string summary = 6;
+  string updated_at = 7;
+  repeated string tags = 8;
+  string body = 9;
+  ContentSource source = 10;
+  CacheMetadata cache = 11;
+}
+
+message Project {
+  string id = 1;
+  string slug = 2;
+  string name = 3;
+  string summary = 4;
+  string url = 5;
+  string repository = 6;
+  string collection_path = 7;
+  string updated_at = 8;
+  repeated string tags = 9;
+  string readme = 10;
+}
+
+message ProjectsResponse {
+  repeated Project projects = 1;
+  ContentSource source = 2;
+  CacheMetadata cache = 3;
+}
+
+message NowResponse {
+  string title = 1;
+  string body = 2;
+  string updated_at = 3;
+  ContentSource source = 4;
+  CacheMetadata cache = 5;
+}
+
+message Commit {
+  string sha = 1;
+  string summary = 2;
+  string authored_at = 3;
+  string url = 4;
+}
+
+message Release {
+  string tag = 1;
+  string name = 2;
+  string published_at = 3;
+  string body = 4;
+  string url = 5;
+  repeated Commit commits = 6;
+}
+
+message ChangelogResponse {
+  repeated Commit unreleased = 1;
+  repeated Release releases = 2;
+  ContentSource source = 3;
+  CacheMetadata cache = 4;
+}
+
 service ContentApi {
   rpc ReadCatalog(EmptyRequest) returns (CatalogResponse);
+  rpc ReadDocument(DocumentRequest) returns (DocumentResponse);
+  rpc ReadProjects(EmptyRequest) returns (ProjectsResponse);
+  rpc ReadNow(EmptyRequest) returns (NowResponse);
+  rpc ReadChangelog(EmptyRequest) returns (ChangelogResponse);
+}
+
+enum StatsStorageState {
+  STATS_STORAGE_STATE_UNSPECIFIED = 0;
+  STATS_STORAGE_STATE_WRITABLE = 1;
+  STATS_STORAGE_STATE_READ_ONLY = 2;
+}
+
+message StatsContentCount {
+  string content_id = 1;
+  int64 page_views = 2;
+}
+
+message StatsDailyCount {
+  string date = 1;
+  int64 sessions = 2;
+  int64 page_views = 3;
+}
+
+message StatsSnapshot {
+  int64 total_sessions = 1;
+  int64 total_page_views = 2;
+  repeated StatsContentCount page_views_by_content = 3;
+  repeated StatsDailyCount daily = 4;
+  StatsStorageState storage_state = 5;
+}
+
+message RecordViewRequest { string content_id = 1; }
+
+service StatisticsApi {
+  rpc ReadSnapshot(EmptyRequest) returns (StatsSnapshot);
+  rpc RecordView(RecordViewRequest) returns (StatsSnapshot);
+}
+
+message UnlockCvRequest { string key = 1; }
+message CvDocumentResponse { string markdown = 1; }
+
+service CvApi {
+  rpc Unlock(UnlockCvRequest) returns (EmptyRequest);
+  rpc Lock(EmptyRequest) returns (EmptyRequest);
+  rpc Read(EmptyRequest) returns (CvDocumentResponse);
 }

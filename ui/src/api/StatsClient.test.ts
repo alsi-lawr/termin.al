@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
+import {
+  StatsDailyCount,
+  StatsSnapshot,
+  StatsStorageState,
+} from "../generated/browser/browser.ts";
+import { BrowserGrpcContext, csrfToken } from "./BrowserGrpcContext.ts";
 import { ContentId } from "./ContentContracts.ts";
 import {
   DemoStatsClient,
@@ -13,116 +20,81 @@ function wireSnapshot(): unknown {
     totalSessions: demoStatsSnapshot.totalSessions,
     totalPageViews: demoStatsSnapshot.totalPageViews,
     pageViewsByContent: Object.fromEntries(
-      demoStatsSnapshot.pageViewsByContent.map((count) => [
-        count.contentId.value,
-        count.pageViews,
-      ]),
+      demoStatsSnapshot.pageViewsByContent.map((count) => [count.contentId.value, count.pageViews]),
     ),
-    daily: demoStatsSnapshot.daily.map((count, index) =>
-      index === 0 ? { ...count, browserBucketMetadata: "ignored" } : count
-    ),
+    daily: demoStatsSnapshot.daily,
     storageState: demoStatsSnapshot.storageState,
-    browserExtension: "ignored",
   };
+}
+
+function generatedSnapshot(): StatsSnapshot {
+  return StatsSnapshot.create({
+    totalSessions: 128n,
+    totalPageViews: 512n,
+    pageViewsByContent: [{ contentId: "about", pageViews: 512n }],
+    daily: demoStatsSnapshot.daily.map((count) => StatsDailyCount.create({
+      date: count.date,
+      sessions: BigInt(count.sessions),
+      pageViews: BigInt(count.pageViews),
+    })),
+    storageState: StatsStorageState.WRITABLE,
+  });
 }
 
 function contentId(value: string): ContentId {
   const validation = ContentId.tryCreate(value, "test content");
-
-  if (validation.kind === "invalid") {
-    assert.fail(validation.message);
-  }
-
+  if (validation.kind === "invalid") assert.fail(validation.message);
   return validation.value;
 }
 
-test("validates consecutive statistics snapshots with additive fields", () => {
-  const valid = validateStatsSnapshot(wireSnapshot());
-  assert.equal(valid.kind, "valid");
-
-  const invalidDaily = wireSnapshot();
-
-  if (typeof invalidDaily !== "object" || invalidDaily === null) {
-    assert.fail("Expected a statistics object fixture.");
-  }
-
-  Reflect.set(invalidDaily, "daily", demoStatsSnapshot.daily.slice(1));
-  assert.equal(validateStatsSnapshot(invalidDaily).kind, "invalid");
-
-  const mismatchedTotal = wireSnapshot();
-
-  if (typeof mismatchedTotal !== "object" || mismatchedTotal === null) {
-    assert.fail("Expected a statistics object fixture.");
-  }
-
-  Reflect.set(mismatchedTotal, "totalPageViews", 511);
-  assert.equal(validateStatsSnapshot(mismatchedTotal).kind, "invalid");
+test("validates consecutive statistics snapshots", () => {
+  assert.equal(validateStatsSnapshot(wireSnapshot()).kind, "valid");
+  const invalid = { ...wireSnapshot() as object, totalPageViews: 511 };
+  assert.equal(validateStatsSnapshot(invalid).kind, "invalid");
 });
 
-test("uses the focused live HTTP and SSE statistics endpoints", async () => {
-  const capturedRequests: Array<Readonly<{ path: string; init: RequestInit | undefined }>> = [];
-  const fetchStats: typeof fetch = async (input, init) => {
-    let path: string;
-
-    if (typeof input === "string") {
-      path = input;
-    } else if (input instanceof URL) {
-      path = input.pathname;
-    } else {
-      path = new URL(input.url).pathname;
-    }
-
-    capturedRequests.push({ path, init });
-    return Response.json(wireSnapshot());
-  };
-  let closed = false;
-  const source: {
-    onmessage: ((event: MessageEvent<string>) => void) | null;
-    onerror: ((event: Event) => void) | null;
-    close: () => void;
-  } = {
-    onmessage: null,
-    onerror: null,
-    close: () => {
-      closed = true;
+test("uses generated unary calls and one non-overlapping 30-second polling lifecycle", async () => {
+  const context = new BrowserGrpcContext();
+  const token = csrfToken("statistics-antiforgery-token");
+  if (token === undefined) assert.fail("Expected valid antiforgery fixture.");
+  context.recordCsrfToken(token);
+  const calls: Array<Readonly<{ method: string; meta: RpcMetadata; abort: AbortSignal }>> = [];
+  const scheduled: Array<Readonly<{ callback: () => void; milliseconds: number }>> = [];
+  const client = new HttpStatsClient(context, {
+    readSnapshot: (_request, options) => {
+      calls.push({ method: "read", meta: options.meta, abort: options.abort });
+      return { response: Promise.resolve(generatedSnapshot()) };
     },
-  };
-  const openedPaths: string[] = [];
-  const client = new HttpStatsClient({
-    fetch: fetchStats,
-    openEventSource: (path) => {
-      openedPaths.push(path);
-      return source;
+    recordView: (request, options) => {
+      assert.equal(request.contentId, "about");
+      calls.push({ method: "record", meta: options.meta, abort: options.abort });
+      return { response: Promise.resolve(generatedSnapshot()) };
     },
+  }, {
+    set: (callback, milliseconds) => {
+      scheduled.push({ callback, milliseconds });
+      return {} as ReturnType<typeof setTimeout>;
+    },
+    clear: () => undefined,
   });
-  const controller = new AbortController();
-
-  const loaded = await client.loadSnapshot(controller.signal);
-  assert.equal(loaded.kind, "available");
-
-  const recorded = await client.recordView(contentId("about"), controller.signal);
-  assert.equal(recorded.kind, "recorded");
-  assert.deepEqual(capturedRequests.map((request) => request.path), [
-    "/api/stats",
-    "/api/stats/view",
-  ]);
-  assert.equal(capturedRequests[1]?.init?.method, "POST");
-  assert.equal(capturedRequests[1]?.init?.signal, controller.signal);
-  assert.equal(capturedRequests[1]?.init?.body, '{"contentId":"about"}');
+  const signal = new AbortController().signal;
+  assert.equal((await client.loadSnapshot(signal)).kind, "available");
+  assert.equal((await client.recordView(contentId("about"), signal)).kind, "recorded");
 
   const events: string[] = [];
-  const subscription = client.subscribe((event) => events.push(event.kind));
-  assert.deepEqual(openedPaths, ["/api/stats/events"]);
-  source.onmessage?.(
-    new MessageEvent<string>("message", { data: JSON.stringify(wireSnapshot()) }),
-  );
-  source.onerror?.(new Event("error"));
-  assert.deepEqual(events, ["snapshot", "disconnected"]);
-
-  subscription.close();
-  assert.equal(source.onmessage, null);
-  assert.equal(source.onerror, null);
-  assert.equal(closed, true);
+  const polling = client.startPolling((event) => events.push(event.kind));
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.deepEqual(events, ["snapshot"]);
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0]?.milliseconds, 30_000);
+  assert.equal(calls.every((call) => call.meta["X-CSRF-TOKEN"] === "statistics-antiforgery-token"), true);
+  scheduled[0]?.callback();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(scheduled.length, 2);
+  polling.close();
+  assert.equal(calls.at(-1)?.abort.aborted, true);
 });
 
 function restoreProperty(
@@ -174,8 +146,8 @@ test("DemoStatsClient performs no network, storage, timer, or random work", asyn
     const loaded = await client.loadSnapshot(controller.signal);
     const recorded = await client.recordView(contentId("about"), controller.signal);
     const events: string[] = [];
-    const subscription = client.subscribe((event) => events.push(event.kind));
-    subscription.close();
+    const polling = client.startPolling((event) => events.push(event.kind));
+    polling.close();
 
     assert.equal(loaded.kind, "available");
     assert.equal(recorded.kind, "recorded");

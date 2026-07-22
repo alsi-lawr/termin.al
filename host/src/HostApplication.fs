@@ -19,15 +19,7 @@ module HostApplication =
         else
             WebApplicationOptions(Args = args)
 
-    let private configureApplication
-        (application: WebApplication)
-        (contentClient: ContentClient)
-        (statsStore: Stats.Store)
-        (allowLocalHttpStatsCookie: bool)
-        (randomBytes: int -> byte array)
-        (now: unit -> DateTimeOffset)
-        (statsHeartbeatInterval: TimeSpan)
-        : WebApplication =
+    let private configureApplication (application: WebApplication) : WebApplication =
         application.UseDefaultFiles() |> ignore
         application.UseStaticFiles() |> ignore
         application.UseGrpcWeb() |> ignore
@@ -40,37 +32,38 @@ module HostApplication =
         )
         |> ignore
 
-        Stats.mapEndpoints
-            application
-            statsStore
-            contentClient
-            allowLocalHttpStatsCookie
-            randomBytes
-            now
-            statsHeartbeatInterval
-
-        Auth.mapEndpoints application
-        Cv.mapEndpoints application
-
+        Auth.mapOAuthEndpoints application
         application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<ContentGrpcService>().EnableGrpcWeb() |> ignore
-
-        Api.mapEndpoints application contentClient
-
+        application.MapGrpcService<StatisticsGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<CvGrpcService>().EnableGrpcWeb() |> ignore
         application.MapFallbackToFile("/demo/{*path:nonfile}", "index.html") |> ignore
-
         application
 
-    let private liveContentClient (configuration: IConfiguration) : ContentClient * HttpClient option =
+    let private liveContentClient
+        (configuration: IConfiguration)
+        : ContentClient * HttpClient option * IHostedService option =
         match GitHubContentConfiguration.tryCreate configuration with
-        | Error _ -> ContentClient.configurationInvalid (), None
+        | Error _ -> ContentClient.configurationInvalid (), None, None
         | Ok githubConfiguration ->
             let httpClient = new HttpClient()
+            let generation = ContentCacheGeneration()
 
             let contentClient =
-                GitHubContentClient.create httpClient githubConfiguration (fun () -> DateTimeOffset.UtcNow)
+                GitHubContentClient.createWithGeneration
+                    httpClient
+                    githubConfiguration
+                    (fun () -> DateTimeOffset.UtcNow)
+                    generation
 
-            contentClient, Some httpClient
+            let worker =
+                new ContentCacheRefreshWorker(
+                    ContentHeadProbe.live httpClient githubConfiguration,
+                    generation,
+                    ContentCacheRefresh.liveDelay
+                )
+
+            contentClient, Some httpClient, Some worker
 
     let createWithContentClientAndStats
         (args: string array)
@@ -79,13 +72,21 @@ module HostApplication =
         (allowLocalHttpStatsCookie: bool)
         (randomBytes: int -> byte array)
         (now: unit -> DateTimeOffset)
-        (statsHeartbeatInterval: TimeSpan)
         : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
         let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+
+        let statsRuntime: Stats.BrowserRuntime =
+            { Store = statsStore
+              ContentClient = contentClient
+              AllowLocalHttpCookie = allowLocalHttpStatsCookie
+              RandomBytes = randomBytes
+              Now = now }
+
+        builder.Services.AddSingleton<Stats.BrowserRuntime>(statsRuntime) |> ignore
 
         Auth.configureServices
             builder.Services
@@ -112,14 +113,7 @@ module HostApplication =
         application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
         |> ignore
 
-        configureApplication
-            application
-            contentClient
-            statsStore
-            allowLocalHttpStatsCookie
-            randomBytes
-            now
-            statsHeartbeatInterval
+        configureApplication application
 
     let createWithContentClient (args: string array) (contentClient: ContentClient) : WebApplication =
         let now () = DateTimeOffset.UtcNow
@@ -132,17 +126,32 @@ module HostApplication =
             false
             Stats.randomBytes
             now
-            (TimeSpan.FromSeconds(30.0))
 
     let create (args: string array) : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
-        let contentClient, httpClient = liveContentClient builder.Configuration
+
+        let contentClient, httpClient, refreshWorker =
+            liveContentClient builder.Configuration
+
         let now () = DateTimeOffset.UtcNow
         let statsStore = Stats.createStore builder.Configuration now
         let authHttpClient = new HttpClient(Timeout = TimeSpan.FromSeconds(10.0))
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+
+        match refreshWorker with
+        | Some worker -> builder.Services.AddSingleton<IHostedService>(worker) |> ignore
+        | None -> ()
+
+        let statsRuntime: Stats.BrowserRuntime =
+            { Store = statsStore
+              ContentClient = contentClient
+              AllowLocalHttpCookie = builder.Environment.IsDevelopment()
+              RandomBytes = Stats.randomBytes
+              Now = now }
+
+        builder.Services.AddSingleton<Stats.BrowserRuntime>(statsRuntime) |> ignore
 
         Auth.configureServices
             builder.Services
@@ -175,11 +184,4 @@ module HostApplication =
         application.Lifetime.ApplicationStopping.Register(Action(statsStore.Shutdown))
         |> ignore
 
-        configureApplication
-            application
-            contentClient
-            statsStore
-            (builder.Environment.IsDevelopment())
-            Stats.randomBytes
-            now
-            (TimeSpan.FromSeconds(30.0))
+        configureApplication application

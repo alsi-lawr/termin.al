@@ -38,12 +38,13 @@ async function createApplicationClientComposition(
       const { HttpCvClient } = await import("./api/CvClient.ts");
 
       const grpcContext = new BrowserGrpcContext();
+      const sessionClient = new HttpSessionClient(grpcContext);
 
       return Object.freeze({
         contentClient: new HttpContentClient(grpcContext),
-        statsClient: new HttpStatsClient(),
-        sessionClient: new HttpSessionClient(grpcContext),
-        cvClient: new HttpCvClient(),
+        statsClient: new HttpStatsClient(grpcContext),
+        sessionClient,
+        cvClient: new HttpCvClient(grpcContext, sessionClient),
       });
     }
   }

@@ -2,27 +2,42 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
 import {
-  resolveVirtualPath,
-  virtualHomeDirectory,
-} from "../domain/filesystem/VirtualFilesystem.ts";
-import {
   CacheMetadata,
   CacheState,
   CatalogEntry,
   CatalogEntryKind,
   CatalogResponse,
+  ChangelogResponse,
+  Commit,
+  ContentSource,
+  DocumentKind,
+  DocumentResponse,
+  NowResponse,
+  Project,
+  ProjectsResponse,
+  Release,
 } from "../generated/browser/browser.ts";
+import {
+  resolveVirtualPath,
+  virtualHomeDirectory,
+} from "../domain/filesystem/VirtualFilesystem.ts";
 import { BrowserGrpcContext, csrfToken } from "./BrowserGrpcContext.ts";
 import { HttpContentClient } from "./ContentClient.ts";
 
-function catalogResponse(): CatalogResponse {
-  const cache = CacheMetadata.create({
-    state: CacheState.FRESH,
-    fetchedAt: "2026-07-15T00:00:00.000Z",
-    freshUntil: "2026-07-15T00:05:00.000Z",
-    staleUntil: "2026-07-15T01:05:00.000Z",
-  });
+const cache = CacheMetadata.create({
+  state: CacheState.FRESH,
+  fetchedAt: "2026-07-15T00:00:00.000Z",
+  freshUntil: "2026-07-15T00:05:00.000Z",
+  staleUntil: "2026-07-15T01:05:00.000Z",
+});
+const source = ContentSource.create({
+  repository: "example-owner/content",
+  path: "content/catalog.json",
+  revision: "main",
+  url: "https://github.com/example-owner/content/blob/main/content/catalog.json",
+});
 
+function catalogResponse(): CatalogResponse {
   const entries = [
     [CatalogEntryKind.DIRECTORY, "home", "~", 0, ""],
     [CatalogEntryKind.DIRECTORY, "projects", "~/projects", 0, ""],
@@ -31,165 +46,138 @@ function catalogResponse(): CatalogResponse {
     [CatalogEntryKind.FILE, "publication-document", "~/blog/validated-metadata.md", 128, "blog-validated-metadata"],
   ] as const;
 
-  const catalogEntries = entries.map(([kind, id, path, size, documentHandle], index) =>
-    CatalogEntry.create({
-      kind,
-      id,
-      path,
-      updatedAt: `2026-07-15T00:00:0${index}.000Z`,
-      size,
-      documentHandle,
-    }));
-
-  return CatalogResponse.create({ entries: catalogEntries, cache });
+  return CatalogResponse.create({
+    source,
+    cache,
+    entries: entries.map(([kind, id, path, size, documentHandle], index) =>
+      CatalogEntry.create({
+        kind,
+        id,
+        path,
+        updatedAt: `2026-07-15T00:00:0${index}.000Z`,
+        size,
+        documentHandle,
+      })),
+  });
 }
 
-function responseForPath(path: string): Response {
-  switch (path) {
-    case "/api/content/projects":
-      return Response.json({"projects":[{"id":"sample-project","slug":"sample-project","name":"Sample Project","summary":"A validated project fixture.","url":"https://github.com/example-owner/sample-project","repository":"example-owner/sample-project","collectionPath":"validated/core","updatedAt":"2026-07-15T00:00:03.000Z","tags":["fsharp","typescript"],"readme":"# Sample Project README\n\nThis is the supplied README body, not the project summary."},{"id":"second-project","slug":"second-project","name":"Second Project","summary":"A second validated project fixture.","url":"https://github.com/example-owner/second-project","repository":"example-owner/second-project","collectionPath":"validated/examples","updatedAt":"2026-07-15T00:00:04.000Z","tags":["typescript"],"readme":"# Second Project README\n\nThis is a second supplied README body."}],"source":{"repository":"example-owner/content","path":"content/projects.json","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/projects.json"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
-    case "/api/content/now":
-      return Response.json({"title":"Now","body":"# Now\n\nA validated current-status fixture.","updatedAt":"2026-07-15T00:00:04.000Z","source":{"repository":"example-owner/content","path":"content/now.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/now.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
-    case "/api/content/changelog":
-      return Response.json({"unreleased":[{"sha":"0123456789abcdef0123456789abcdef01234567","summary":"Add validated content contracts","authoredAt":"2026-07-15T00:00:05.000Z","url":"https://github.com/example-owner/application/commit/0123456789abcdef0123456789abcdef01234567"}],"releases":[{"tag":"v1.0.0","name":"1.0.0","publishedAt":"2026-07-14T00:00:00.000Z","body":"Initial validated release.","url":"https://github.com/example-owner/application/releases/tag/v1.0.0","commits":[{"sha":"89abcdef0123456789abcdef0123456789abcdef","summary":"Initial release","authoredAt":"2026-07-14T00:00:00.000Z","url":"https://github.com/example-owner/application/commit/89abcdef0123456789abcdef0123456789abcdef"}]}],"source":{"repository":"example-owner/application","path":"releases","revision":"main","url":"https://github.com/example-owner/application/releases"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
-    case "/api/content/document/about":
-      return Response.json({"kind":"page","id":"about","path":"~/about.md","title":"About","updatedAt":"2026-07-15T00:00:03.000Z","body":"# About\n\nA validated shared content fixture.","source":{"repository":"example-owner/content","path":"content/about.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/content/about.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
-    case "/api/content/document/blog-validated-metadata":
-      return Response.json({"kind":"blog","id":"blog-validated-metadata","slug":"validated-metadata","path":"~/blog/validated-metadata.md","title":"Validated Metadata","summary":"The supplied publication summary.","publishedAt":"2026-07-10T00:00:00.000Z","updatedAt":"2026-07-15T00:00:04.000Z","tags":["fsharp","content"],"body":"# Body Heading\n\nThis first body paragraph is not the supplied summary.","source":{"repository":"example-owner/content","path":"blog/validated-metadata.md","revision":"main","url":"https://github.com/example-owner/content/blob/main/blog/validated-metadata.md"},"cache":{"state":"fresh","fetchedAt":"2026-07-15T00:00:00.000Z","freshUntil":"2026-07-15T00:05:00.000Z","staleUntil":"2026-07-15T01:05:00.000Z"}});
-    default:
-      throw new Error(`Unexpected content API request: ${path}`);
-  }
-}
-function requestPath(input: RequestInfo | URL): string {
-  if (typeof input === "string") {
-    return input;
-  }
-
-  if (input instanceof URL) {
-    return input.pathname;
-  }
-
-  return new URL(input.url).pathname;
-}
-
-test("loads the same-origin content corpus and forwards cancellation", async () => {
-  const originalFetch = globalThis.fetch;
-  const paths: string[] = [];
-  const signals: Array<AbortSignal | null> = [];
-  const fetchContent: typeof fetch = async (input, init) => {
-    const path = requestPath(input);
-    paths.push(path);
-    signals.push(init?.signal ?? null);
-
-    return responseForPath(path);
+function generatedClient(calls: Array<Readonly<{ method: string; meta: RpcMetadata; abort: AbortSignal }>>) {
+  const call = <Value>(method: string, value: Value, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) => {
+    calls.push({ method, meta: options.meta, abort: options.abort });
+    return { response: Promise.resolve(value) };
   };
-  globalThis.fetch = fetchContent;
 
-  try {
-    const controller = new AbortController();
-    const grpcContext = new BrowserGrpcContext();
-    const token = csrfToken("catalog-antiforgery-token");
+  return {
+    readCatalog: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
+      call("catalog", catalogResponse(), options),
+    readProjects: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
+      call("projects", ProjectsResponse.create({
+        source: ContentSource.create({ ...source, path: "content/projects.json" }),
+        cache,
+        projects: [Project.create({
+          id: "sample-project",
+          slug: "sample-project",
+          name: "Sample Project",
+          summary: "A validated project fixture.",
+          url: "https://github.com/example-owner/sample-project",
+          repository: "example-owner/sample-project",
+          collectionPath: "validated/core",
+          updatedAt: "2026-07-15T00:00:03.000Z",
+          tags: ["fsharp", "typescript"],
+          readme: "# Sample Project README\n\nSupplied README.",
+        })],
+      }), options),
+    readNow: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
+      call("now", NowResponse.create({
+        title: "Now",
+        body: "# Now\n\nCurrent status.",
+        updatedAt: "2026-07-15T00:00:04.000Z",
+        source: ContentSource.create({ ...source, path: "content/now.md" }),
+        cache,
+      }), options),
+    readChangelog: (_request: Readonly<Record<string, never>>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) =>
+      call("changelog", ChangelogResponse.create({
+        source: ContentSource.create({ ...source, repository: "example-owner/application", path: "releases" }),
+        cache,
+        unreleased: [Commit.create({ sha: "0123456789abcdef0123456789abcdef01234567", summary: "Add contracts" })],
+        releases: [Release.create({
+          tag: "v1.0.0",
+          name: "1.0.0",
+          publishedAt: "2026-07-14T09:30:00.000Z",
+          body: "Initial release.",
+          commits: [],
+        })],
+      }), options),
+    readDocument: (request: Readonly<{ id: string }>, options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>) => {
+      const publication = request.id === "blog-validated-metadata";
+      return call("document", DocumentResponse.create({
+        kind: publication ? DocumentKind.BLOG : DocumentKind.PAGE,
+        id: request.id,
+        slug: publication ? "validated-metadata" : "",
+        path: publication ? "~/blog/validated-metadata.md" : "~/about.md",
+        title: publication ? "Validated Metadata" : "About",
+        summary: publication ? "The supplied publication summary." : "",
+        updatedAt: publication ? "2026-07-15T00:00:04.000Z" : "2026-07-15T00:00:03.000Z",
+        tags: publication ? ["fsharp", "content"] : [],
+        body: publication ? "# Body Heading\n\nPublication body." : "# About\n\nShared content.",
+        source: ContentSource.create({
+          ...source,
+          path: publication ? "blog/validated-metadata.md" : "content/about.md",
+        }),
+        cache,
+      }), options);
+    },
+  };
+}
 
-    if (token === undefined) {
-      assert.fail("Expected a valid catalog antiforgery fixture.");
-    }
+test("loads every content slice through one narrow generated client", async () => {
+  const controller = new AbortController();
+  const context = new BrowserGrpcContext();
+  const token = csrfToken("catalog-antiforgery-token");
+  if (token === undefined) assert.fail("Expected valid antiforgery fixture.");
+  context.recordCsrfToken(token);
+  const calls: Array<Readonly<{ method: string; meta: RpcMetadata; abort: AbortSignal }>> = [];
+  const client = new HttpContentClient(context, generatedClient(calls));
+  const result = await client.loadCorpus(controller.signal);
+  if (result.kind !== "available") assert.fail(`Expected corpus, received ${result.kind}.`);
 
-    grpcContext.recordCsrfToken(token);
-    const grpcMetadata: RpcMetadata[] = [];
-    const grpcSignals: Array<AbortSignal | undefined> = [];
-    const client = new HttpContentClient(grpcContext, {
-      readCatalog: (_request, options) => {
-        grpcMetadata.push(options.meta);
-        grpcSignals.push(options.abort);
-        return { response: Promise.resolve(catalogResponse()) };
-      },
-    });
-    const result = await client.loadCorpus(controller.signal);
+  assert.deepEqual(calls.map((entry) => entry.method), ["catalog", "projects", "now", "changelog"]);
+  assert.equal(calls.every((entry) => entry.abort === controller.signal), true);
+  assert.equal(calls.every((entry) => entry.meta["X-CSRF-TOKEN"] === "catalog-antiforgery-token"), true);
 
-    if (result.kind !== "available") {
-      assert.fail(`Expected an available corpus, received ${result.kind}.`);
-    }
+  const publication = resolveVirtualPath(result.corpus.filesystem, virtualHomeDirectory(), "blog/validated-metadata.md");
+  if (publication.kind !== "found" || publication.node.kind !== "file") assert.fail("Expected publication.");
+  const document = await result.corpus.documents.read(publication.node.documentHandle, controller.signal);
+  if (document.kind !== "available" || document.classification.kind !== "publication") assert.fail("Expected publication metadata.");
+  assert.equal(document.classification.updatedAt, publication.node.updatedAt);
+  assert.equal(calls.at(-1)?.method, "document");
+});
 
-    assert.deepEqual(new Set(paths), new Set([
-      "/api/content/projects",
-      "/api/content/now",
-      "/api/content/changelog",
-    ]));
-    assert.equal(signals.every((signal) => signal === controller.signal), true);
-    assert.deepEqual(grpcMetadata, [{ "X-CSRF-TOKEN": "catalog-antiforgery-token" }]);
-    assert.deepEqual(grpcSignals, [controller.signal]);
+test("rejects incomplete catalog source and cache metadata", async () => {
+  const response = catalogResponse();
+  response.source = ContentSource.create({ ...source, repository: "" });
+  const base = generatedClient([]);
+  const client = new HttpContentClient(new BrowserGrpcContext(), {
+    ...base,
+    readCatalog: () => ({ response: Promise.resolve(response) }),
+  });
+  const result = await client.loadCorpus(new AbortController().signal);
+  assert.equal(result.kind, "failed");
+});
 
-    const about = resolveVirtualPath(
-      result.corpus.filesystem,
-      virtualHomeDirectory(),
-      "about.md",
-    );
+test("rejects a changelog release without generated chronology metadata", async () => {
+  const base = generatedClient([]);
+  const client = new HttpContentClient(new BrowserGrpcContext(), {
+    ...base,
+    readChangelog: () => ({
+      response: Promise.resolve(ChangelogResponse.create({
+        source: ContentSource.create({ ...source, repository: "example-owner/application", path: "releases" }),
+        cache,
+        releases: [Release.create({ tag: "v1.0.0", name: "1.0.0", body: "Missing chronology." })],
+      })),
+    }),
+  });
 
-    if (about.kind !== "found" || about.node.kind !== "file") {
-      assert.fail("Expected the catalog's about document.");
-    }
-
-    const document = await result.corpus.documents.read(
-      about.node.documentHandle,
-      controller.signal,
-    );
-
-    if (document.kind !== "available") {
-      assert.fail("Expected the about document from the content API.");
-    }
-
-    assert.equal(document.classification.kind, "page");
-    assert.equal(document.document.text, "# About\n\nA validated shared content fixture.");
-    assert.equal(paths.at(-1), "/api/content/document/about");
-
-    const publication = resolveVirtualPath(
-      result.corpus.filesystem,
-      virtualHomeDirectory(),
-      "blog/validated-metadata.md",
-    );
-
-    if (publication.kind !== "found" || publication.node.kind !== "file") {
-      assert.fail("Expected the catalog's publication document.");
-    }
-
-    const publicationDocument = await result.corpus.documents.read(
-      publication.node.documentHandle,
-      controller.signal,
-    );
-
-    if (
-      publicationDocument.kind !== "available" ||
-      publicationDocument.classification.kind !== "publication"
-    ) {
-      assert.fail("Expected publication metadata from the content API.");
-    }
-
-    assert.equal(publication.node.updatedAt, "2026-07-15T00:00:04.000Z");
-    assert.equal(
-      publicationDocument.classification.publishedAt,
-      "2026-07-10T00:00:00.000Z",
-    );
-    assert.equal(
-      publicationDocument.classification.summary,
-      "The supplied publication summary.",
-    );
-    assert.deepEqual(publicationDocument.classification.tags, ["fsharp", "content"]);
-    assert.doesNotMatch(
-      publicationDocument.document.text,
-      /The supplied publication summary\./u,
-    );
-    assert.equal(paths.at(-1), "/api/content/document/blog-validated-metadata");
-
-    const project = result.corpus.projectReadmes[0];
-
-    assert.equal(project?.name, "Sample Project");
-    assert.equal(project?.collectionPath, "validated/core");
-    assert.equal(
-      project?.document.text,
-      "# Sample Project README\n\nThis is the supplied README body, not the project summary.",
-    );
-    assert.notEqual(project?.document.text, project?.summary);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const result = await client.loadCorpus(new AbortController().signal);
+  assert.equal(result.kind, "failed");
 });

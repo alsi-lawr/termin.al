@@ -6,7 +6,7 @@ import {
   type StatsClient,
   type StatsLoadResult,
   type StatsSnapshot,
-  type StatsStreamEvent,
+  type StatsPollEvent,
 } from "../../api/StatsClient.ts";
 import {
   formatPortfolioStats,
@@ -90,7 +90,7 @@ const olderBootstrapSnapshot = snapshot({
   counts: [{ id: "about", views: 1 }],
   storageState: "writable",
 });
-const newerStreamSnapshot = snapshot({
+const newerPollSnapshot = snapshot({
   totalSessions: 1,
   counts: [{ id: "about", views: 2 }],
   storageState: "writable",
@@ -148,15 +148,15 @@ test("formats current UTC, sorted content, no-data, stale, and unavailable comma
   );
 });
 
-test("retains HTTP-first non-zero, zero, and read-only snapshots as reconnecting until valid SSE", async () => {
+test("maps non-zero, zero, and read-only polling snapshots to workspace state", async () => {
   const scenarios = [
-    { snapshot: liveSnapshot, expectedStreamState: "live" },
-    { snapshot: zeroSnapshot, expectedStreamState: "no-data" },
-    { snapshot: readOnlySnapshot, expectedStreamState: "stale" },
+    { snapshot: liveSnapshot, expectedPollState: "live" },
+    { snapshot: zeroSnapshot, expectedPollState: "no-data" },
+    { snapshot: readOnlySnapshot, expectedPollState: "stale" },
   ] as const;
 
   for (const scenario of scenarios) {
-    let listener: (event: StatsStreamEvent) => void = () => undefined;
+    let listener: (event: StatsPollEvent) => void = () => undefined;
     const client: StatsClient = {
       loadSnapshot: () => Promise.resolve({
         kind: "available",
@@ -166,7 +166,7 @@ test("retains HTTP-first non-zero, zero, and read-only snapshots as reconnecting
         kind: "recorded",
         snapshot: scenario.snapshot,
       }),
-      subscribe: (nextListener) => {
+      startPolling: (nextListener) => {
         listener = nextListener;
         return { close: () => undefined };
       },
@@ -180,24 +180,17 @@ test("retains HTTP-first non-zero, zero, and read-only snapshots as reconnecting
     const currentState = (): WorkspaceStatsState => state;
     const cleanup = connectWorkspaceStats(client, dispatch);
 
-    await Promise.resolve();
-    const afterHttp = currentState();
-    assert.equal(afterHttp.kind, "reconnecting");
-    if (afterHttp.kind === "reconnecting") {
-      assert.strictEqual(afterHttp.snapshot, scenario.snapshot);
-      assert.equal(
-        workspaceStatsStatus(afterHttp).totalPageViews,
-        scenario.snapshot.totalPageViews,
-      );
-    }
-
     listener({ kind: "snapshot", snapshot: scenario.snapshot });
-    assert.equal(currentState().kind, scenario.expectedStreamState);
+    assert.equal(currentState().kind, scenario.expectedPollState);
+    assert.equal(
+      workspaceStatsStatus(currentState()).totalPageViews,
+      scenario.snapshot.totalPageViews,
+    );
     cleanup();
   }
 });
 
-test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP failure", async () => {
+test("preserves the latest polling snapshot after a later polling failure", async () => {
   const scenarios = [
     { snapshot: liveSnapshot, loadResult: { kind: "failed", message: "failed" }, expected: "live" },
     { snapshot: zeroSnapshot, loadResult: { kind: "unavailable" }, expected: "no-data" },
@@ -205,7 +198,7 @@ test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP 
   ] as const;
 
   for (const scenario of scenarios) {
-    let listener: (event: StatsStreamEvent) => void = () => undefined;
+    let listener: (event: StatsPollEvent) => void = () => undefined;
     let resolveLoad: (result: StatsLoadResult) => void = () => undefined;
     const loadResult = new Promise<StatsLoadResult>((resolve) => {
       resolveLoad = resolve;
@@ -216,7 +209,7 @@ test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP 
         kind: "recorded",
         snapshot: scenario.snapshot,
       }),
-      subscribe: (nextListener) => {
+      startPolling: (nextListener) => {
         listener = nextListener;
         return { close: () => undefined };
       },
@@ -243,8 +236,8 @@ test("accepts SSE-first proof while HTTP is pending and preserves it after HTTP 
   }
 });
 
-test("preserves a newer reconnecting stream snapshot when delayed bootstrap HTTP completes", async () => {
-  let listener: (event: StatsStreamEvent) => void = () => undefined;
+test("preserves a newer refreshed polling snapshot when delayed initial polling read completes", async () => {
+  let listener: (event: StatsPollEvent) => void = () => undefined;
   let resolveLoad: (result: StatsLoadResult) => void = () => undefined;
   const loadResult = new Promise<StatsLoadResult>((resolve) => {
     resolveLoad = resolve;
@@ -253,9 +246,9 @@ test("preserves a newer reconnecting stream snapshot when delayed bootstrap HTTP
     loadSnapshot: () => loadResult,
     recordView: () => Promise.resolve({
       kind: "recorded",
-      snapshot: newerStreamSnapshot,
+      snapshot: newerPollSnapshot,
     }),
-    subscribe: (nextListener) => {
+    startPolling: (nextListener) => {
       listener = nextListener;
       return { close: () => undefined };
     },
@@ -269,15 +262,15 @@ test("preserves a newer reconnecting stream snapshot when delayed bootstrap HTTP
   const currentState = (): WorkspaceStatsState => state;
   const cleanup = connectWorkspaceStats(client, dispatch);
 
-  listener({ kind: "snapshot", snapshot: newerStreamSnapshot });
-  listener({ kind: "disconnected" });
+  listener({ kind: "snapshot", snapshot: newerPollSnapshot });
+  listener({ kind: "unavailable" });
   resolveLoad({ kind: "available", snapshot: olderBootstrapSnapshot });
   await Promise.resolve();
 
   const afterBootstrap = currentState();
   assert.equal(afterBootstrap.kind, "reconnecting");
   if (afterBootstrap.kind === "reconnecting") {
-    assert.strictEqual(afterBootstrap.snapshot, newerStreamSnapshot);
+    assert.strictEqual(afterBootstrap.snapshot, newerPollSnapshot);
     assert.equal(afterBootstrap.snapshot.totalPageViews, 2);
   }
   cleanup();
@@ -290,7 +283,7 @@ test("record responses update retained data without promoting reconnecting or st
       kind: "recorded",
       snapshot: recordedSnapshot,
     }),
-    subscribe: () => ({ close: () => undefined }),
+    startPolling: () => ({ close: () => undefined }),
   };
   const signal = new AbortController().signal;
   let reconnecting: WorkspaceStatsState = {
@@ -349,29 +342,21 @@ test("record responses update retained data without promoting reconnecting or st
   }
 });
 
-test("owns one stream lifecycle, retains snapshots through disconnects, and recovers", async () => {
-  let listener: (event: StatsStreamEvent) => void = () => undefined;
-  let activeStreams = 0;
-  let maximumActiveStreams = 0;
+test("owns one polling lifecycle, retains snapshots through poll failures, and recovers", async () => {
+  let listener: (event: StatsPollEvent) => void = () => undefined;
+  let activePollers = 0;
+  let maximumActivePollers = 0;
   let closeCount = 0;
-  let loadSignal: AbortSignal | undefined;
-  let resolveLoad: (result: StatsLoadResult) => void = () => undefined;
-  const loadResult = new Promise<StatsLoadResult>((resolve) => {
-    resolveLoad = resolve;
-  });
   const client: StatsClient = {
-    loadSnapshot: (signal) => {
-      loadSignal = signal;
-      return loadResult;
-    },
+    loadSnapshot: () => Promise.resolve({ kind: "available", snapshot: liveSnapshot }),
     recordView: () => Promise.resolve({ kind: "recorded", snapshot: liveSnapshot }),
-    subscribe: (nextListener) => {
+    startPolling: (nextListener) => {
       listener = nextListener;
-      activeStreams += 1;
-      maximumActiveStreams = Math.max(maximumActiveStreams, activeStreams);
+      activePollers += 1;
+      maximumActivePollers = Math.max(maximumActivePollers, activePollers);
       return {
         close: () => {
-          activeStreams -= 1;
+          activePollers -= 1;
           closeCount += 1;
         },
       };
@@ -385,7 +370,7 @@ test("owns one stream lifecycle, retains snapshots through disconnects, and reco
 
   const firstCleanup = connectWorkspaceStats(client, dispatch);
   listener({ kind: "snapshot", snapshot: liveSnapshot });
-  listener({ kind: "disconnected" });
+  listener({ kind: "unavailable" });
   assert.equal(stateKind(), "reconnecting");
   listener({ kind: "invalid" });
   assert.equal(stateKind(), "stale");
@@ -393,20 +378,17 @@ test("owns one stream lifecycle, retains snapshots through disconnects, and reco
   assert.equal(stateKind(), "no-data");
 
   firstCleanup();
-  assert.equal(loadSignal?.aborted, true);
-  assert.equal(activeStreams, 0);
+  assert.equal(activePollers, 0);
   const stateAfterCleanup = stateKind();
-  resolveLoad({ kind: "available", snapshot: readOnlySnapshot });
-  await Promise.resolve();
   assert.equal(stateKind(), stateAfterCleanup);
 
   const secondCleanup = connectWorkspaceStats(client, dispatch);
-  assert.equal(activeStreams, 1);
+  assert.equal(activePollers, 1);
   secondCleanup();
 
-  assert.equal(maximumActiveStreams, 1);
+  assert.equal(maximumActivePollers, 1);
   assert.equal(closeCount, 2);
-  assert.equal(activeStreams, 0);
+  assert.equal(activePollers, 0);
 });
 
 test("deduplicates workspace-local accepted content IDs before recording", async () => {
@@ -417,7 +399,7 @@ test("deduplicates workspace-local accepted content IDs before recording", async
       recorded.push(id.value);
       return Promise.resolve({ kind: "recorded", snapshot: liveSnapshot });
     },
-    subscribe: () => ({ close: () => undefined }),
+    startPolling: () => ({ close: () => undefined }),
   };
   let state: WorkspaceStatsState = { kind: "loading" };
   const dispatch = (transition: (current: WorkspaceStatsState) => WorkspaceStatsState): void => {

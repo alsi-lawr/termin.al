@@ -303,10 +303,6 @@ module StatsTests =
             if unavailable.GetSnapshot(CancellationToken.None).GetAwaiter().GetResult().IsSome then
                 failwith "A never-valid corrupt store must be unavailable."
 
-            match unavailable.Subscribe().GetAwaiter().GetResult() with
-            | Stats.SubscriptionUnavailable -> ()
-            | result -> failwithf "A never-valid store must reject subscriptions, received %A." result
-
             unavailable.Shutdown())
 
         withTemporaryDirectory (fun path ->
@@ -339,12 +335,6 @@ module StatsTests =
             if readOnly.StorageState <> Stats.ReadOnly || readOnly.TotalPageViews <> 1L then
                 failwith "An unremovable temporary sibling must leave the valid main snapshot available read-only."
 
-            let subscriptionId =
-                match readOnlyStore.Subscribe().GetAwaiter().GetResult() with
-                | Stats.Subscribed(_, subscriptionId, initial) when initial.StorageState = Stats.ReadOnly ->
-                    subscriptionId
-                | result -> failwithf "A readable read-only snapshot must remain subscribable, received %A." result
-
             match record readOnlyStore "another-session" "sample-project" with
             | Stats.Unavailable -> ()
             | result -> failwithf "A cleanup-failed store must reject writes as unavailable, received %A." result
@@ -352,10 +342,9 @@ module StatsTests =
             if File.ReadAllText(mainPath) <> persisted then
                 failwith "Temporary-sibling cleanup failure must not damage the valid main statistics file."
 
-            readOnlyStore.Unsubscribe subscriptionId
             readOnlyStore.Shutdown())
 
-    let private runRateAndSubscriptionChecks () =
+    let private runRateChecks () =
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
 
@@ -369,131 +358,21 @@ module StatsTests =
             | Stats.RateLimited -> ()
             | result -> failwithf "Duplicate attempts must consume the per-session rate budget, received %A." result
 
-            let reader, subscriptionId =
-                match store.Subscribe().GetAwaiter().GetResult() with
-                | Stats.Subscribed(reader, subscriptionId, _) -> reader, subscriptionId
-                | result -> failwithf "Expected an available subscription, received %A." result
-
-            record store "published-session" "about" |> expectAccepted |> ignore
-            record store "published-session" "sample-project" |> expectAccepted |> ignore
-
-            let mutable publication = ""
-
-            if
-                not (reader.TryRead(&publication))
-                || not (publication.Contains("\"totalPageViews\":3", StringComparison.Ordinal))
-            then
-                failwith "A slow subscriber must retain only the latest accepted aggregate snapshot."
-
-            let mutable superseded = ""
-
-            if reader.TryRead(&superseded) then
-                failwith "A slow subscriber must not retain superseded aggregate snapshots."
-
-            store.Unsubscribe subscriptionId
             store.Shutdown())
-
-        withTemporaryDirectory (fun path ->
-            let store = Stats.createStoreAt path (fun () -> now)
-            store.Shutdown()
-
-            match
-                store
-                    .Subscribe()
-                    .WaitAsync(TimeSpan.FromSeconds(1.0))
-                    .GetAwaiter()
-                    .GetResult()
-            with
-            | Stats.SubscriptionStopped -> ()
-            | result -> failwithf "Expected a post-shutdown subscription to stop immediately, received %A." result)
-
-        withTemporaryDirectory (fun path ->
-            let store = Stats.createStoreAt path (fun () -> now)
-            let subscription = store.Subscribe()
-            let shutdown = Task.Run(fun () -> store.Shutdown())
-
-            Task
-                .WhenAll(subscription :> Task, shutdown)
-                .WaitAsync(TimeSpan.FromSeconds(1.0))
-                .GetAwaiter()
-                .GetResult()
-
-            match subscription.GetAwaiter().GetResult() with
-            | Stats.Subscribed(reader, subscriptionId, _) ->
-                reader
-                    .Completion
-                    .WaitAsync(TimeSpan.FromSeconds(1.0))
-                    .GetAwaiter()
-                    .GetResult()
-
-                store.Unsubscribe subscriptionId
-            | result -> failwithf "Expected a pre-stop registration to complete, received %A." result)
-
-        withTemporaryDirectory (fun path ->
-            for iteration in 1..25 do
-                let iterationPath = Path.Combine(path, string iteration)
-                let store = Stats.createStoreAt iterationPath (fun () -> now)
-                use barrier = new Barrier(2)
-
-                let subscription =
-                    Task.Run<Stats.SubscriptionResult>(
-                        Func<Task<Stats.SubscriptionResult>>(fun () ->
-                            barrier.SignalAndWait()
-                            store.Subscribe())
-                    )
-
-                let shutdown =
-                    Task.Run(fun () ->
-                        barrier.SignalAndWait()
-                        store.Shutdown())
-
-                Task
-                    .WhenAll(subscription :> Task, shutdown)
-                    .WaitAsync(TimeSpan.FromSeconds(1.0))
-                    .GetAwaiter()
-                    .GetResult()
-
-                match subscription.GetAwaiter().GetResult() with
-                | Stats.Subscribed(reader, subscriptionId, _) ->
-                    reader
-                        .Completion
-                        .WaitAsync(TimeSpan.FromSeconds(1.0))
-                        .GetAwaiter()
-                        .GetResult()
-
-                    store.Unsubscribe subscriptionId
-                | Stats.SubscriptionStopped -> ()
-                | result ->
-                    failwithf
-                        "Expected a legal concurrent subscription outcome in iteration %d, received %A."
-                        iteration
-                        result)
 
         withTemporaryDirectory (fun path ->
             let store = Stats.createStoreAt path (fun () -> now)
 
             for attempt in 1..15 do
                 match
-                    store.RecordView(
-                        "invalid-session",
-                        "lexically-valid",
-                        allowedContent,
-                        now,
-                        CancellationToken.None
-                    )
+                    store.RecordView("invalid-session", "lexically-valid", allowedContent, now, CancellationToken.None)
                     |> _.GetAwaiter().GetResult()
                 with
                 | Stats.InvalidContent -> ()
                 | result -> failwithf "Unexpected invalid-content result for attempt %d: %A." attempt result
 
             match
-                store.RecordView(
-                    "invalid-session",
-                    "lexically-valid",
-                    allowedContent,
-                    now,
-                    CancellationToken.None
-                )
+                store.RecordView("invalid-session", "lexically-valid", allowedContent, now, CancellationToken.None)
                 |> _.GetAwaiter().GetResult()
             with
             | Stats.RateLimited -> ()
@@ -514,13 +393,7 @@ module StatsTests =
 
                 for attempt in 1..15 do
                     match
-                        store.RecordView(
-                            sessionId,
-                            "lexically-valid",
-                            allowedContent,
-                            now,
-                            CancellationToken.None
-                        )
+                        store.RecordView(sessionId, "lexically-valid", allowedContent, now, CancellationToken.None)
                         |> _.GetAwaiter().GetResult()
                     with
                     | Stats.InvalidContent -> ()
@@ -532,13 +405,7 @@ module StatsTests =
                             result
 
             match
-                store.RecordView(
-                    "process-session-21",
-                    "lexically-valid",
-                    allowedContent,
-                    now,
-                    CancellationToken.None
-                )
+                store.RecordView("process-session-21", "lexically-valid", allowedContent, now, CancellationToken.None)
                 |> _.GetAwaiter().GetResult()
             with
             | Stats.RateLimited -> ()
@@ -566,369 +433,7 @@ module StatsTests =
 
             store.Shutdown())
 
-    let private withRunningHost (application: WebApplication) action =
-        application.Urls.Add("http://127.0.0.1:0")
-
-        try
-            application.StartAsync().GetAwaiter().GetResult()
-            let server = application.Services.GetRequiredService<IServer>()
-            let addresses = server.Features.Get<IServerAddressesFeature>()
-
-            if isNull addresses then
-                failwith "The statistics test host did not publish an address."
-
-            let address = addresses.Addresses |> Seq.exactlyOne
-            use client = new HttpClient()
-            client.BaseAddress <- Uri(address)
-            action client address
-        finally
-            application
-                .StopAsync()
-                .WaitAsync(TimeSpan.FromSeconds(5.0))
-                .GetAwaiter()
-                .GetResult()
-
-            application.DisposeAsync().AsTask().GetAwaiter().GetResult()
-
-    let private request
-        (method: HttpMethod)
-        (path: string)
-        (origin: string option)
-        (body: string option)
-        (cookie: string option)
-        =
-        let message = new HttpRequestMessage(method, path)
-
-        origin |> Option.iter (fun value -> message.Headers.Add("Origin", value))
-        cookie |> Option.iter (fun value -> message.Headers.Add("Cookie", value))
-
-        body
-        |> Option.iter (fun value -> message.Content <- new StringContent(value, Encoding.UTF8, "application/json"))
-
-        message
-
-    let private runApiChecks () =
-        withTemporaryDirectory (fun path ->
-            let store = Stats.createStoreAt path (fun () -> now)
-
-            let randomBytes count =
-                Array.init count (fun index -> byte (index + 1))
-
-            HostApplication.createWithContentClientAndStats
-                [||]
-                (countableContentClient ())
-                store
-                true
-                randomBytes
-                (fun () -> now)
-                (TimeSpan.FromMilliseconds(20.0))
-            |> fun application ->
-                withRunningHost application (fun client origin ->
-                    use getRequest = request HttpMethod.Get "/api/stats" None None None
-                    use getResponse = client.Send getRequest
-
-                    if getResponse.StatusCode <> HttpStatusCode.OK then
-                        failwithf "Expected statistics GET 200, received %O." getResponse.StatusCode
-
-                    let setCookie = getResponse.Headers.GetValues("Set-Cookie") |> Seq.exactlyOne
-
-                    for required in [ "termin.al.stats-session="; "httponly"; "samesite=strict"; "path=/" ] do
-                        if not (setCookie.Contains(required, StringComparison.OrdinalIgnoreCase)) then
-                            failwithf "Statistics cookie is missing %s." required
-
-                    if setCookie.Contains("expires=", StringComparison.OrdinalIgnoreCase) then
-                        failwith "The statistics session cookie must not have a persistent expiry."
-
-                    let cookie = setCookie.Split(';')[0]
-                    let cookieValue = cookie.Split('=')[1]
-
-                    if cookieValue.Length <> 22 then
-                        failwith "The statistics session cookie must contain one base64url 128-bit value."
-
-                    use mismatchedGet =
-                        request HttpMethod.Get "/api/stats" (Some "https://example.invalid") None None
-
-                    use mismatchedGetResponse = client.Send mismatchedGet
-
-                    if mismatchedGetResponse.StatusCode <> HttpStatusCode.Forbidden then
-                        failwith "A present mismatched GET Origin must be rejected."
-
-                    use missingPostOrigin =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            None
-                            (Some "{\"contentId\":\"about\"}")
-                            (Some cookie)
-
-                    use missingPostOriginResponse = client.Send missingPostOrigin
-
-                    if missingPostOriginResponse.StatusCode <> HttpStatusCode.Forbidden then
-                        failwith "Statistics POST must require Origin."
-
-                    use arbitraryId =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"lexically-valid\"}")
-                            (Some cookie)
-
-                    use arbitraryIdResponse = client.Send arbitraryId
-
-                    if arbitraryIdResponse.StatusCode <> HttpStatusCode.BadRequest then
-                        failwith "Lexically valid IDs outside the catalog/project boundary must be rejected."
-
-                    let unchangedAfterInvalid = snapshot store
-
-                    if unchangedAfterInvalid.TotalSessions <> 0L || unchangedAfterInvalid.TotalPageViews <> 0L then
-                        failwith "An invalid content identifier must not change API aggregate totals."
-
-                    use lexicalInvalid =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"not countable!\"}")
-                            (Some cookie)
-
-                    use lexicalInvalidResponse = client.Send lexicalInvalid
-
-                    if lexicalInvalidResponse.StatusCode <> HttpStatusCode.BadRequest then
-                        failwith "Lexically invalid content IDs must remain invalid requests."
-
-                    use validPost =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"about\"}")
-                            (Some cookie)
-
-                    use validPostResponse = client.Send validPost
-
-                    if validPostResponse.StatusCode <> HttpStatusCode.OK then
-                        failwithf "Expected countable view 200, received %O." validPostResponse.StatusCode
-
-                    let validBody =
-                        validPostResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                    if
-                        not (validBody.Contains("\"totalSessions\":1", StringComparison.Ordinal))
-                        || not (validBody.Contains("\"totalPageViews\":1", StringComparison.Ordinal))
-                    then
-                        failwith "The first API view must atomically count its session and content."
-
-                    use duplicatePost =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"about\"}")
-                            (Some cookie)
-
-                    use duplicatePostResponse = client.Send duplicatePost
-
-                    let duplicateBody =
-                        duplicatePostResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                    if not (duplicateBody.Contains("\"totalPageViews\":1", StringComparison.Ordinal)) then
-                        failwith "The API must deduplicate content within one statistics session."
-
-                    use projectPost =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"sample-project\"}")
-                            (Some cookie)
-
-                    use projectPostResponse = client.Send projectPost
-
-                    let projectBody =
-                        projectPostResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                    if
-                        not (projectBody.Contains("\"totalSessions\":1", StringComparison.Ordinal))
-                        || not (projectBody.Contains("\"totalPageViews\":2", StringComparison.Ordinal))
-                    then
-                        failwith
-                            "Project IDs from the current content boundary must be countable without duplicating sessions."
-
-                    for attempt in 5..15 do
-                        use invalidContent =
-                            request
-                                HttpMethod.Post
-                                "/api/stats/view"
-                                (Some origin)
-                                (Some "{\"contentId\":\"lexically-valid\"}")
-                                (Some cookie)
-
-                        use invalidContentResponse = client.Send invalidContent
-
-                        if invalidContentResponse.StatusCode <> HttpStatusCode.BadRequest then
-                            failwithf
-                                "Expected invalid-content attempt %d to remain 400, received %O."
-                                attempt
-                                invalidContentResponse.StatusCode
-
-                    use rateLimitedInvalidContent =
-                        request
-                            HttpMethod.Post
-                            "/api/stats/view"
-                            (Some origin)
-                            (Some "{\"contentId\":\"lexically-valid\"}")
-                            (Some cookie)
-
-                    use rateLimitedInvalidContentResponse = client.Send rateLimitedInvalidContent
-
-                    if rateLimitedInvalidContentResponse.StatusCode <> HttpStatusCode.TooManyRequests then
-                        failwith
-                            "Lexically valid invalid content must consume the API session budget before allowlist rejection."
-
-                    let unchangedAfterRateLimit = snapshot store
-
-                    if
-                        unchangedAfterRateLimit.TotalSessions <> 1L
-                        || unchangedAfterRateLimit.TotalPageViews <> 2L
-                        || unchangedAfterRateLimit.PageViewsByContent.ContainsKey "lexically-valid"
-                    then
-                        failwith "Invalid API content must never aggregate or enter persisted content counts."
-
-                    use cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5.0))
-                    use sseRequest = request HttpMethod.Get "/api/stats/events" None None (Some cookie)
-
-                    use sseResponse =
-                        client.Send(sseRequest, HttpCompletionOption.ResponseHeadersRead, cancellation.Token)
-
-                    if
-                        sseResponse.StatusCode <> HttpStatusCode.OK
-                        || sseResponse.Content.Headers.ContentType.MediaType <> "text/event-stream"
-                    then
-                        failwith "The statistics event endpoint must return an SSE stream."
-
-                    use stream = sseResponse.Content.ReadAsStream(cancellation.Token)
-                    use reader = new StreamReader(stream)
-
-                    let retry =
-                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
-
-                    let data =
-                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
-
-                    let separator =
-                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
-
-                    let heartbeat =
-                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
-
-                    let heartbeatSeparator =
-                        reader.ReadLineAsync(cancellation.Token).AsTask().GetAwaiter().GetResult()
-
-                    if
-                        retry <> "retry: 5000"
-                        || not (data.StartsWith("data: {", StringComparison.Ordinal))
-                        || separator <> ""
-                        || heartbeat <> ": heartbeat"
-                        || heartbeatSeparator <> ""
-                    then
-                        failwith
-                            "The statistics SSE stream must send retry guidance, its current snapshot, and heartbeats."
-
-                    cancellation.Cancel()
-
-                    try
-                        reader
-                            .ReadLineAsync(cancellation.Token)
-                            .AsTask()
-                            .WaitAsync(TimeSpan.FromSeconds(5.0))
-                            .GetAwaiter()
-                            .GetResult()
-                        |> ignore
-
-                        failwith "A cancelled statistics SSE request must stop reading promptly."
-                    with :? OperationCanceledException -> ()))
-
-        withTemporaryDirectory (fun path ->
-            let store = Stats.createStoreAt path (fun () -> now)
-            let mutable setupAttempts = 0
-
-            let wrongLengthRandomBytes count =
-                setupAttempts <- setupAttempts + 1
-                Array.zeroCreate (count - 1)
-
-            HostApplication.createWithContentClientAndStats
-                [||]
-                (countableContentClient ())
-                store
-                true
-                wrongLengthRandomBytes
-                (fun () -> now)
-                (TimeSpan.FromSeconds(30.0))
-            |> fun application ->
-                withRunningHost application (fun client _ ->
-                    use sseRequest = request HttpMethod.Get "/api/stats/events" None None None
-
-                    try
-                        use response =
-                            client
-                                .SendAsync(sseRequest, HttpCompletionOption.ResponseHeadersRead)
-                                .WaitAsync(TimeSpan.FromSeconds(5.0))
-                                .GetAwaiter()
-                                .GetResult()
-
-                        if response.IsSuccessStatusCode then
-                            failwith "Failed statistics SSE setup must not establish a successful stream."
-                    with :? HttpRequestException -> ()
-
-                    if setupAttempts <> 1 then
-                        failwithf
-                            "Expected one post-registration statistics cookie setup attempt, received %d."
-                            setupAttempts))
-
-        withTemporaryDirectory (fun path ->
-            let store = Stats.createStoreAt path (fun () -> now)
-
-            HostApplication.createWithContentClientAndStats
-                [||]
-                (countableContentClient ())
-                store
-                false
-                (fun count -> Array.zeroCreate count)
-                (fun () -> now)
-                (TimeSpan.FromSeconds(30.0))
-            |> fun application ->
-                withRunningHost application (fun client _ ->
-                    use response = client.GetAsync("/api/stats").GetAwaiter().GetResult()
-                    let setCookie = response.Headers.GetValues("Set-Cookie") |> Seq.exactlyOne
-
-                    if not (setCookie.Contains("secure", StringComparison.OrdinalIgnoreCase)) then
-                        failwith "Statistics cookies must be Secure outside local HTTP development."))
-
-        let unavailableStore = Stats.unavailableStore (fun () -> now)
-
-        HostApplication.createWithContentClientAndStats
-            [||]
-            (countableContentClient ())
-            unavailableStore
-            true
-            (fun count -> Array.zeroCreate count)
-            (fun () -> now)
-            (TimeSpan.FromSeconds(30.0))
-        |> fun application ->
-            withRunningHost application (fun client _ ->
-                use response = client.GetAsync("/api/stats").GetAwaiter().GetResult()
-                let body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-
-                if
-                    response.StatusCode <> HttpStatusCode.ServiceUnavailable
-                    || not (body.Contains("\"code\":\"stats-unavailable\"", StringComparison.Ordinal))
-                    || body.Contains("totalSessions", StringComparison.Ordinal)
-                then
-                    failwith "A never-valid statistics store must return a payload-free stable unavailable problem.")
-
     let run () =
         runStoreDurabilityAndPrivacyChecks ()
         runRecoveryAndAvailabilityChecks ()
-        runRateAndSubscriptionChecks ()
-        runApiChecks ()
+        runRateChecks ()

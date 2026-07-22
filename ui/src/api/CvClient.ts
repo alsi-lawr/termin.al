@@ -1,5 +1,11 @@
-import { apiPathPrefix } from "./ApiPath.ts";
-import { DemoCapabilityState } from "./SessionClient.ts";
+import { RpcError, type RpcMetadata } from "@protobuf-ts/runtime-rpc";
+import type { CvDocumentResponse, EmptyRequest } from "../generated/browser/browser.ts";
+import { CvApiClient } from "../generated/browser/browser.client.ts";
+import {
+  BrowserGrpcContext,
+  createBrowserGrpcTransport,
+} from "./BrowserGrpcContext.ts";
+import { DemoCapabilityState, type SessionClient } from "./SessionClient.ts";
 
 export type CvViewerKey = string & { readonly __brand: "CvViewerKey" };
 
@@ -23,6 +29,21 @@ export interface CvClient {
   read(signal: AbortSignal): Promise<CvDocumentResult>;
 }
 
+type CvRpcClient = Readonly<{
+  unlock: (
+    request: Readonly<{ key: string }>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<EmptyRequest> }>;
+  lock: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<EmptyRequest> }>;
+  read: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<CvDocumentResponse> }>;
+}>;
+
 const cvAccessFailed = {
   kind: "failed",
   message: "CV access failed.",
@@ -34,120 +55,88 @@ const cvDocumentFailed = {
 } as const satisfies CvDocumentResult;
 
 export function cvViewerKeyFrom(value: string): CvKeyResult {
-  if (value.length < 32 || value.length > 256) {
-    return { kind: "invalid" };
-  }
-
-  return { kind: "valid", key: value as CvViewerKey };
-}
-
-async function csrfToken(signal: AbortSignal): Promise<string | undefined> {
-  try {
-    const response = await fetch(`${apiPathPrefix}/session`, {
-      credentials: "same-origin",
-      headers: { Accept: "application/json" },
-      signal,
-    });
-
-    if (!response.ok) {
-      return undefined;
-    }
-
-    const value: unknown = await response.json();
-
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      !("csrfToken" in value) ||
-      typeof value.csrfToken !== "string" ||
-      value.csrfToken.length < 16 ||
-      value.csrfToken.length > 4096
-    ) {
-      return undefined;
-    }
-
-    return value.csrfToken;
-  } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
-
-    return undefined;
-  }
-}
-
-async function mutateCv(
-  method: "POST" | "DELETE",
-  key: CvViewerKey | undefined,
-  signal: AbortSignal,
-): Promise<CvAccessResult> {
-  const token = await csrfToken(signal);
-
-  if (token === undefined) {
-    return cvAccessFailed;
-  }
-
-  try {
-    const response = await fetch(`${apiPathPrefix}/auth/cv`, {
-      method,
-      credentials: "same-origin",
-      headers: {
-        "X-CSRF-TOKEN": token,
-        ...(key === undefined ? {} : { "Content-Type": "application/json" }),
-      },
-      body: key === undefined ? undefined : JSON.stringify({ key }),
-      signal,
-    });
-
-    if (response.ok) {
-      return method === "POST" ? { kind: "unlocked" } : { kind: "locked" };
-    }
-
-    return cvAccessFailed;
-  } catch (error: unknown) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      throw error;
-    }
-
-    return cvAccessFailed;
-  }
+  return value.length >= 32 && value.length <= 256
+    ? { kind: "valid", key: value as CvViewerKey }
+    : { kind: "invalid" };
 }
 
 export class HttpCvClient implements CvClient {
-  unlock(key: CvViewerKey, signal: AbortSignal): Promise<CvAccessResult> {
-    return mutateCv("POST", key, signal);
+  private readonly context: BrowserGrpcContext;
+  private readonly sessionClient: SessionClient;
+  private readonly client: CvRpcClient;
+
+  constructor(
+    context: BrowserGrpcContext,
+    sessionClient: SessionClient,
+    client: CvRpcClient = new CvApiClient(createBrowserGrpcTransport()),
+  ) {
+    this.context = context;
+    this.sessionClient = sessionClient;
+    this.client = client;
   }
 
-  lock(signal: AbortSignal): Promise<CvAccessResult> {
-    return mutateCv("DELETE", undefined, signal);
+  private async prepareMutation(signal: AbortSignal): Promise<boolean> {
+    const session = await this.sessionClient.read(signal);
+    return session.kind === "available";
+  }
+
+  async unlock(key: CvViewerKey, signal: AbortSignal): Promise<CvAccessResult> {
+    if (!await this.prepareMutation(signal)) {
+      return cvAccessFailed;
+    }
+
+    try {
+      await this.client.unlock(
+        { key },
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      return { kind: "unlocked" };
+    } catch (error: unknown) {
+      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+
+      return cvAccessFailed;
+    }
+  }
+
+  async lock(signal: AbortSignal): Promise<CvAccessResult> {
+    if (!await this.prepareMutation(signal)) {
+      return cvAccessFailed;
+    }
+
+    try {
+      await this.client.lock(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      return { kind: "locked" };
+    } catch (error: unknown) {
+      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+
+      return cvAccessFailed;
+    }
   }
 
   async read(signal: AbortSignal): Promise<CvDocumentResult> {
     try {
-      const response = await fetch(`${apiPathPrefix}/cv`, {
-        credentials: "same-origin",
-        headers: { Accept: "text/markdown" },
-        signal,
-      });
+      const response = await this.client.read(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
 
-      if (response.status === 403) {
-        return { kind: "locked" };
-      }
-
-      if (!response.ok) {
-        return cvDocumentFailed;
-      }
-
-      const markdown = await response.text();
-
-      if (new TextEncoder().encode(markdown).byteLength > 1024 * 1024) {
-        return cvDocumentFailed;
-      }
-
-      return { kind: "available", markdown };
+      return new TextEncoder().encode(response.markdown).byteLength <= 1024 * 1024
+        ? { kind: "available", markdown: response.markdown }
+        : cvDocumentFailed;
     } catch (error: unknown) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw error;
+      if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+
+      if (error instanceof RpcError && error.code === "PERMISSION_DENIED") {
+        return { kind: "locked" };
       }
 
       return cvDocumentFailed;

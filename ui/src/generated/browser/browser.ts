@@ -121,6 +121,304 @@ export interface CatalogResponse {
     cache?: CacheMetadata;
 }
 /**
+ * @generated from protobuf message terminal.v1.DocumentRequest
+ */
+export interface DocumentRequest {
+    /**
+     * @generated from protobuf field: string id = 1
+     */
+    id: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.DocumentResponse
+ */
+export interface DocumentResponse {
+    /**
+     * @generated from protobuf field: terminal.v1.DocumentKind kind = 1
+     */
+    kind: DocumentKind;
+    /**
+     * @generated from protobuf field: string id = 2
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: string slug = 3
+     */
+    slug: string;
+    /**
+     * @generated from protobuf field: string path = 4
+     */
+    path: string;
+    /**
+     * @generated from protobuf field: string title = 5
+     */
+    title: string;
+    /**
+     * @generated from protobuf field: string summary = 6
+     */
+    summary: string;
+    /**
+     * @generated from protobuf field: string updated_at = 7
+     */
+    updatedAt: string;
+    /**
+     * @generated from protobuf field: repeated string tags = 8
+     */
+    tags: string[];
+    /**
+     * @generated from protobuf field: string body = 9
+     */
+    body: string;
+    /**
+     * @generated from protobuf field: terminal.v1.ContentSource source = 10
+     */
+    source?: ContentSource;
+    /**
+     * @generated from protobuf field: terminal.v1.CacheMetadata cache = 11
+     */
+    cache?: CacheMetadata;
+}
+/**
+ * @generated from protobuf message terminal.v1.Project
+ */
+export interface Project {
+    /**
+     * @generated from protobuf field: string id = 1
+     */
+    id: string;
+    /**
+     * @generated from protobuf field: string slug = 2
+     */
+    slug: string;
+    /**
+     * @generated from protobuf field: string name = 3
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: string summary = 4
+     */
+    summary: string;
+    /**
+     * @generated from protobuf field: string url = 5
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: string repository = 6
+     */
+    repository: string;
+    /**
+     * @generated from protobuf field: string collection_path = 7
+     */
+    collectionPath: string;
+    /**
+     * @generated from protobuf field: string updated_at = 8
+     */
+    updatedAt: string;
+    /**
+     * @generated from protobuf field: repeated string tags = 9
+     */
+    tags: string[];
+    /**
+     * @generated from protobuf field: string readme = 10
+     */
+    readme: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.ProjectsResponse
+ */
+export interface ProjectsResponse {
+    /**
+     * @generated from protobuf field: repeated terminal.v1.Project projects = 1
+     */
+    projects: Project[];
+    /**
+     * @generated from protobuf field: terminal.v1.ContentSource source = 2
+     */
+    source?: ContentSource;
+    /**
+     * @generated from protobuf field: terminal.v1.CacheMetadata cache = 3
+     */
+    cache?: CacheMetadata;
+}
+/**
+ * @generated from protobuf message terminal.v1.NowResponse
+ */
+export interface NowResponse {
+    /**
+     * @generated from protobuf field: string title = 1
+     */
+    title: string;
+    /**
+     * @generated from protobuf field: string body = 2
+     */
+    body: string;
+    /**
+     * @generated from protobuf field: string updated_at = 3
+     */
+    updatedAt: string;
+    /**
+     * @generated from protobuf field: terminal.v1.ContentSource source = 4
+     */
+    source?: ContentSource;
+    /**
+     * @generated from protobuf field: terminal.v1.CacheMetadata cache = 5
+     */
+    cache?: CacheMetadata;
+}
+/**
+ * @generated from protobuf message terminal.v1.Commit
+ */
+export interface Commit {
+    /**
+     * @generated from protobuf field: string sha = 1
+     */
+    sha: string;
+    /**
+     * @generated from protobuf field: string summary = 2
+     */
+    summary: string;
+    /**
+     * @generated from protobuf field: string authored_at = 3
+     */
+    authoredAt: string;
+    /**
+     * @generated from protobuf field: string url = 4
+     */
+    url: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.Release
+ */
+export interface Release {
+    /**
+     * @generated from protobuf field: string tag = 1
+     */
+    tag: string;
+    /**
+     * @generated from protobuf field: string name = 2
+     */
+    name: string;
+    /**
+     * @generated from protobuf field: string published_at = 3
+     */
+    publishedAt: string;
+    /**
+     * @generated from protobuf field: string body = 4
+     */
+    body: string;
+    /**
+     * @generated from protobuf field: string url = 5
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: repeated terminal.v1.Commit commits = 6
+     */
+    commits: Commit[];
+}
+/**
+ * @generated from protobuf message terminal.v1.ChangelogResponse
+ */
+export interface ChangelogResponse {
+    /**
+     * @generated from protobuf field: repeated terminal.v1.Commit unreleased = 1
+     */
+    unreleased: Commit[];
+    /**
+     * @generated from protobuf field: repeated terminal.v1.Release releases = 2
+     */
+    releases: Release[];
+    /**
+     * @generated from protobuf field: terminal.v1.ContentSource source = 3
+     */
+    source?: ContentSource;
+    /**
+     * @generated from protobuf field: terminal.v1.CacheMetadata cache = 4
+     */
+    cache?: CacheMetadata;
+}
+/**
+ * @generated from protobuf message terminal.v1.StatsContentCount
+ */
+export interface StatsContentCount {
+    /**
+     * @generated from protobuf field: string content_id = 1
+     */
+    contentId: string;
+    /**
+     * @generated from protobuf field: int64 page_views = 2
+     */
+    pageViews: bigint;
+}
+/**
+ * @generated from protobuf message terminal.v1.StatsDailyCount
+ */
+export interface StatsDailyCount {
+    /**
+     * @generated from protobuf field: string date = 1
+     */
+    date: string;
+    /**
+     * @generated from protobuf field: int64 sessions = 2
+     */
+    sessions: bigint;
+    /**
+     * @generated from protobuf field: int64 page_views = 3
+     */
+    pageViews: bigint;
+}
+/**
+ * @generated from protobuf message terminal.v1.StatsSnapshot
+ */
+export interface StatsSnapshot {
+    /**
+     * @generated from protobuf field: int64 total_sessions = 1
+     */
+    totalSessions: bigint;
+    /**
+     * @generated from protobuf field: int64 total_page_views = 2
+     */
+    totalPageViews: bigint;
+    /**
+     * @generated from protobuf field: repeated terminal.v1.StatsContentCount page_views_by_content = 3
+     */
+    pageViewsByContent: StatsContentCount[];
+    /**
+     * @generated from protobuf field: repeated terminal.v1.StatsDailyCount daily = 4
+     */
+    daily: StatsDailyCount[];
+    /**
+     * @generated from protobuf field: terminal.v1.StatsStorageState storage_state = 5
+     */
+    storageState: StatsStorageState;
+}
+/**
+ * @generated from protobuf message terminal.v1.RecordViewRequest
+ */
+export interface RecordViewRequest {
+    /**
+     * @generated from protobuf field: string content_id = 1
+     */
+    contentId: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.UnlockCvRequest
+ */
+export interface UnlockCvRequest {
+    /**
+     * @generated from protobuf field: string key = 1
+     */
+    key: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.CvDocumentResponse
+ */
+export interface CvDocumentResponse {
+    /**
+     * @generated from protobuf field: string markdown = 1
+     */
+    markdown: string;
+}
+/**
  * @generated from protobuf enum terminal.v1.SessionKind
  */
 export const SessionKind = { UNSPECIFIED: 0, ANONYMOUS: 1, GITHUB_VIEWER: 2, CV_VIEWER: 3, GITHUB_CV_VIEWER: 4, OWNER: 5 } as const;
@@ -135,6 +433,16 @@ export type CacheState = number;
  */
 export const CatalogEntryKind = { UNSPECIFIED: 0, DIRECTORY: 1, FILE: 2, LOCKED_FILE: 3 } as const;
 export type CatalogEntryKind = number;
+/**
+ * @generated from protobuf enum terminal.v1.DocumentKind
+ */
+export const DocumentKind = { UNSPECIFIED: 0, PAGE: 1, BLOG: 2, NOTE: 3 } as const;
+export type DocumentKind = number;
+/**
+ * @generated from protobuf enum terminal.v1.StatsStorageState
+ */
+export const StatsStorageState = { UNSPECIFIED: 0, WRITABLE: 1, READ_ONLY: 2 } as const;
+export type StatsStorageState = number;
 // @generated message type with reflection information, may provide speed optimized methods
 class EmptyRequest$Type extends MessageType<EmptyRequest> {
     constructor() {
@@ -526,15 +834,1029 @@ class CatalogResponse$Type extends MessageType<CatalogResponse> {
  * @generated MessageType for protobuf message terminal.v1.CatalogResponse
  */
 export const CatalogResponse = new CatalogResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DocumentRequest$Type extends MessageType<DocumentRequest> {
+    constructor() {
+        super("terminal.v1.DocumentRequest", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<DocumentRequest>): DocumentRequest {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.id = "";
+        if (value !== undefined)
+            reflectionMergePartial<DocumentRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DocumentRequest): DocumentRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DocumentRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.DocumentRequest
+ */
+export const DocumentRequest = new DocumentRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class DocumentResponse$Type extends MessageType<DocumentResponse> {
+    constructor() {
+        super("terminal.v1.DocumentResponse", [
+            { no: 1, name: "kind", kind: "enum", T: () => ["terminal.v1.DocumentKind", DocumentKind, "DOCUMENT_KIND_"] },
+            { no: 2, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "slug", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "summary", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "updated_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "tags", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "source", kind: "message", T: () => ContentSource },
+            { no: 11, name: "cache", kind: "message", T: () => CacheMetadata }
+        ]);
+    }
+    create(value?: PartialMessage<DocumentResponse>): DocumentResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.kind = 0;
+        message.id = "";
+        message.slug = "";
+        message.path = "";
+        message.title = "";
+        message.summary = "";
+        message.updatedAt = "";
+        message.tags = [];
+        message.body = "";
+        if (value !== undefined)
+            reflectionMergePartial<DocumentResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: DocumentResponse): DocumentResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* terminal.v1.DocumentKind kind */ 1:
+                    message.kind = reader.int32();
+                    break;
+                case /* string id */ 2:
+                    message.id = reader.string();
+                    break;
+                case /* string slug */ 3:
+                    message.slug = reader.string();
+                    break;
+                case /* string path */ 4:
+                    message.path = reader.string();
+                    break;
+                case /* string title */ 5:
+                    message.title = reader.string();
+                    break;
+                case /* string summary */ 6:
+                    message.summary = reader.string();
+                    break;
+                case /* string updated_at */ 7:
+                    message.updatedAt = reader.string();
+                    break;
+                case /* repeated string tags */ 8:
+                    message.tags.push(reader.string());
+                    break;
+                case /* string body */ 9:
+                    message.body = reader.string();
+                    break;
+                case /* terminal.v1.ContentSource source */ 10:
+                    message.source = ContentSource.internalBinaryRead(reader, reader.uint32(), options, message.source);
+                    break;
+                case /* terminal.v1.CacheMetadata cache */ 11:
+                    message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: DocumentResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* terminal.v1.DocumentKind kind = 1; */
+        if (message.kind !== 0)
+            writer.tag(1, WireType.Varint).int32(message.kind);
+        /* string id = 2; */
+        if (message.id !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.id);
+        /* string slug = 3; */
+        if (message.slug !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.slug);
+        /* string path = 4; */
+        if (message.path !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.path);
+        /* string title = 5; */
+        if (message.title !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.title);
+        /* string summary = 6; */
+        if (message.summary !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.summary);
+        /* string updated_at = 7; */
+        if (message.updatedAt !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.updatedAt);
+        /* repeated string tags = 8; */
+        for (let i = 0; i < message.tags.length; i++)
+            writer.tag(8, WireType.LengthDelimited).string(message.tags[i]);
+        /* string body = 9; */
+        if (message.body !== "")
+            writer.tag(9, WireType.LengthDelimited).string(message.body);
+        /* terminal.v1.ContentSource source = 10; */
+        if (message.source)
+            ContentSource.internalBinaryWrite(message.source, writer.tag(10, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.CacheMetadata cache = 11; */
+        if (message.cache)
+            CacheMetadata.internalBinaryWrite(message.cache, writer.tag(11, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.DocumentResponse
+ */
+export const DocumentResponse = new DocumentResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Project$Type extends MessageType<Project> {
+    constructor() {
+        super("terminal.v1.Project", [
+            { no: 1, name: "id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "slug", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "summary", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "repository", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "collection_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "updated_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "tags", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
+            { no: 10, name: "readme", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Project>): Project {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.id = "";
+        message.slug = "";
+        message.name = "";
+        message.summary = "";
+        message.url = "";
+        message.repository = "";
+        message.collectionPath = "";
+        message.updatedAt = "";
+        message.tags = [];
+        message.readme = "";
+        if (value !== undefined)
+            reflectionMergePartial<Project>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Project): Project {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string id */ 1:
+                    message.id = reader.string();
+                    break;
+                case /* string slug */ 2:
+                    message.slug = reader.string();
+                    break;
+                case /* string name */ 3:
+                    message.name = reader.string();
+                    break;
+                case /* string summary */ 4:
+                    message.summary = reader.string();
+                    break;
+                case /* string url */ 5:
+                    message.url = reader.string();
+                    break;
+                case /* string repository */ 6:
+                    message.repository = reader.string();
+                    break;
+                case /* string collection_path */ 7:
+                    message.collectionPath = reader.string();
+                    break;
+                case /* string updated_at */ 8:
+                    message.updatedAt = reader.string();
+                    break;
+                case /* repeated string tags */ 9:
+                    message.tags.push(reader.string());
+                    break;
+                case /* string readme */ 10:
+                    message.readme = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Project, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string id = 1; */
+        if (message.id !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.id);
+        /* string slug = 2; */
+        if (message.slug !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.slug);
+        /* string name = 3; */
+        if (message.name !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.name);
+        /* string summary = 4; */
+        if (message.summary !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.summary);
+        /* string url = 5; */
+        if (message.url !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.url);
+        /* string repository = 6; */
+        if (message.repository !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.repository);
+        /* string collection_path = 7; */
+        if (message.collectionPath !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.collectionPath);
+        /* string updated_at = 8; */
+        if (message.updatedAt !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.updatedAt);
+        /* repeated string tags = 9; */
+        for (let i = 0; i < message.tags.length; i++)
+            writer.tag(9, WireType.LengthDelimited).string(message.tags[i]);
+        /* string readme = 10; */
+        if (message.readme !== "")
+            writer.tag(10, WireType.LengthDelimited).string(message.readme);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.Project
+ */
+export const Project = new Project$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ProjectsResponse$Type extends MessageType<ProjectsResponse> {
+    constructor() {
+        super("terminal.v1.ProjectsResponse", [
+            { no: 1, name: "projects", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Project },
+            { no: 2, name: "source", kind: "message", T: () => ContentSource },
+            { no: 3, name: "cache", kind: "message", T: () => CacheMetadata }
+        ]);
+    }
+    create(value?: PartialMessage<ProjectsResponse>): ProjectsResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.projects = [];
+        if (value !== undefined)
+            reflectionMergePartial<ProjectsResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ProjectsResponse): ProjectsResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated terminal.v1.Project projects */ 1:
+                    message.projects.push(Project.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* terminal.v1.ContentSource source */ 2:
+                    message.source = ContentSource.internalBinaryRead(reader, reader.uint32(), options, message.source);
+                    break;
+                case /* terminal.v1.CacheMetadata cache */ 3:
+                    message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ProjectsResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated terminal.v1.Project projects = 1; */
+        for (let i = 0; i < message.projects.length; i++)
+            Project.internalBinaryWrite(message.projects[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.ContentSource source = 2; */
+        if (message.source)
+            ContentSource.internalBinaryWrite(message.source, writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.CacheMetadata cache = 3; */
+        if (message.cache)
+            CacheMetadata.internalBinaryWrite(message.cache, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.ProjectsResponse
+ */
+export const ProjectsResponse = new ProjectsResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class NowResponse$Type extends MessageType<NowResponse> {
+    constructor() {
+        super("terminal.v1.NowResponse", [
+            { no: 1, name: "title", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "updated_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "source", kind: "message", T: () => ContentSource },
+            { no: 5, name: "cache", kind: "message", T: () => CacheMetadata }
+        ]);
+    }
+    create(value?: PartialMessage<NowResponse>): NowResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.title = "";
+        message.body = "";
+        message.updatedAt = "";
+        if (value !== undefined)
+            reflectionMergePartial<NowResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: NowResponse): NowResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string title */ 1:
+                    message.title = reader.string();
+                    break;
+                case /* string body */ 2:
+                    message.body = reader.string();
+                    break;
+                case /* string updated_at */ 3:
+                    message.updatedAt = reader.string();
+                    break;
+                case /* terminal.v1.ContentSource source */ 4:
+                    message.source = ContentSource.internalBinaryRead(reader, reader.uint32(), options, message.source);
+                    break;
+                case /* terminal.v1.CacheMetadata cache */ 5:
+                    message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: NowResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string title = 1; */
+        if (message.title !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.title);
+        /* string body = 2; */
+        if (message.body !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.body);
+        /* string updated_at = 3; */
+        if (message.updatedAt !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.updatedAt);
+        /* terminal.v1.ContentSource source = 4; */
+        if (message.source)
+            ContentSource.internalBinaryWrite(message.source, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.CacheMetadata cache = 5; */
+        if (message.cache)
+            CacheMetadata.internalBinaryWrite(message.cache, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.NowResponse
+ */
+export const NowResponse = new NowResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Commit$Type extends MessageType<Commit> {
+    constructor() {
+        super("terminal.v1.Commit", [
+            { no: 1, name: "sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "summary", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "authored_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<Commit>): Commit {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.sha = "";
+        message.summary = "";
+        message.authoredAt = "";
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<Commit>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Commit): Commit {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string sha */ 1:
+                    message.sha = reader.string();
+                    break;
+                case /* string summary */ 2:
+                    message.summary = reader.string();
+                    break;
+                case /* string authored_at */ 3:
+                    message.authoredAt = reader.string();
+                    break;
+                case /* string url */ 4:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Commit, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string sha = 1; */
+        if (message.sha !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.sha);
+        /* string summary = 2; */
+        if (message.summary !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.summary);
+        /* string authored_at = 3; */
+        if (message.authoredAt !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.authoredAt);
+        /* string url = 4; */
+        if (message.url !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.Commit
+ */
+export const Commit = new Commit$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class Release$Type extends MessageType<Release> {
+    constructor() {
+        super("terminal.v1.Release", [
+            { no: 1, name: "tag", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "name", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "published_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "commits", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Commit }
+        ]);
+    }
+    create(value?: PartialMessage<Release>): Release {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.tag = "";
+        message.name = "";
+        message.publishedAt = "";
+        message.body = "";
+        message.url = "";
+        message.commits = [];
+        if (value !== undefined)
+            reflectionMergePartial<Release>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: Release): Release {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string tag */ 1:
+                    message.tag = reader.string();
+                    break;
+                case /* string name */ 2:
+                    message.name = reader.string();
+                    break;
+                case /* string published_at */ 3:
+                    message.publishedAt = reader.string();
+                    break;
+                case /* string body */ 4:
+                    message.body = reader.string();
+                    break;
+                case /* string url */ 5:
+                    message.url = reader.string();
+                    break;
+                case /* repeated terminal.v1.Commit commits */ 6:
+                    message.commits.push(Commit.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: Release, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string tag = 1; */
+        if (message.tag !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.tag);
+        /* string name = 2; */
+        if (message.name !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.name);
+        /* string published_at = 3; */
+        if (message.publishedAt !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.publishedAt);
+        /* string body = 4; */
+        if (message.body !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.body);
+        /* string url = 5; */
+        if (message.url !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.url);
+        /* repeated terminal.v1.Commit commits = 6; */
+        for (let i = 0; i < message.commits.length; i++)
+            Commit.internalBinaryWrite(message.commits[i], writer.tag(6, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.Release
+ */
+export const Release = new Release$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ChangelogResponse$Type extends MessageType<ChangelogResponse> {
+    constructor() {
+        super("terminal.v1.ChangelogResponse", [
+            { no: 1, name: "unreleased", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Commit },
+            { no: 2, name: "releases", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Release },
+            { no: 3, name: "source", kind: "message", T: () => ContentSource },
+            { no: 4, name: "cache", kind: "message", T: () => CacheMetadata }
+        ]);
+    }
+    create(value?: PartialMessage<ChangelogResponse>): ChangelogResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.unreleased = [];
+        message.releases = [];
+        if (value !== undefined)
+            reflectionMergePartial<ChangelogResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ChangelogResponse): ChangelogResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* repeated terminal.v1.Commit unreleased */ 1:
+                    message.unreleased.push(Commit.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated terminal.v1.Release releases */ 2:
+                    message.releases.push(Release.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* terminal.v1.ContentSource source */ 3:
+                    message.source = ContentSource.internalBinaryRead(reader, reader.uint32(), options, message.source);
+                    break;
+                case /* terminal.v1.CacheMetadata cache */ 4:
+                    message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ChangelogResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* repeated terminal.v1.Commit unreleased = 1; */
+        for (let i = 0; i < message.unreleased.length; i++)
+            Commit.internalBinaryWrite(message.unreleased[i], writer.tag(1, WireType.LengthDelimited).fork(), options).join();
+        /* repeated terminal.v1.Release releases = 2; */
+        for (let i = 0; i < message.releases.length; i++)
+            Release.internalBinaryWrite(message.releases[i], writer.tag(2, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.ContentSource source = 3; */
+        if (message.source)
+            ContentSource.internalBinaryWrite(message.source, writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.CacheMetadata cache = 4; */
+        if (message.cache)
+            CacheMetadata.internalBinaryWrite(message.cache, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.ChangelogResponse
+ */
+export const ChangelogResponse = new ChangelogResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StatsContentCount$Type extends MessageType<StatsContentCount> {
+    constructor() {
+        super("terminal.v1.StatsContentCount", [
+            { no: 1, name: "content_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "page_views", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StatsContentCount>): StatsContentCount {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.contentId = "";
+        message.pageViews = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<StatsContentCount>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StatsContentCount): StatsContentCount {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string content_id */ 1:
+                    message.contentId = reader.string();
+                    break;
+                case /* int64 page_views */ 2:
+                    message.pageViews = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StatsContentCount, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string content_id = 1; */
+        if (message.contentId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.contentId);
+        /* int64 page_views = 2; */
+        if (message.pageViews !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.pageViews);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.StatsContentCount
+ */
+export const StatsContentCount = new StatsContentCount$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StatsDailyCount$Type extends MessageType<StatsDailyCount> {
+    constructor() {
+        super("terminal.v1.StatsDailyCount", [
+            { no: 1, name: "date", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "sessions", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "page_views", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ }
+        ]);
+    }
+    create(value?: PartialMessage<StatsDailyCount>): StatsDailyCount {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.date = "";
+        message.sessions = 0n;
+        message.pageViews = 0n;
+        if (value !== undefined)
+            reflectionMergePartial<StatsDailyCount>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StatsDailyCount): StatsDailyCount {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string date */ 1:
+                    message.date = reader.string();
+                    break;
+                case /* int64 sessions */ 2:
+                    message.sessions = reader.int64().toBigInt();
+                    break;
+                case /* int64 page_views */ 3:
+                    message.pageViews = reader.int64().toBigInt();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StatsDailyCount, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string date = 1; */
+        if (message.date !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.date);
+        /* int64 sessions = 2; */
+        if (message.sessions !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.sessions);
+        /* int64 page_views = 3; */
+        if (message.pageViews !== 0n)
+            writer.tag(3, WireType.Varint).int64(message.pageViews);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.StatsDailyCount
+ */
+export const StatsDailyCount = new StatsDailyCount$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class StatsSnapshot$Type extends MessageType<StatsSnapshot> {
+    constructor() {
+        super("terminal.v1.StatsSnapshot", [
+            { no: 1, name: "total_sessions", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 2, name: "total_page_views", kind: "scalar", T: 3 /*ScalarType.INT64*/, L: 0 /*LongType.BIGINT*/ },
+            { no: 3, name: "page_views_by_content", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => StatsContentCount },
+            { no: 4, name: "daily", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => StatsDailyCount },
+            { no: 5, name: "storage_state", kind: "enum", T: () => ["terminal.v1.StatsStorageState", StatsStorageState, "STATS_STORAGE_STATE_"] }
+        ]);
+    }
+    create(value?: PartialMessage<StatsSnapshot>): StatsSnapshot {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.totalSessions = 0n;
+        message.totalPageViews = 0n;
+        message.pageViewsByContent = [];
+        message.daily = [];
+        message.storageState = 0;
+        if (value !== undefined)
+            reflectionMergePartial<StatsSnapshot>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: StatsSnapshot): StatsSnapshot {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* int64 total_sessions */ 1:
+                    message.totalSessions = reader.int64().toBigInt();
+                    break;
+                case /* int64 total_page_views */ 2:
+                    message.totalPageViews = reader.int64().toBigInt();
+                    break;
+                case /* repeated terminal.v1.StatsContentCount page_views_by_content */ 3:
+                    message.pageViewsByContent.push(StatsContentCount.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* repeated terminal.v1.StatsDailyCount daily */ 4:
+                    message.daily.push(StatsDailyCount.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* terminal.v1.StatsStorageState storage_state */ 5:
+                    message.storageState = reader.int32();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: StatsSnapshot, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* int64 total_sessions = 1; */
+        if (message.totalSessions !== 0n)
+            writer.tag(1, WireType.Varint).int64(message.totalSessions);
+        /* int64 total_page_views = 2; */
+        if (message.totalPageViews !== 0n)
+            writer.tag(2, WireType.Varint).int64(message.totalPageViews);
+        /* repeated terminal.v1.StatsContentCount page_views_by_content = 3; */
+        for (let i = 0; i < message.pageViewsByContent.length; i++)
+            StatsContentCount.internalBinaryWrite(message.pageViewsByContent[i], writer.tag(3, WireType.LengthDelimited).fork(), options).join();
+        /* repeated terminal.v1.StatsDailyCount daily = 4; */
+        for (let i = 0; i < message.daily.length; i++)
+            StatsDailyCount.internalBinaryWrite(message.daily[i], writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* terminal.v1.StatsStorageState storage_state = 5; */
+        if (message.storageState !== 0)
+            writer.tag(5, WireType.Varint).int32(message.storageState);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.StatsSnapshot
+ */
+export const StatsSnapshot = new StatsSnapshot$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class RecordViewRequest$Type extends MessageType<RecordViewRequest> {
+    constructor() {
+        super("terminal.v1.RecordViewRequest", [
+            { no: 1, name: "content_id", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<RecordViewRequest>): RecordViewRequest {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.contentId = "";
+        if (value !== undefined)
+            reflectionMergePartial<RecordViewRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: RecordViewRequest): RecordViewRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string content_id */ 1:
+                    message.contentId = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: RecordViewRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string content_id = 1; */
+        if (message.contentId !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.contentId);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.RecordViewRequest
+ */
+export const RecordViewRequest = new RecordViewRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class UnlockCvRequest$Type extends MessageType<UnlockCvRequest> {
+    constructor() {
+        super("terminal.v1.UnlockCvRequest", [
+            { no: 1, name: "key", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<UnlockCvRequest>): UnlockCvRequest {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.key = "";
+        if (value !== undefined)
+            reflectionMergePartial<UnlockCvRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: UnlockCvRequest): UnlockCvRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string key */ 1:
+                    message.key = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: UnlockCvRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string key = 1; */
+        if (message.key !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.key);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.UnlockCvRequest
+ */
+export const UnlockCvRequest = new UnlockCvRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class CvDocumentResponse$Type extends MessageType<CvDocumentResponse> {
+    constructor() {
+        super("terminal.v1.CvDocumentResponse", [
+            { no: 1, name: "markdown", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<CvDocumentResponse>): CvDocumentResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.markdown = "";
+        if (value !== undefined)
+            reflectionMergePartial<CvDocumentResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: CvDocumentResponse): CvDocumentResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string markdown */ 1:
+                    message.markdown = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: CvDocumentResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string markdown = 1; */
+        if (message.markdown !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.markdown);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.CvDocumentResponse
+ */
+export const CvDocumentResponse = new CvDocumentResponse$Type();
 /**
  * @generated ServiceType for protobuf service terminal.v1.SessionApi
  */
 export const SessionApi = new ServiceType("terminal.v1.SessionApi", [
-    { name: "ReadSession", options: {}, I: EmptyRequest, O: SessionResponse }
+    { name: "ReadSession", options: {}, I: EmptyRequest, O: SessionResponse },
+    { name: "Logout", options: {}, I: EmptyRequest, O: EmptyRequest }
 ]);
 /**
  * @generated ServiceType for protobuf service terminal.v1.ContentApi
  */
 export const ContentApi = new ServiceType("terminal.v1.ContentApi", [
-    { name: "ReadCatalog", options: {}, I: EmptyRequest, O: CatalogResponse }
+    { name: "ReadCatalog", options: {}, I: EmptyRequest, O: CatalogResponse },
+    { name: "ReadDocument", options: {}, I: DocumentRequest, O: DocumentResponse },
+    { name: "ReadProjects", options: {}, I: EmptyRequest, O: ProjectsResponse },
+    { name: "ReadNow", options: {}, I: EmptyRequest, O: NowResponse },
+    { name: "ReadChangelog", options: {}, I: EmptyRequest, O: ChangelogResponse }
+]);
+/**
+ * @generated ServiceType for protobuf service terminal.v1.StatisticsApi
+ */
+export const StatisticsApi = new ServiceType("terminal.v1.StatisticsApi", [
+    { name: "ReadSnapshot", options: {}, I: EmptyRequest, O: StatsSnapshot },
+    { name: "RecordView", options: {}, I: RecordViewRequest, O: StatsSnapshot }
+]);
+/**
+ * @generated ServiceType for protobuf service terminal.v1.CvApi
+ */
+export const CvApi = new ServiceType("terminal.v1.CvApi", [
+    { name: "Unlock", options: {}, I: UnlockCvRequest, O: EmptyRequest },
+    { name: "Lock", options: {}, I: EmptyRequest, O: EmptyRequest },
+    { name: "Read", options: {}, I: EmptyRequest, O: CvDocumentResponse }
 ]);

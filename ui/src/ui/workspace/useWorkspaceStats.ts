@@ -4,9 +4,8 @@ import type { ContentId } from "../../api/ContentContracts.ts";
 import type { PortfolioStatsReader } from "../../application/commands/PortfolioCommands.ts";
 import type {
   StatsClient,
-  StatsLoadResult,
   StatsRecordResult,
-  StatsStreamEvent,
+  StatsPollEvent,
 } from "../../api/StatsClient.ts";
 import {
   formatPortfolioStats,
@@ -30,34 +29,14 @@ type WorkspaceStatsTransition = (
 
 type WorkspaceStatsDispatch = (transition: WorkspaceStatsTransition) => void;
 
-function applyLoadResult(
+function applyPollEvent(
   state: WorkspaceStatsState,
-  result: StatsLoadResult,
-): WorkspaceStatsState {
-  if (result.kind !== "available") {
-    return state.kind === "loading" ? { kind: "unavailable" } : state;
-  }
-
-  switch (state.kind) {
-    case "loading":
-    case "unavailable":
-      return { kind: "reconnecting", snapshot: result.snapshot };
-    case "reconnecting":
-    case "stale":
-    case "live":
-    case "no-data":
-      return state;
-  }
-}
-
-function applyStreamEvent(
-  state: WorkspaceStatsState,
-  event: StatsStreamEvent,
+  event: StatsPollEvent,
 ): WorkspaceStatsState {
   switch (event.kind) {
     case "snapshot":
       return workspaceStatsFromSnapshot(event.snapshot);
-    case "disconnected":
+    case "unavailable":
       return workspaceStatsAfterDisconnect(state);
     case "invalid":
       return workspaceStatsAfterInvalidEvent(state);
@@ -68,28 +47,16 @@ export function connectWorkspaceStats(
   statsClient: StatsClient,
   dispatch: WorkspaceStatsDispatch,
 ): () => void {
-  const controller = new AbortController();
   let connected = true;
-  const subscription = statsClient.subscribe((event) => {
+  const polling = statsClient.startPolling((event) => {
     if (connected) {
-      dispatch((state) => applyStreamEvent(state, event));
-    }
-  });
-
-  void statsClient.loadSnapshot(controller.signal).then((result) => {
-    if (connected) {
-      dispatch((state) => applyLoadResult(state, result));
-    }
-  }).catch(() => {
-    if (connected) {
-      dispatch((state) => state.kind === "loading" ? { kind: "unavailable" } : state);
+      dispatch((state) => applyPollEvent(state, event));
     }
   });
 
   return () => {
     connected = false;
-    controller.abort();
-    subscription.close();
+    polling.close();
   };
 }
 

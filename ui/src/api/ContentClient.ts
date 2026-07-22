@@ -8,11 +8,15 @@ import {
   type VirtualDocumentSupplier,
   type VirtualFilesystem,
 } from "../domain/filesystem/VirtualFilesystem.ts";
-import { apiPathPrefix } from "./ApiPath.ts";
 import {
   CacheState,
   CatalogEntryKind,
+  DocumentKind,
+  type ChangelogResponse,
   type CatalogResponse,
+  type DocumentResponse,
+  type NowResponse,
+  type ProjectsResponse,
 } from "../generated/browser/browser.ts";
 import { ContentApiClient } from "../generated/browser/browser.client.ts";
 import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
@@ -50,25 +54,28 @@ export type ContentClient = Readonly<{
   loadCorpus: (signal: AbortSignal) => Promise<ContentCorpusLoadResult>;
 }>;
 
-type ContentRequestResult =
-  | Readonly<{ kind: "payload"; payload: unknown }>
-  | Readonly<{ kind: "problem"; problem: ContentProblem }>
-  | Readonly<{ kind: "cancelled" }>
-  | Readonly<{ kind: "failed"; message: string }>;
-
 type ContentEndpointResult<Value> =
   | Readonly<{ kind: "available"; value: Value }>
-  | Readonly<{ kind: "problem"; problem: ContentProblem }>
   | Readonly<{ kind: "cancelled" }>
   | Readonly<{ kind: "failed"; message: string }>;
 
 type ContentCache = Readonly<{
   state: "fresh" | "stale";
   fetchedAt: string;
+  freshUntil: string;
+  staleUntil: string;
+}>;
+
+type ContentSource = Readonly<{
+  repository: string;
+  path: string;
+  revision: string;
+  url: string;
 }>;
 
 type ContentCatalog = Readonly<{
   entries: ReadonlyArray<VirtualCorpusCatalogEntry>;
+  source: ContentSource;
   cache: ContentCache;
 }>;
 
@@ -102,6 +109,7 @@ type ContentCommit = Readonly<{
 type ContentRelease = Readonly<{
   tag: string;
   name: string;
+  publishedAt: string;
   body: string;
   commits: ReadonlyArray<ContentCommit>;
 }>;
@@ -121,11 +129,9 @@ type ContentDocument =
       slug: string;
       title: string;
       summary: string;
-      publishedAt: string;
+      updatedAt: string;
       tags: ReadonlyArray<string>;
     }>;
-
-type ContentProblem = Readonly<{ title: string }>;
 
 type ProjectCandidate = Readonly<{
   project: ContentProject;
@@ -139,11 +145,27 @@ type DerivedDocument = Readonly<{
   text: string;
 }>;
 
-type ContentCatalogRpcClient = Readonly<{
+type ContentRpcClient = Readonly<{
   readCatalog: (
     request: Readonly<Record<string, never>>,
     options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
   ) => Readonly<{ response: Promise<CatalogResponse> }>;
+  readDocument: (
+    request: Readonly<{ id: string }>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<DocumentResponse> }>;
+  readProjects: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<ProjectsResponse> }>;
+  readNow: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<NowResponse> }>;
+  readChangelog: (
+    request: Readonly<Record<string, never>>,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<ChangelogResponse> }>;
 }>;
 
 function grpcCatalogEntryKind(kind: CatalogEntryKind): string {
@@ -168,6 +190,20 @@ function grpcCacheState(state: CacheState | undefined): string {
       return "stale";
     case CacheState.UNSPECIFIED:
     case undefined:
+    default:
+      return "unspecified";
+  }
+}
+
+function grpcDocumentKind(kind: DocumentKind): string {
+  switch (kind) {
+    case DocumentKind.PAGE:
+      return "page";
+    case DocumentKind.BLOG:
+      return "blog";
+    case DocumentKind.NOTE:
+      return "note";
+    case DocumentKind.UNSPECIFIED:
     default:
       return "unspecified";
   }
@@ -310,12 +346,43 @@ function decodeCache(value: unknown): ContentValidation<ContentCache> {
 
   const state = property(value, "state");
   const fetchedAt = property(value, "fetchedAt");
+  const freshUntil = property(value, "freshUntil");
+  const staleUntil = property(value, "staleUntil");
 
-  if ((state !== "fresh" && state !== "stale") || !isTimestamp(fetchedAt)) {
+  if (
+    (state !== "fresh" && state !== "stale") ||
+    !isTimestamp(fetchedAt) ||
+    !isTimestamp(freshUntil) ||
+    !isTimestamp(staleUntil) ||
+    fetchedAt > freshUntil ||
+    freshUntil > staleUntil
+  ) {
     return invalid("cache fields are invalid.");
   }
 
-  return valid({ state, fetchedAt });
+  return valid({ state, fetchedAt, freshUntil, staleUntil });
+}
+
+function decodeSource(value: unknown): ContentValidation<ContentSource> {
+  if (!isObject(value)) {
+    return invalid("source must be an object.");
+  }
+
+  const repository = property(value, "repository");
+  const path = property(value, "path");
+  const revision = property(value, "revision");
+  const url = property(value, "url");
+
+  if (
+    !isRepositoryName(repository) ||
+    !isRelativePath(path) ||
+    !isSingleLine(revision, 128) ||
+    !isHttpsUrl(url)
+  ) {
+    return invalid("source fields are invalid.");
+  }
+
+  return valid({ repository, path, revision, url });
 }
 
 function decodeCatalogEntry(value: unknown): ContentValidation<VirtualCorpusCatalogEntry> {
@@ -366,14 +433,15 @@ function decodeContentCatalog(value: unknown): ContentValidation<ContentCatalog>
   }
 
   const entriesValue = property(value, "entries");
+  const source = decodeSource(property(value, "source"));
   const cache = decodeCache(property(value, "cache"));
 
   if (!Array.isArray(entriesValue) || entriesValue.length > contentPageItemLimit) {
     return invalid("catalog entries are invalid or exceed the page limit.");
   }
 
-  if (cache.kind === "invalid") {
-    return cache;
+  if (source.kind === "invalid" || cache.kind === "invalid") {
+    return invalid("catalog source or cache metadata is invalid.");
   }
 
   const entries: VirtualCorpusCatalogEntry[] = [];
@@ -422,7 +490,7 @@ function decodeContentCatalog(value: unknown): ContentValidation<ContentCatalog>
     }
   }
 
-  return valid({ entries, cache: cache.value });
+  return valid({ entries, source: source.value, cache: cache.value });
 }
 
 function decodeProject(value: unknown): ContentValidation<ProjectCandidate> {
@@ -588,6 +656,7 @@ function decodeRelease(value: unknown): ContentValidation<ContentRelease> {
 
   const tag = property(value, "tag");
   const name = property(value, "name");
+  const publishedAt = property(value, "publishedAt");
   const body = property(value, "body");
   const commits = decodeCommitList(property(value, "commits"), "release.commits");
 
@@ -595,13 +664,14 @@ function decodeRelease(value: unknown): ContentValidation<ContentRelease> {
     typeof tag !== "string" ||
     !tagPattern.test(tag) ||
     !isSingleLine(name, 200) ||
+    !isTimestamp(publishedAt) ||
     !isBody(body, false) ||
     commits.kind === "invalid"
   ) {
     return invalid("release fields are invalid.");
   }
 
-  return valid({ tag, name: name.trim(), body, commits: commits.value });
+  return valid({ tag, name: name.trim(), publishedAt, body, commits: commits.value });
 }
 
 function decodeContentChangelog(value: unknown): ContentValidation<ContentChangelog> {
@@ -686,7 +756,7 @@ function decodeContentDocument(value: unknown): ContentValidation<ContentDocumen
   const slug = property(value, "slug");
   const title = property(value, "title");
   const summary = property(value, "summary");
-  const publishedAt = property(value, "publishedAt");
+  const updatedAt = property(value, "updatedAt");
   const tags = decodeTags(property(value, "tags"), "document.tags");
 
   if (
@@ -694,7 +764,7 @@ function decodeContentDocument(value: unknown): ContentValidation<ContentDocumen
     !slugPattern.test(slug) ||
     !isSingleLine(title, 200) ||
     !isSummary(summary) ||
-    !isTimestamp(publishedAt) ||
+    !isTimestamp(updatedAt) ||
     tags.kind === "invalid"
   ) {
     return invalid("publication document fields are invalid.");
@@ -718,81 +788,13 @@ function decodeContentDocument(value: unknown): ContentValidation<ContentDocumen
     slug,
     title: title.trim(),
     summary: summary.trim(),
-    publishedAt,
+    updatedAt,
     tags: tags.value,
   });
 }
 
-function decodeContentProblem(value: unknown): ContentValidation<ContentProblem> {
-  if (!isObject(value)) {
-    return invalid("problem must be an object.");
-  }
-
-  const type = property(value, "type");
-  const title = property(value, "title");
-  const status = property(value, "status");
-  const code = property(value, "code");
-  const detail = property(value, "detail");
-  const definitions = [
-    { code: "invalid-request", status: 400, title: "The request is invalid." },
-    { code: "not-found", status: 404, title: "The requested content was not found." },
-    { code: "upstream-unavailable", status: 503, title: "Content is temporarily unavailable." },
-    { code: "rate-limited", status: 429, title: "Content retrieval is rate limited." },
-    { code: "configuration-invalid", status: 500, title: "Content is not configured." },
-  ] as const;
-  const definition = definitions.find((candidate) => candidate.code === code);
-
-  if (
-    definition === undefined ||
-    type !== `https://termin.al/problems/${definition.code}` ||
-    typeof title !== "string" ||
-    title !== definition.title ||
-    status !== definition.status ||
-    typeof detail !== "string" ||
-    detail.trim().length === 0 ||
-    detail.length > 500
-  ) {
-    return invalid("problem does not match a stable content problem contract.");
-  }
-
-  return valid({ title });
-}
-
 function isAbortError(value: unknown): boolean {
   return value instanceof Error && value.name === "AbortError";
-}
-
-function contentApiPath(path: string): string {
-  return `${apiPathPrefix}/content/${path}`;
-}
-
-async function request(
-  path: string,
-  signal: AbortSignal,
-): Promise<ContentRequestResult> {
-  try {
-    const response = await fetch(path, {
-      signal,
-      headers: { Accept: "application/json" },
-    });
-    const payload: unknown = await response.json();
-
-    if (!response.ok) {
-      const problem = decodeContentProblem(payload);
-
-      return problem.kind === "valid"
-        ? { kind: "problem", problem: problem.value }
-        : { kind: "failed", message: "The content API returned an invalid error response." };
-    }
-
-    return { kind: "payload", payload };
-  } catch (error: unknown) {
-    if (signal.aborted || isAbortError(error)) {
-      return { kind: "cancelled" };
-    }
-
-    return { kind: "failed", message: "The content API could not be reached." };
-  }
 }
 
 function byteSize(value: string): number {
@@ -936,21 +938,21 @@ function freshness(
 
 export class HttpContentClient implements ContentClient {
   private readonly context: BrowserGrpcContext;
-  private readonly catalogClient: ContentCatalogRpcClient;
+  private readonly client: ContentRpcClient;
 
   constructor(
     context: BrowserGrpcContext = new BrowserGrpcContext(),
-    catalogClient: ContentCatalogRpcClient = new ContentApiClient(createBrowserGrpcTransport()),
+    client: ContentRpcClient = new ContentApiClient(createBrowserGrpcTransport()),
   ) {
     this.context = context;
-    this.catalogClient = catalogClient;
+    this.client = client;
   }
 
   private async catalog(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentCatalog>> {
     try {
-      const call = this.catalogClient.readCatalog(
+      const call = this.client.readCatalog(
         {},
         { meta: this.context.metadata(), abort: signal },
       );
@@ -968,7 +970,10 @@ export class HttpContentClient implements ContentClient {
         cache: {
           state: grpcCacheState(cache?.state),
           fetchedAt: cache?.fetchedAt,
+          freshUntil: cache?.freshUntil,
+          staleUntil: cache?.staleUntil,
         },
+        source: response.source,
       };
       const validation = decodeContentCatalog(payload);
 
@@ -987,60 +992,79 @@ export class HttpContentClient implements ContentClient {
   private async projects(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentProjects>> {
-    const response = await request(contentApiPath("projects"), signal);
+    try {
+      const response = await this.client.readProjects(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodeContentProjects({
+        projects: response.projects,
+        source: response.source,
+        cache: {
+          ...response.cache,
+          state: grpcCacheState(response.cache?.state),
+        },
+      });
 
-    switch (response.kind) {
-      case "payload": {
-        const validation = decodeContentProjects(response.payload);
-
-        return validation.kind === "valid"
-          ? { kind: "available", value: validation.value }
-          : { kind: "failed", message: "The projects response is invalid." };
-      }
-      case "problem":
-      case "cancelled":
-      case "failed":
-        return response;
+      return validation.kind === "valid"
+        ? { kind: "available", value: validation.value }
+        : { kind: "failed", message: "The projects response is invalid." };
+    } catch (error: unknown) {
+      return signal.aborted || isAbortError(error)
+        ? { kind: "cancelled" }
+        : { kind: "failed", message: "The content API could not be reached." };
     }
   }
 
   private async now(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentNow>> {
-    const response = await request(contentApiPath("now"), signal);
+    try {
+      const response = await this.client.readNow(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodeContentNow({
+        ...response,
+        cache: {
+          ...response.cache,
+          state: grpcCacheState(response.cache?.state),
+        },
+      });
 
-    switch (response.kind) {
-      case "payload": {
-        const validation = decodeContentNow(response.payload);
-
-        return validation.kind === "valid"
-          ? { kind: "available", value: validation.value }
-          : { kind: "failed", message: "The Now response is invalid." };
-      }
-      case "problem":
-      case "cancelled":
-      case "failed":
-        return response;
+      return validation.kind === "valid"
+        ? { kind: "available", value: validation.value }
+        : { kind: "failed", message: "The Now response is invalid." };
+    } catch (error: unknown) {
+      return signal.aborted || isAbortError(error)
+        ? { kind: "cancelled" }
+        : { kind: "failed", message: "The content API could not be reached." };
     }
   }
 
   private async changelog(
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentChangelog>> {
-    const response = await request(contentApiPath("changelog"), signal);
+    try {
+      const response = await this.client.readChangelog(
+        {},
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodeContentChangelog({
+        ...response,
+        cache: {
+          ...response.cache,
+          state: grpcCacheState(response.cache?.state),
+        },
+      });
 
-    switch (response.kind) {
-      case "payload": {
-        const validation = decodeContentChangelog(response.payload);
-
-        return validation.kind === "valid"
-          ? { kind: "available", value: validation.value }
-          : { kind: "failed", message: "The changelog response is invalid." };
-      }
-      case "problem":
-      case "cancelled":
-      case "failed":
-        return response;
+      return validation.kind === "valid"
+        ? { kind: "available", value: validation.value }
+        : { kind: "failed", message: "The changelog response is invalid." };
+    } catch (error: unknown) {
+      return signal.aborted || isAbortError(error)
+        ? { kind: "cancelled" }
+        : { kind: "failed", message: "The content API could not be reached." };
     }
   }
 
@@ -1048,23 +1072,23 @@ export class HttpContentClient implements ContentClient {
     id: ContentId,
     signal: AbortSignal,
   ): Promise<ContentEndpointResult<ContentDocument>> {
-    const response = await request(
-      contentApiPath(`document/${encodeURIComponent(id.value)}`),
-      signal,
-    );
+    try {
+      const response = await this.client.readDocument(
+        { id: id.value },
+        { meta: this.context.metadata(), abort: signal },
+      ).response;
+      const validation = decodeContentDocument({
+        ...response,
+        kind: grpcDocumentKind(response.kind),
+      });
 
-    switch (response.kind) {
-      case "payload": {
-        const validation = decodeContentDocument(response.payload);
-
-        return validation.kind === "valid"
-          ? { kind: "available", value: validation.value }
-          : { kind: "failed", message: "The document response is invalid." };
-      }
-      case "problem":
-      case "cancelled":
-      case "failed":
-        return response;
+      return validation.kind === "valid"
+        ? { kind: "available", value: validation.value }
+        : { kind: "failed", message: "The document response is invalid." };
+    } catch (error: unknown) {
+      return signal.aborted || isAbortError(error)
+        ? { kind: "cancelled" }
+        : { kind: "failed", message: "The content API could not be reached." };
     }
   }
 
@@ -1083,14 +1107,6 @@ export class HttpContentClient implements ContentClient {
       changelog.kind === "cancelled"
     ) {
       return { kind: "cancelled" };
-    }
-
-    const problem = [catalog, projects, now, changelog].find(
-      (result) => result.kind === "problem",
-    );
-
-    if (problem !== undefined && problem.kind === "problem") {
-      return { kind: "failed", message: problem.problem.title };
     }
 
     const failure = [catalog, projects, now, changelog].find(
@@ -1189,14 +1205,13 @@ export class HttpContentClient implements ContentClient {
                 slug: result.value.slug,
                 title: result.value.title,
                 summary: result.value.summary,
-                publishedAt: createVirtualTimestamp(result.value.publishedAt),
+                updatedAt: createVirtualTimestamp(result.value.updatedAt),
                 tags: result.value.tags,
               },
             };
           }
           case "cancelled":
             return { kind: "cancelled" };
-          case "problem":
           case "failed":
             return { kind: "missing", handle };
         }

@@ -70,6 +70,14 @@ async function normalizeGeneratedFiles(outputRoot: string): Promise<void> {
       .replace(
         /export enum CatalogEntryKind \{[\s\S]*?\n\}/u,
         "export const CatalogEntryKind = { UNSPECIFIED: 0, DIRECTORY: 1, FILE: 2, LOCKED_FILE: 3 } as const;\nexport type CatalogEntryKind = number;",
+      )
+      .replace(
+        /export enum DocumentKind \{[\s\S]*?\n\}/u,
+        "export const DocumentKind = { UNSPECIFIED: 0, PAGE: 1, BLOG: 2, NOTE: 3 } as const;\nexport type DocumentKind = number;",
+      )
+      .replace(
+        /export enum StatsStorageState \{[\s\S]*?\n\}/u,
+        "export const StatsStorageState = { UNSPECIFIED: 0, WRITABLE: 1, READ_ONLY: 2 } as const;\nexport type StatsStorageState = number;",
       );
     await writeFile(path, normalized);
   }

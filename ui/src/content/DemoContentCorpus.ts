@@ -26,7 +26,7 @@ type DemoContentDocument =
       path: string;
       title: string;
       summary: string;
-      publishedAt: string;
+      updatedAt: string;
       tags: ReadonlyArray<string>;
       text: string;
     }>;
@@ -88,7 +88,7 @@ function createDemoDocumentSupplier(
           slug: document.slug,
           title: document.title,
           summary: document.summary,
-          publishedAt: createVirtualTimestamp(document.publishedAt),
+          updatedAt: createVirtualTimestamp(document.updatedAt),
           tags: document.tags,
         },
       });
@@ -127,7 +127,7 @@ const documents = [
     path: "~/blog/engineering/interfaces/sample-post.md",
     title: "Stable Interfaces",
     summary: "Validated metadata about typed outcomes and explicit dependencies.",
-    publishedAt: "2026-01-05T00:00:00.000Z",
+    updatedAt: "2026-01-05T00:00:00.000Z",
     tags: ["typescript", "interfaces"],
     text: blogText,
   },
@@ -139,7 +139,7 @@ const documents = [
     path: "~/blog/engineering/demos/deterministic-demo.md",
     title: "Deterministic Demos",
     summary: "Fixed publication metadata keeps the offline demonstration repeatable.",
-    publishedAt: "2026-01-12T00:00:00.000Z",
+    updatedAt: "2026-01-12T00:00:00.000Z",
     tags: ["demo", "offline"],
     text: newerBlogText,
   },
@@ -151,7 +151,7 @@ const documents = [
     path: "~/notes/field-notes/filesystems/sample-note.md",
     title: "Local Paths",
     summary: "Validated metadata about deterministic virtual filesystems.",
-    publishedAt: "2026-01-07T00:00:00.000Z",
+    updatedAt: "2026-01-07T00:00:00.000Z",
     tags: ["filesystem", "determinism"],
     text: noteText,
   },
