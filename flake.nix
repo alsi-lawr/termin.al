@@ -1,5 +1,5 @@
 {
-  description = "termin.al development shell";
+  description = "termin.al";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -12,6 +12,8 @@
       pkgs = import nixpkgs { inherit system; };
     in
     {
+      nixosModules.default = import ./nix/module.nix { source = ./.; };
+
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
           bun
