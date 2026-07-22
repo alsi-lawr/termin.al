@@ -224,6 +224,69 @@ async function exerciseStrictModeRuntime(session: DevToolsSession): Promise<void
   );
 }
 
+async function focusViewer(session: DevToolsSession): Promise<void> {
+  const focused = await evaluate(session, `(() => {
+    const viewer = document.querySelector('section[aria-label$=" viewer"]');
+    if (!(viewer instanceof HTMLElement)) return false;
+    viewer.focus();
+    return document.activeElement === viewer;
+  })()`);
+  if (focused !== true) throw new Error("The rendered viewer could not be focused.");
+}
+
+async function openRawPager(session: DevToolsSession): Promise<void> {
+  await reloadDemo(session);
+  await enterTerminalCommand(session, "less ~/about.md");
+  await waitFor(
+    session,
+    `document.querySelector('[aria-label="Less prompt"]') !== null`,
+    "The raw pager did not open through public shell behavior.",
+  );
+  await focusViewer(session);
+}
+
+async function exerciseConnectedPagerKeys(session: DevToolsSession): Promise<void> {
+  await openRawPager(session);
+  for (const modifiers of [1, 2, 4]) {
+    for (const key of ["q", "Escape"]) {
+      await pressKey(session, key, { modifiers });
+      if (await evaluate(session, `document.querySelector('[aria-label="Less prompt"]') !== null`) !== true) {
+        throw new Error(`Modified ${key} closed the rendered raw pager.`);
+      }
+    }
+  }
+
+  await pressKey(session, "q");
+  await waitFor(
+    session,
+    `document.querySelector('[aria-label="Less prompt"]') === null`,
+    "Unmodified q did not close the rendered raw pager.",
+  );
+
+  await openRawPager(session);
+  await pressKey(session, "Escape");
+  await waitFor(
+    session,
+    `document.querySelector('[aria-label="Less prompt"]') === null`,
+    "Unmodified Escape did not close the rendered raw pager.",
+  );
+
+  await reloadDemo(session);
+  await enterTerminalCommand(session, "open ~/about.md");
+  await waitFor(
+    session,
+    `document.querySelector('section[aria-label$=" viewer"]') !== null`,
+    "The ordinary viewer did not open through public shell behavior.",
+  );
+  await focusViewer(session);
+  await pressKey(session, "Escape");
+  await waitFor(
+    session,
+    `document.querySelector('section[aria-label$=" viewer"]') === null`,
+    "Unmodified Escape did not close the ordinary rendered viewer.",
+  );
+}
+
 const baseUrl = new URL(process.env.TERMINAL_SMOKE_BASE_URL ?? "http://127.0.0.1:5089");
 const debugPort = Number.parseInt(process.env.TERMINAL_SMOKE_DEBUG_PORT ?? "9339", 10);
 const chrome = process.env.CHROME_BIN ?? "google-chrome";
@@ -292,6 +355,7 @@ try {
   }
 
   await exerciseStrictModeRuntime(session);
+  await exerciseConnectedPagerKeys(session);
 
   await session.command("Page.navigate", { url: new URL("/", baseUrl).href });
   await waitForApplication(session);
