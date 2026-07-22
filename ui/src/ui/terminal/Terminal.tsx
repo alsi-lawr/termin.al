@@ -18,7 +18,9 @@ import type { ContentId } from "../../api/ContentContracts.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
+  VirtualFilesystemOverlay,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
+import { createWorkspaceVirtualDocumentSupplier } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
 import type { ThemeController } from "../../theme/Theme.ts";
 import type {
@@ -86,6 +88,7 @@ type TerminalProps = Readonly<{
   ) => void;
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
+  onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
@@ -113,6 +116,7 @@ export function Terminal({
   onCloseShellPresentation,
   themeController,
   filesystem,
+  onFilesystemChange,
   documents,
   projectReadmes,
   readStats,
@@ -130,27 +134,34 @@ export function Terminal({
     (): boolean => hasShellRuntime(paneId),
     [hasShellRuntime, paneId],
   );
-  const [registry] = useState(() =>
-    createCommandRegistry({
+  const [registry] = useState(() => {
+    const workspaceDocuments = createWorkspaceVirtualDocumentSupplier(
       filesystem,
+      documents,
+    );
+
+    return createCommandRegistry({
+      filesystem,
+      documents: workspaceDocuments,
+      onFilesystemChange,
       commands: [
         ...createReadOnlyCommandDefinitions({
           filesystem,
-          documents,
+          documents: workspaceDocuments,
           manpages: generatedManpageCorpus,
           recursiveEntryLimit: 100,
         }),
         ...createPortfolioCommandDefinitions({
           filesystem,
-          documents,
+          documents: workspaceDocuments,
           projectReadmes,
           themes: themeController,
           readStats,
         }),
         createPaneCommandDefinition(paneId, paneCommandHandler),
       ],
-    }),
-  );
+    });
+  });
   const completionService =
     createCompletionService({
       commands: createRegistryCommandCompletionProvider(registry),

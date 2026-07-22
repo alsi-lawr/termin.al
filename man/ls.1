@@ -14,7 +14,7 @@ ls [-a] [-l] [--tree] [path]
 .SH DESCRIPTION
 Lists one virtual file or directory. The default path is the current pane directory; relative paths resolve there and
 .B ~
-addresses virtual home. Output comes only from termin.al's read-only corpus, never the host filesystem.
+addresses virtual home. Output comes only from termin.al's published corpus and browser-persistent redirected files, never the host filesystem.
 .SH OPTIONS
 .TP
 .B -a
@@ -25,7 +25,7 @@ and
 rows for directory listings.
 .TP
 .B -l
-Use a long listing with read-only type permissions, UTF-8 byte size, UTC timestamp and name. Locked files show no permissions and the suffix
+Use a long listing with virtual type permissions, UTF-8 byte size, UTC timestamp and name. Locked files show no permissions and the suffix
 .BR "[locked]" .
 .TP
 .B --tree

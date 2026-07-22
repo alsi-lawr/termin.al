@@ -9,30 +9,29 @@ SYNOPSIS
 DESCRIPTION
      Renders  a deterministic hierarchy rooted at one virtual directory. The de‐
      fault path is the current pane directory. Relative paths  and  ~  use  ter‐
-     min.al's  read-only virtual path resolver; no host filesystem traversal oc‐
-     curs.
+     min.al's shared virtual path resolver; no host filesystem traversal occurs.
 
 OPTIONS
      -a     Include hidden descendants. The synthetic ./ and ../ rows used by ls
             listings are not added to tree output.
 
      -L depth
-            Set the maximum descendant depth from 0 through  8.  A  depth  of  0
+            Set  the  maximum  descendant  depth  from 0 through 8. A depth of 0
             prints only the canonical root path. The option may appear before or
             after the single path; a later value replaces an earlier one.
 
 OUTPUT
-     The  first  line is the canonical directory path. Descendants follow deter‐
-     ministic traversal order, with / for directories and  [locked]  for  locked
+     The first line is the canonical directory path. Descendants  follow  deter‐
+     ministic  traversal  order,  with / for directories and [locked] for locked
      entries.
 
 FAILURES
-     Unknown  options,  a missing or out-of-range depth, more than one path, in‐
+     Unknown options, a missing or out-of-range depth, more than one  path,  in‐
      valid or missing paths, files and locked paths are rejected.
 
 LIMITS
-     Depth defaults to 8. Traversal also stops at the  application's  recursive-
-     entry  limit, currently 100; retained output is followed by a runtime.trun‐
+     Depth  defaults  to 8. Traversal also stops at the application's recursive-
+     entry limit, currently 100; retained output is followed by a  runtime.trun‐
      cated diagnostic.
 
 NOTES

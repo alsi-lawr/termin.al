@@ -54,7 +54,8 @@ export function Workspace({
             onConsumeMobileCtrl={controller.onConsumeMobileCtrl}
             resolveMobileCtrlInput={controller.resolveMobileCtrlInput}
             themeController={theme.controller}
-            filesystem={corpus.filesystem}
+            filesystem={controller.filesystem}
+            onFilesystemChange={controller.onFilesystemChange}
             documents={corpus.documents}
             projectReadmes={corpus.projectReadmes}
             readStats={stats.readStats}

@@ -11,7 +11,7 @@ DESCRIPTION
      Traverses  entries  beneath a starting directory and prints canonical paths
      that satisfy every predicate in command order. The default path is the cur‐
      rent pane directory. With no predicates,  every  traversed  entry  matches.
-     Paths are resolved only inside the read-only virtual corpus.
+     Paths are resolved only inside the shared virtual filesystem.
 
 OPTIONS
      -name pattern

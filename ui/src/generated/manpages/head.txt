@@ -32,7 +32,8 @@ LIMITS
      The requested count is capped at 1000 lines.
 
 NOTES
-     The virtual document is read-only and no host filesystem path is accepted.
+     The  command reads published or redirected virtual-file text and accepts no
+     host filesystem path.
 
 EXAMPLES
      $ cat about.md | head -n 3

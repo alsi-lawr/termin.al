@@ -21,9 +21,11 @@ FAILURES
      Any argument is rejected.
 
 NOTES
-     Use man(1) to open the complete reference for one registered command.  Help
-     output  reflects  the current registry for this application load and is not
-     browser-persisted.
+     Use man(1) to open the complete reference for one registered  command.  Un‐
+     quoted  and  unescaped redirections support descriptors 0 through 9 with <,
+     >, >>, <>, <&, >& and >|.   Redirections  belong  to  each  command  before
+     pipelines  and  command lists. Redirected files are shared by all panes and
+     persist in browser-local storage; no host filesystem is accessed.
 
 EXAMPLES
      $ help

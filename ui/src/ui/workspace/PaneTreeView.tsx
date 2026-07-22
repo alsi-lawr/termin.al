@@ -4,6 +4,7 @@ import type { ContentId } from "../../api/ContentContracts.ts";
 import type {
   VirtualDocumentSupplier,
   VirtualFilesystem,
+  VirtualFilesystemOverlay,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { ShellAction } from "../../domain/terminal/Shell.ts";
 import type { PaneCommandHandler } from "../../application/commands/PaneCommand.ts";
@@ -56,6 +57,7 @@ type PaneTreeViewProps = Readonly<{
   ) => MobileCtrlInputResolution;
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
+  onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
@@ -128,6 +130,7 @@ function PaneLeaf({
   resolveMobileCtrlInput,
   themeController,
   filesystem,
+  onFilesystemChange,
   documents,
   projectReadmes,
   readStats,
@@ -170,6 +173,7 @@ function PaneLeaf({
             paneCommandHandler={commandHandler}
             themeController={themeController}
             filesystem={filesystem}
+            onFilesystemChange={onFilesystemChange}
             documents={documents}
             projectReadmes={projectReadmes}
             readStats={readStats}
@@ -246,6 +250,7 @@ export function PaneTreeView({
   resolveMobileCtrlInput,
   themeController,
   filesystem,
+  onFilesystemChange,
   documents,
   projectReadmes,
   readStats,
@@ -270,6 +275,7 @@ export function PaneTreeView({
         resolveMobileCtrlInput={resolveMobileCtrlInput}
         themeController={themeController}
         filesystem={filesystem}
+        onFilesystemChange={onFilesystemChange}
         documents={documents}
         projectReadmes={projectReadmes}
         readStats={readStats}
@@ -322,6 +328,7 @@ export function PaneTreeView({
           resolveMobileCtrlInput={resolveMobileCtrlInput}
           themeController={themeController}
           filesystem={filesystem}
+          onFilesystemChange={onFilesystemChange}
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}
@@ -354,6 +361,7 @@ export function PaneTreeView({
           resolveMobileCtrlInput={resolveMobileCtrlInput}
           themeController={themeController}
           filesystem={filesystem}
+          onFilesystemChange={onFilesystemChange}
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}

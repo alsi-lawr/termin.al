@@ -21,8 +21,9 @@ FAILURES
      tent-unavailable diagnostic; cancellation returns no viewer.
 
 NOTES
-     The published document and virtual filesystem are  read-only.  Mobile  con‐
-     trols provide Escape, movement and the pane Prefix action.
+     The published source is immutable, while shell redirection may  shadow  its
+     ordinary  virtual  path  in the browser-persistent overlay. Mobile controls
+     provide Escape, movement and the pane Prefix action.
 
 EXAMPLES
      $ about

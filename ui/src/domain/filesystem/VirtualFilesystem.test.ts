@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createVirtualFilesystem,
+  createWorkspaceVirtualFilesystem,
+  expandVirtualPathGlob,
   listVirtualDirectory,
   resolveVirtualDirectory,
   resolveVirtualPath,
   traverseVirtualDirectory,
   virtualHomeDirectory,
+  writableVirtualFileText,
+  writeVirtualFile,
 } from "./VirtualFilesystem.ts";
 
 const filesystem = createVirtualFilesystem({
@@ -171,4 +175,59 @@ test("lists and traverses immutable virtual directory data with bounds", () => {
   }
 
   assert.equal(filesystem.root.path, "~");
+});
+
+test("writes one visible overlay without shadowing locked nodes or directories", () => {
+  const workspace = createWorkspaceVirtualFilesystem(filesystem);
+  const created = writeVirtualFile(
+    workspace,
+    virtualHomeDirectory(),
+    "projects/new.txt",
+    "new",
+  );
+  const shadowed = writeVirtualFile(
+    workspace,
+    virtualHomeDirectory(),
+    "about.md",
+    "shadow",
+  );
+
+  assert.equal(created.kind, "written");
+  assert.equal(shadowed.kind, "written");
+  if (shadowed.kind !== "written") {
+    assert.fail("Expected the corpus file to be shadowed.");
+  }
+
+  assert.equal(writableVirtualFileText(workspace, shadowed.path), "shadow");
+  assert.equal(
+    writeVirtualFile(workspace, virtualHomeDirectory(), "cv.md", "x").kind,
+    "locked",
+  );
+  assert.equal(
+    writeVirtualFile(workspace, virtualHomeDirectory(), "projects", "x").kind,
+    "is-directory",
+  );
+  assert.equal(
+    writeVirtualFile(workspace, virtualHomeDirectory(), "missing/x", "x").kind,
+    "not-found",
+  );
+
+  const listing = listVirtualDirectory(workspace, virtualHomeDirectory(), "projects");
+  if (listing.kind !== "found") {
+    assert.fail("Expected the overlay directory listing.");
+  }
+
+  assert.deepEqual(
+    listing.entries.map((entry) => entry.name),
+    ["example.md", "new.txt"],
+  );
+  assert.deepEqual(
+    expandVirtualPathGlob({
+      filesystem: workspace,
+      currentDirectory: virtualHomeDirectory(),
+      value: "projects/*.txt",
+      protectedMetacharacterOffsets: [],
+    }),
+    ["~/projects/new.txt"],
+  );
 });

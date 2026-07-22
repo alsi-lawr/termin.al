@@ -99,7 +99,35 @@ export type VirtualFilesystem = Readonly<{
     VirtualDirectoryPath,
     ReadonlyArray<VirtualNode>
   >;
+  writableFiles: VirtualFilesystemWritableFiles;
 }>;
+
+export type VirtualWritableFile = Readonly<{
+  path: VirtualAbsolutePath;
+  text: string;
+}>;
+
+export type VirtualFilesystemOverlay = Readonly<{
+  files: ReadonlyArray<VirtualWritableFile>;
+}>;
+
+export type VirtualFilesystemWritableFiles = Readonly<{
+  current: () => VirtualFilesystemOverlay;
+  replace: (overlay: VirtualFilesystemOverlay) => void;
+}>;
+
+export type VirtualFileWriteResult =
+  | Readonly<{
+      kind: "written";
+      path: VirtualAbsolutePath;
+      overlay: VirtualFilesystemOverlay;
+    }>
+  | Readonly<{
+      kind: "is-directory";
+      path: VirtualDirectoryPath;
+      node: VirtualDirectoryNode;
+    }>
+  | VirtualPathFailure;
 
 export type VirtualPathNormalization =
   | Readonly<{
@@ -223,6 +251,7 @@ export type VirtualDocumentSupplier = Readonly<{
 const stableIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 const canonicalHomePath = "~" as VirtualAbsolutePath;
 const canonicalHomeDirectoryPath = canonicalHomePath as VirtualDirectoryPath;
+const writableTimestamp = "1970-01-01T00:00:00.000Z";
 
 function assertStableIdentifier(value: string, label: string): void {
   if (!stableIdentifierPattern.test(value)) {
@@ -315,6 +344,67 @@ function compareNodeNames(left: VirtualNode, right: VirtualNode): number {
   }
 
   return 0;
+}
+
+function writableFileHandle(path: VirtualAbsolutePath): VirtualDocumentHandle {
+  const encoded = new TextEncoder()
+    .encode(path)
+    .reduce((value, byte) => value + byte.toString(16).padStart(2, "0"), "");
+
+  return createVirtualDocumentHandle(`writable-${encoded}`);
+}
+
+function createWritableFileNode(file: VirtualWritableFile): VirtualFileNode {
+  return {
+    kind: "file",
+    id: createVirtualNodeId(writableFileHandle(file.path)),
+    path: file.path,
+    name: nodeName(file.path),
+    updatedAt: createVirtualTimestamp(writableTimestamp),
+    size: createVirtualByteSize(new TextEncoder().encode(file.text).byteLength),
+    documentHandle: writableFileHandle(file.path),
+  };
+}
+
+function writableFileAt(
+  filesystem: VirtualFilesystem,
+  path: VirtualAbsolutePath,
+): VirtualWritableFile | undefined {
+  return filesystem.writableFiles.current().files.find(
+    (file) => file.path === path,
+  );
+}
+
+function visibleNodeAt(
+  filesystem: VirtualFilesystem,
+  path: VirtualAbsolutePath,
+): VirtualNode | undefined {
+  const writable = writableFileAt(filesystem, path);
+  return writable === undefined
+    ? filesystem.nodesByPath.get(path)
+    : createWritableFileNode(writable);
+}
+
+function visibleNodes(filesystem: VirtualFilesystem): ReadonlyArray<VirtualNode> {
+  const overlay = filesystem.writableFiles.current();
+  const shadowedPaths = new Set(overlay.files.map((file) => file.path));
+  const corpusNodes = [...filesystem.nodesByPath.values()].filter(
+    (node) => !shadowedPaths.has(node.path),
+  );
+
+  return [
+    ...corpusNodes,
+    ...overlay.files.map(createWritableFileNode),
+  ];
+}
+
+function visibleChildren(
+  filesystem: VirtualFilesystem,
+  directory: VirtualDirectoryPath,
+): ReadonlyArray<VirtualNode> {
+  return visibleNodes(filesystem)
+    .filter((node) => parentPath(node.path) === directory)
+    .sort(compareNodeNames);
 }
 
 function createVirtualNode(entry: VirtualCorpusCatalogEntry): VirtualNode {
@@ -600,7 +690,7 @@ export function expandVirtualPathGlob({
     return [];
   }
 
-  return [...filesystem.nodesByPath.values()]
+  return visibleNodes(filesystem)
     .filter((node) => matchesProtectedVirtualPathGlob(normalized.path, node.path))
     .map((node) => node.path)
     .sort();
@@ -628,6 +718,19 @@ export function createVirtualByteSize(value: number): VirtualByteSize {
 
 export function virtualHomeDirectory(): VirtualDirectoryPath {
   return canonicalHomeDirectoryPath;
+}
+
+export function createVirtualFilesystemWritableFiles(
+  initial: VirtualFilesystemOverlay = { files: [] },
+): VirtualFilesystemWritableFiles {
+  let overlay = initial;
+
+  return {
+    current: (): VirtualFilesystemOverlay => overlay,
+    replace: (replacement: VirtualFilesystemOverlay): void => {
+      overlay = replacement;
+    },
+  };
 }
 
 export function createVirtualFilesystem(
@@ -700,7 +803,115 @@ export function createVirtualFilesystem(
     childrenByDirectoryPath.set(path, [...children].sort(compareNodeNames));
   }
 
-  return { root, nodesByPath, childrenByDirectoryPath };
+  return {
+    root,
+    nodesByPath,
+    childrenByDirectoryPath,
+    writableFiles: createVirtualFilesystemWritableFiles(),
+  };
+}
+
+export function createWorkspaceVirtualFilesystem(
+  corpus: VirtualFilesystem,
+  overlay: VirtualFilesystemOverlay = { files: [] },
+): VirtualFilesystem {
+  return {
+    root: corpus.root,
+    nodesByPath: corpus.nodesByPath,
+    childrenByDirectoryPath: corpus.childrenByDirectoryPath,
+    writableFiles: createVirtualFilesystemWritableFiles(overlay),
+  };
+}
+
+export function replaceVirtualFilesystemOverlay(
+  filesystem: VirtualFilesystem,
+  overlay: VirtualFilesystemOverlay,
+): void {
+  filesystem.writableFiles.replace(overlay);
+}
+
+export function writeVirtualFile(
+  filesystem: VirtualFilesystem,
+  currentDirectory: VirtualDirectoryPath,
+  input: string,
+  text: string,
+): VirtualFileWriteResult {
+  const normalization = normalizeVirtualPath(currentDirectory, input);
+
+  if (normalization.kind === "invalid-path") {
+    return normalization;
+  }
+
+  const target = filesystem.nodesByPath.get(normalization.path);
+
+  if (target?.kind === "directory") {
+    return { kind: "is-directory", path: target.path, node: target };
+  }
+
+  if (target?.kind === "locked-file") {
+    return { kind: "locked", path: target.path, node: target };
+  }
+
+  const parent = parentPath(normalization.path);
+  const parentNode = parent === undefined
+    ? undefined
+    : visibleNodeAt(filesystem, parent);
+
+  if (parent === undefined || parentNode === undefined) {
+    return { kind: "not-found", path: normalization.path };
+  }
+
+  if (parentNode.kind !== "directory") {
+    if (parentNode.kind === "locked-file") {
+      return { kind: "locked", path: parentNode.path, node: parentNode };
+    }
+
+    return { kind: "not-directory", path: parentNode.path, node: parentNode };
+  }
+
+  const current = filesystem.writableFiles.current();
+  const nextFile = { path: normalization.path, text };
+  const overlay = {
+    files: [
+      ...current.files.filter((file) => file.path !== normalization.path),
+      nextFile,
+    ].sort((left, right) => left.path.localeCompare(right.path)),
+  } satisfies VirtualFilesystemOverlay;
+  filesystem.writableFiles.replace(overlay);
+
+  return { kind: "written", path: normalization.path, overlay };
+}
+
+export function writableVirtualFileText(
+  filesystem: VirtualFilesystem,
+  path: VirtualAbsolutePath,
+): string | undefined {
+  return writableFileAt(filesystem, path)?.text;
+}
+
+export function createWorkspaceVirtualDocumentSupplier(
+  filesystem: VirtualFilesystem,
+  corpus: VirtualDocumentSupplier,
+): VirtualDocumentSupplier {
+  return {
+    read: (handle, signal) => {
+      const file = filesystem.writableFiles.current().files.find(
+        (candidate) => writableFileHandle(candidate.path) === handle,
+      );
+
+      if (file === undefined) {
+        return corpus.read(handle, signal);
+      }
+
+      return Promise.resolve(signal.aborted
+        ? { kind: "cancelled" }
+        : {
+            kind: "available",
+            document: { text: file.text, source: { path: file.path } },
+            classification: { kind: "page" },
+          });
+    },
+  };
 }
 
 export function normalizeVirtualPath(
@@ -762,7 +973,7 @@ export function resolveVirtualPath(
 
   for (let index = 0; index < segments.length; index += 1) {
     const path = pathForSegments(segments.slice(0, index + 1));
-    const next = filesystem.nodesByPath.get(path);
+    const next = visibleNodeAt(filesystem, path);
 
     if (next === undefined) {
       return { kind: "not-found", path: normalization.path };
@@ -823,11 +1034,7 @@ export function listVirtualDirectory(
     return resolution;
   }
 
-  const entries = filesystem.childrenByDirectoryPath.get(resolution.directory.path);
-
-  if (entries === undefined) {
-    throw new Error("Virtual filesystem directories must have child collections.");
-  }
+  const entries = visibleChildren(filesystem, resolution.directory.path);
 
   return { kind: "found", directory: resolution.directory, entries };
 }
@@ -847,11 +1054,7 @@ export function traverseVirtualDirectory({
     throw new Error("Virtual traversal depths must be non-negative safe integers.");
   }
 
-  const children = filesystem.childrenByDirectoryPath.get(directory.path);
-
-  if (children === undefined) {
-    throw new Error("Virtual filesystem directories must have child collections.");
-  }
+  const children = visibleChildren(filesystem, directory.path);
 
   const pending =
     maximumDepth === 0
@@ -882,11 +1085,7 @@ export function traverseVirtualDirectory({
       continue;
     }
 
-    const childEntries = filesystem.childrenByDirectoryPath.get(entry.node.path);
-
-    if (childEntries === undefined) {
-      throw new Error("Virtual filesystem directories must have child collections.");
-    }
+    const childEntries = visibleChildren(filesystem, entry.node.path);
 
     for (const child of [...childEntries].reverse()) {
       pending.push({ node: child, depth: entry.depth + 1 });

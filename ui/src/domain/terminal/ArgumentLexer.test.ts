@@ -104,6 +104,54 @@ test("tracks option terminators independently for each command unit", () => {
   );
 });
 
+test("recognises the bounded redirection grammar without stealing protected operators", () => {
+  const result = successfulLex(
+    "echo 2>errors >> output 0<input 3<>rw 4<&0 5>&1 6>|forced '7>quoted' 8\\>escaped",
+  );
+
+  assert.deepEqual(
+    result.tokens.flatMap((token) => {
+      if (token.kind === "argument") {
+        return [token.value];
+      }
+
+      if (token.kind === "redirection") {
+        return [`${token.descriptor}${token.operator}`];
+      }
+
+      return [];
+    }),
+    [
+      "echo",
+      "2>",
+      "errors",
+      "1>>",
+      "output",
+      "0<",
+      "input",
+      "3<>",
+      "rw",
+      "4<&",
+      "0",
+      "5>&",
+      "1",
+      "6>|",
+      "forced",
+      "7>quoted",
+      "8>escaped",
+    ],
+  );
+
+  assert.deepEqual(lexArguments("echo 10>file"), {
+    kind: "error",
+    error: { kind: "unsupported-file-descriptor", position: 5 },
+  });
+  assert.deepEqual(lexArguments("cat <<EOF"), {
+    kind: "error",
+    error: { kind: "unsupported-redirection", position: 4 },
+  });
+});
+
 test("reports each explicit lexer error", () => {
   assert.deepEqual(lexArguments("open 'unfinished"), {
     kind: "error",

@@ -6,6 +6,8 @@ import { createManpageCorpus } from "../../content/ManpageCorpus.ts";
 import type { ViewerContent } from "../../content/ViewerContent.ts";
 import {
   createVirtualFilesystem,
+  createWorkspaceVirtualDocumentSupplier,
+  createWorkspaceVirtualFilesystem,
   virtualHomeDirectory,
   type VirtualCorpusCatalogEntry,
   type VirtualDirectoryPath,
@@ -62,6 +64,7 @@ function createRegistry(
 ): CommandRegistry {
   return createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
+    documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents,
@@ -122,6 +125,7 @@ function createGrepFixture(
   };
   const registry = createCommandRegistry({
     filesystem,
+    documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -376,6 +380,7 @@ test("derives explicit credential-argument persistence policy from parsed comman
   );
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
     commands,
   });
 
@@ -629,6 +634,7 @@ test("uses one canonical artifact for default less, explicit less, vi, and alias
   });
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
     commands: definitions.map((command) =>
       command.metadata.name === "ls"
         ? {
@@ -688,6 +694,7 @@ test("reports stable diagnostics for malformed and unavailable manual requests",
 
   const noManuals = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem: demoContentCorpus.filesystem,
       documents: demoContentCorpus.documents,
@@ -756,6 +763,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   });
   const registry = createCommandRegistry({
     filesystem,
+    documents: demoContentCorpus.documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -772,6 +780,7 @@ test("renders hidden, locked, directory, and long Unicode listings as text", asy
   const lsAllTree = outputText(await execute("ls -a --tree", registry));
   const boundedRegistry = createCommandRegistry({
     filesystem,
+    documents: demoContentCorpus.documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents: demoContentCorpus.documents,
@@ -1047,6 +1056,7 @@ test("rejects every invalid sed option and script before reading or emitting", a
   );
   const registry = createCommandRegistry({
     filesystem: guarded.filesystem,
+    documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem: guarded.filesystem,
       documents,
@@ -1177,6 +1187,7 @@ test("cancellation discards accumulated grep and sed output", async () => {
   };
   const registry = createCommandRegistry({
     filesystem,
+    documents,
     commands: createReadOnlyCommandDefinitions({
       filesystem,
       documents,
@@ -1314,4 +1325,102 @@ test("normalizes non-Error supplier failures at the execution boundary", async (
   }
 
   assert.equal(diagnosticEvent.output.diagnostic.code, "runtime.execution-failed");
+});
+
+test("applies ordered redirections through the shared virtual reader boundary", async () => {
+  const filesystem = createWorkspaceVirtualFilesystem(demoContentCorpus.filesystem);
+  const documents = createWorkspaceVirtualDocumentSupplier(
+    filesystem,
+    demoContentCorpus.documents,
+  );
+  const registry = createCommandRegistry({
+    filesystem,
+    documents,
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents,
+      manpages: generatedManpages,
+      recursiveEntryLimit: 100,
+    }),
+  });
+
+  assert.equal(outputText(await execute("echo exact > note ; cat note", registry)), "exact");
+  assert.equal(outputText(await execute("echo second >> note ; head < note", registry)), "exactsecond");
+  assert.equal(outputText(await execute("echo forced >| note ; cat note", registry)), "forced");
+  assert.equal(
+    outputText(await execute("echo xy 1<> note ; cat note", registry)),
+    "xyrced",
+  );
+  assert.equal(
+    outputText(await execute("echo suffix >> about.md ; cat about.md", registry)).endsWith("suffix"),
+    true,
+  );
+  assert.equal(outputText(await execute("<> read-write ; head < read-write", registry)), "");
+  assert.equal(outputText(await execute("echo piped > pipe | head", registry)), "");
+  assert.equal(outputText(await execute("cat pipe", registry)), "piped");
+  assert.equal(
+    outputText(await execute("echo alias 3> descriptor 1>&3 ; head 4< descriptor 0<&4", registry)),
+    "alias",
+  );
+
+  const separated = await execute("missing 2> errors || cat errors", registry);
+  assert.equal(outputText(separated), "Command not found: missing");
+  assert.equal(
+    succeeded(separated).outputs.some((output) => output.kind === "diagnostic"),
+    false,
+  );
+
+  assert.equal(
+    outputText(await execute("missing 2>&1 > unused | head", registry)),
+    "Command not found: missing",
+  );
+  assert.equal(
+    outputText(await execute("missing > captured 2>&1 || cat captured", registry)),
+    "Command not found: missing",
+  );
+
+  const laterFailure = await execute(
+    "> retained > missing/child",
+    registry,
+  );
+  assert.equal(laterFailure.kind, "failed");
+  assert.equal(outputText(await execute("cat retained", registry)), "");
+  assert.equal(
+    outputText(await execute("> missing/child || echo recovered", registry)),
+    "recovered",
+  );
+  assert.equal(
+    outputText(await execute("> success && echo continued", registry)),
+    "continued",
+  );
+
+  const invalidLine = await execute("echo should-not-run > untouched ; echo >", registry);
+  assert.equal(invalidLine.kind, "failed");
+  assert.equal((await execute("cat untouched", registry)).kind, "failed");
+
+  assert.equal(
+    outputText(await execute("unknown > created || cat created", registry)),
+    "",
+  );
+  assert.equal(
+    outputText(await execute("echo literal > '*.txt' ; cat '*.txt'", registry)),
+    "literal",
+  );
+  assert.equal(
+    outputText(await execute("echo '>' \\> escaped", registry)),
+    "> > escaped",
+  );
+
+  const closedOutput = await execute("echo lost 1>&-", registry);
+  assert.equal(closedOutput.kind, "failed");
+
+  const controller = new AbortController();
+  controller.abort();
+  const cancelled = await executeWithSignal(
+    "> cancelled-file",
+    registry,
+    controller.signal,
+  );
+  assert.equal(cancelled.kind, "cancelled");
+  assert.equal((await execute("cat cancelled-file", registry)).kind, "failed");
 });

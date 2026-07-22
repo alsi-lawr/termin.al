@@ -80,8 +80,12 @@ export type ShellDiagnostic =
         | "parse.unterminated-double-quote"
         | "parse.trailing-escape"
         | "parse.unsupported-background-operator"
+        | "parse.unsupported-redirection"
+        | "parse.unsupported-file-descriptor"
         | "parse.unexpected-operator"
-        | "parse.trailing-operator";
+        | "parse.trailing-operator"
+        | "parse.missing-redirection-operand"
+        | "parse.invalid-redirection-operand";
       message: string;
       position: SourceOffset;
     }>
@@ -170,6 +174,10 @@ export type CommandFailure =
   | Readonly<{
       kind: "command-rejected";
       commandName: string;
+      message: string;
+    }>
+  | Readonly<{
+      kind: "redirection-error";
       message: string;
     }>
   | Readonly<{

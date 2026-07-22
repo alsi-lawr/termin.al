@@ -59,6 +59,7 @@ test("executes parsed pane operations through the existing command registry cont
   const registry = createCommandRegistry({
     commands: [command],
     filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
   });
   const outcome = await command.execute(
     {

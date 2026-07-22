@@ -9,39 +9,39 @@ SYNOPSIS
 DESCRIPTION
      Lists  one  virtual file or directory. The default path is the current pane
      directory; relative paths resolve there and ~ addresses virtual home.  Out‐
-     put  comes  only from termin.al's read-only corpus, never the host filesys‐
-     tem.
+     put  comes  only  from  termin.al's published corpus and browser-persistent
+     redirected files, never the host filesystem.
 
 OPTIONS
      -a     Include hidden entries and add synthetic ./ and ../ rows for  direc‐
             tory listings.
 
-     -l     Use a long listing with read-only type permissions, UTF-8 byte size,
-            UTC  timestamp  and  name.  Locked files show no permissions and the
+     -l     Use  a  long listing with virtual type permissions, UTF-8 byte size,
+            UTC timestamp and name. Locked files show  no  permissions  and  the
             suffix [locked].
 
      --tree
-            Render the selected directory recursively as a  tree.  This  may  be
-            combined  with -a but not with -l.  Short flags may be clustered and
+            Render  the  selected  directory  recursively as a tree. This may be
+            combined with -a but not with -l.  Short flags may be clustered  and
             options may appear before or after the single path.
 
 OUTPUT
-     Short directory listings contain one name per line; directories end  in  /.
+     Short  directory  listings contain one name per line; directories end in /.
      A file operand prints only that file. Tree output starts with the canonical
      root path and marks directories and locked files.
 
 FAILURES
      Unknown flags, more than one path, every -l and --tree combination, invalid
-     or  missing  paths, and direct locked-file operands are rejected. Tree mode
+     or missing paths, and direct locked-file operands are rejected.  Tree  mode
      also rejects file operands as not directories.
 
 LIMITS
      Tree mode traverses to depth 8 and stops at the application's recursive-en‐
-     try limit, currently 100. It preserves rendered entries  and  adds  a  run‐
+     try  limit,  currently  100.  It preserves rendered entries and adds a run‐
      time.truncated diagnostic when bounded.
 
 NOTES
-     Listing  does not read document bodies. It can therefore display locked en‐
+     Listing does not read document bodies. It can therefore display locked  en‐
      tries without unlocking them.
 
 EXAMPLES

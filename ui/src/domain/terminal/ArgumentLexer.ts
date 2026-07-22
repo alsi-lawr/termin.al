@@ -10,6 +10,7 @@ export type ArgumentIndex = number & {
 };
 
 export type ShellOperator = ";" | "&&" | "||" | "|" | "&";
+export type RedirectionOperator = "<" | ">" | ">>" | "<>" | "<&" | ">&" | ">|";
 
 export type LexedArgument = Readonly<{
   kind: "argument";
@@ -32,10 +33,18 @@ export type LexedOperator = Readonly<{
   position: SourceOffset;
 }>;
 
+export type LexedRedirection = Readonly<{
+  kind: "redirection";
+  descriptor: number;
+  operator: RedirectionOperator;
+  position: SourceOffset;
+}>;
+
 export type ArgumentLexerToken =
   | LexedArgument
   | LexedOptionTerminator
-  | LexedOperator;
+  | LexedOperator
+  | LexedRedirection;
 
 export type OptionTerminator =
   | Readonly<{ kind: "absent" }>
@@ -62,6 +71,14 @@ export type ArgumentLexerError =
   | Readonly<{
       kind: "unsupported-background-operator";
       position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "unsupported-redirection";
+      position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "unsupported-file-descriptor";
+      position: SourceOffset;
     }>;
 
 export type CommandListParseError =
@@ -71,6 +88,14 @@ export type CommandListParseError =
     }>
   | Readonly<{
       kind: "trailing-operator";
+      position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "missing-redirection-operand";
+      position: SourceOffset;
+    }>
+  | Readonly<{
+      kind: "invalid-redirection-operand";
       position: SourceOffset;
     }>;
 
@@ -146,6 +171,24 @@ function shellOperatorAt(
   return undefined;
 }
 
+function redirectionOperatorAt(
+  source: string,
+  position: number,
+): RedirectionOperator | undefined {
+  const pair = source.slice(position, position + 2);
+
+  if (pair === ">>" || pair === "<>" || pair === "<&" || pair === ">&" || pair === ">|") {
+    return pair;
+  }
+
+  const character = source[position];
+  return character === "<" || character === ">" ? character : undefined;
+}
+
+function defaultRedirectionDescriptor(operator: RedirectionOperator): number {
+  return operator.startsWith("<") ? 0 : 1;
+}
+
 function protectGlobMetacharacter(
   value: string,
   protectedGlobMetacharacterOffsets: number[],
@@ -165,7 +208,6 @@ export function lexArguments(source: string): ArgumentLexerResult {
   let argumentUsesSyntax = false;
   let protectedGlobMetacharacterOffsets: number[] = [];
   let argumentIndex = 0;
-  let optionTerminatorSeen = false;
 
   const beginArgument = (position: number): void => {
     if (argumentOpen) {
@@ -183,8 +225,7 @@ export function lexArguments(source: string): ArgumentLexerResult {
 
     const sourceStart = createSourceOffset(argumentStart, source);
     const sourceEnd = createSourceOffset(position, source);
-    const isOptionTerminator =
-      !optionTerminatorSeen && value === "--" && !argumentUsesSyntax;
+    const isOptionTerminator = value === "--" && !argumentUsesSyntax;
 
     if (isOptionTerminator) {
       tokens.push({
@@ -193,7 +234,6 @@ export function lexArguments(source: string): ArgumentLexerResult {
         sourceStart,
         sourceEnd,
       });
-      optionTerminatorSeen = true;
     } else {
       tokens.push({
         kind: "argument",
@@ -219,7 +259,41 @@ export function lexArguments(source: string): ArgumentLexerResult {
       position: createSourceOffset(position, source),
     });
     argumentIndex = 0;
-    optionTerminatorSeen = false;
+  };
+
+  const appendRedirection = (
+    operator: RedirectionOperator,
+    position: number,
+  ): ArgumentLexerError | undefined => {
+    const descriptorText = argumentOpen && !argumentUsesSyntax && /^\d+$/u.test(value)
+      ? value
+      : undefined;
+
+    if (descriptorText !== undefined && descriptorText.length !== 1) {
+      return {
+        kind: "unsupported-file-descriptor",
+        position: createSourceOffset(argumentStart, source),
+      };
+    }
+
+    if (descriptorText === undefined) {
+      finishArgument(position);
+    } else {
+      value = "";
+      argumentOpen = false;
+      argumentUsesSyntax = false;
+      protectedGlobMetacharacterOffsets = [];
+    }
+
+    tokens.push({
+      kind: "redirection",
+      descriptor: descriptorText === undefined
+        ? defaultRedirectionDescriptor(operator)
+        : Number(descriptorText),
+      operator,
+      position: createSourceOffset(position, source),
+    });
+    return undefined;
   };
 
   for (let position = 0; position < source.length; position += 1) {
@@ -271,6 +345,32 @@ export function lexArguments(source: string): ArgumentLexerResult {
 
     if (whitespacePattern.test(character)) {
       finishArgument(position);
+      continue;
+    }
+
+    if (character === "<" && source[position + 1] === "<") {
+      return {
+        kind: "error",
+        error: {
+          kind: "unsupported-redirection",
+          position: createSourceOffset(position, source),
+        },
+      };
+    }
+
+    const redirection = redirectionOperatorAt(source, position);
+
+    if (redirection !== undefined) {
+      const error = appendRedirection(redirection, position);
+
+      if (error !== undefined) {
+        return { kind: "error", error };
+      }
+
+      if (redirection.length === 2) {
+        position += 1;
+      }
+
       continue;
     }
 

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
+import {
+  createWorkspaceVirtualFilesystem,
+  replaceVirtualFilesystemOverlay,
+  type VirtualFilesystem,
+  type VirtualFilesystemOverlay,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import type {
   CommandHistoryEntry,
   ShellAction,
@@ -32,6 +38,14 @@ import {
   type CommandHistoryStorageBackend,
   type CommandHistoryStorageResult,
 } from "./CommandHistoryStorage.ts";
+import {
+  readVirtualFilesystemOverlay,
+  virtualFilesystemOverlayFromStoredValue,
+  virtualFilesystemStorageKey,
+  writeVirtualFilesystemOverlay,
+  type VirtualFilesystemStorageBackend,
+  type VirtualFilesystemStorageResult,
+} from "./VirtualFilesystemStorage.ts";
 import {
   applyPaneKeyInput,
   initialPanePrefixState,
@@ -66,6 +80,8 @@ export type PaneWorkspaceController = Readonly<{
   closeConfirmation: PaneCloseConfirmation;
   mobileCtrlPressed: boolean;
   vimSession: VimSessionBinding;
+  filesystem: VirtualFilesystem;
+  onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
   applyOperation: (operation: PaneOperation) => PaneOperationResult;
   onShellAction: (paneId: PaneId, action: ShellAction) => void;
   onCloseShellPresentation: (
@@ -91,6 +107,13 @@ function browserCommandHistoryStorage(): CommandHistoryStorageBackend | undefine
     return undefined;
   }
 }
+function browserVirtualFilesystemStorage(): VirtualFilesystemStorageBackend | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
 function reportStorageFailure(result: CommandHistoryStorageResult): void {
   if (result.kind === "unavailable") {
     console.warn(result.diagnostic);
@@ -107,11 +130,23 @@ export function usePaneWorkspace(
   onAcceptedContentOpen: (contentId: ContentId) => void,
 ): PaneWorkspaceController {
   const currentDirectory = corpus.filesystem.root.path;
+  const [filesystemStorage] = useState<VirtualFilesystemStorageBackend | undefined>(
+    browserVirtualFilesystemStorage,
+  );
+  const [hydratedFilesystem] = useState<VirtualFilesystemStorageResult>(() =>
+    readVirtualFilesystemOverlay(filesystemStorage, corpus.filesystem)
+  );
+  const [filesystem] = useState<VirtualFilesystem>(() =>
+    createWorkspaceVirtualFilesystem(
+      corpus.filesystem,
+      hydratedFilesystem.overlay,
+    )
+  );
   const [historyStorage] = useState<CommandHistoryStorageBackend | undefined>(
     browserCommandHistoryStorage,
   );
   const [hydratedHistory] = useState<CommandHistoryStorageResult>(() =>
-    readCommandHistory(historyStorage, corpus.filesystem)
+    readCommandHistory(historyStorage, filesystem)
   );
   const [workspace, setWorkspace] = useState<PaneWorkspace>(() =>
     createPaneWorkspace({ initialContent: createShellPaneContent() }),
@@ -140,9 +175,25 @@ export function usePaneWorkspace(
   const commandHistoryRef = useRef<ReadonlyArray<CommandHistoryEntry>>(
     hydratedHistory.entries,
   );
+  const filesystemStorageFailureReported = useRef(false);
+  const reportFilesystemStorageFailure = useCallback(
+    (result: VirtualFilesystemStorageResult): void => {
+      if (
+        result.kind === "unavailable" &&
+        !filesystemStorageFailureReported.current
+      ) {
+        filesystemStorageFailureReported.current = true;
+        console.warn(result.diagnostic);
+      }
+    },
+    [],
+  );
   useEffect(() => {
     reportStorageFailure(hydratedHistory);
   }, [hydratedHistory]);
+  useEffect(() => {
+    reportFilesystemStorageFailure(hydratedFilesystem);
+  }, [hydratedFilesystem, reportFilesystemStorageFailure]);
   useEffect(() => {
     const receiveStoredHistory = (event: StorageEvent): void => {
       if (event.key !== commandHistoryStorageKey) {
@@ -150,7 +201,7 @@ export function usePaneWorkspace(
       }
       const received = commandHistoryFromStoredValue(
         event.newValue,
-        corpus.filesystem,
+        filesystem,
       );
       reportStorageFailure(received);
       if (received.kind === "unavailable") {
@@ -170,7 +221,35 @@ export function usePaneWorkspace(
     };
     window.addEventListener("storage", receiveStoredHistory);
     return () => window.removeEventListener("storage", receiveStoredHistory);
-  }, [corpus.filesystem]);
+  }, [filesystem]);
+  useEffect(() => {
+    const receiveStoredFilesystem = (event: StorageEvent): void => {
+      if (event.key !== virtualFilesystemStorageKey) {
+        return;
+      }
+
+      const received = virtualFilesystemOverlayFromStoredValue(
+        event.newValue,
+        corpus.filesystem,
+      );
+      reportFilesystemStorageFailure(received);
+
+      if (received.kind === "available") {
+        replaceVirtualFilesystemOverlay(filesystem, received.overlay);
+      }
+    };
+
+    window.addEventListener("storage", receiveStoredFilesystem);
+    return () => window.removeEventListener("storage", receiveStoredFilesystem);
+  }, [corpus.filesystem, filesystem, reportFilesystemStorageFailure]);
+  const onFilesystemChange = useCallback(
+    (overlay: VirtualFilesystemOverlay): void => {
+      reportFilesystemStorageFailure(
+        writeVirtualFilesystemOverlay(filesystemStorage, overlay),
+      );
+    },
+    [filesystemStorage, reportFilesystemStorageFailure],
+  );
   const setMobileCtrl = useCallback((modifier: MobileCtrlModifier): void => {
     mobileCtrlModifierRef.current = modifier;
     setMobileCtrlModifier(modifier);
@@ -383,6 +462,8 @@ export function usePaneWorkspace(
       state: vimSessionState,
       onStateChange: onVimSessionStateChange,
     },
+    filesystem,
+    onFilesystemChange,
     applyOperation,
     onShellAction,
     onCloseShellPresentation,

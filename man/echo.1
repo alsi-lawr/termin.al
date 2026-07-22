@@ -21,6 +21,6 @@ $ echo 'hello terminal'
 $ echo -n is text here
 .fi
 .SH NOTES
-Output is added only to the current pane's transcript and is not persisted across a page reload.
+Unredirected output is added to the current pane's transcript. Shell redirection can write the exact text without an added trailing newline to a shared browser-persistent virtual file.
 .SH SEE ALSO
 clear(1), history(1)

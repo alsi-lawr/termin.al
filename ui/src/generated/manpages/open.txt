@@ -44,9 +44,10 @@ LIMITS
      100. Other directory viewers list one directory level.
 
 NOTES
-     Targets are read-only virtual paths. Viewer navigation is transient.  Shell
-     history  and  current directory remain owned by the originating shell pane,
-     while a split viewer has no shell runtime.
+     Targets are virtual paths from  the  published  corpus  or  redirected-file
+     overlay.  Viewer  navigation is transient. Shell history and current direc‐
+     tory remain owned by the originating shell pane, while a split  viewer  has
+     no shell runtime.
 
 EXAMPLES
      $ open about.md

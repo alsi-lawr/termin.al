@@ -22,7 +22,7 @@ Exactly one path is required. Options before
 .BR -- ,
 invalid or missing paths, directories, locked files and unavailable documents are rejected. Cancellation opens no pager.
 .SH NOTES
-Closing returns to the same pane's shell transcript, history and working directory. Pager position is transient and resets on each open. The virtual corpus is read-only.
+Closing returns to the same pane's shell transcript, history and working directory. Pager position is transient and resets on each open. Published and redirected virtual files use the same pager.
 .SH EXAMPLES
 .nf
 $ less notes/field-notes/filesystems/sample-note.md

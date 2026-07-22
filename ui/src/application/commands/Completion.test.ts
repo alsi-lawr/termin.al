@@ -13,6 +13,7 @@ import {
   createVirtualFilesystem,
   resolveVirtualDirectory,
   virtualHomeDirectory,
+  writeVirtualFile,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
 import {
   createCompletionService,
@@ -24,6 +25,7 @@ import { createCommandRegistry } from "./CommandRegistry.ts";
 test("completes registry command names and aliases", async () => {
   const registry = createCommandRegistry({
     filesystem: demoContentCorpus.filesystem,
+    documents: demoContentCorpus.documents,
     commands: [
       {
         metadata: {
@@ -160,6 +162,16 @@ test("completes direct virtual paths from the active directory without hidden en
   );
   const controller = new AbortController();
 
+  assert.equal(
+    writeVirtualFile(
+      filesystem,
+      virtualHomeDirectory(),
+      "written.txt",
+      "visible",
+    ).kind,
+    "written",
+  );
+
   const paths = await provider.complete(pathRequest, controller.signal);
   const hidden = await provider.complete(hiddenRequest, controller.signal);
 
@@ -169,6 +181,16 @@ test("completes direct virtual paths from the active directory without hidden en
   assert.deepEqual(hidden, [
     { kind: "path", value: ".hidden.md", label: "File" },
   ]);
+  const writtenRequest = createCompletionRequest(
+    createShellId("terminal"),
+    createShellSessionId("session"),
+    "open wr",
+    7,
+  );
+  assert.deepEqual(
+    await provider.complete(writtenRequest, controller.signal),
+    [{ kind: "path", value: "written.txt", label: "File" }],
+  );
 
   const projects = resolveVirtualDirectory(
     filesystem,

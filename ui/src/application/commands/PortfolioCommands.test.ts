@@ -113,6 +113,7 @@ function createRegistry(
 ): CommandRegistry {
   return createCommandRegistry({
     filesystem,
+    documents,
     commands: [
       ...createReadOnlyCommandDefinitions({
         filesystem,
