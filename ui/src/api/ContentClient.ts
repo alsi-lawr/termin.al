@@ -17,7 +17,6 @@ import {
   type ChangelogResponse,
   type Commit as GrpcCommit,
   type CatalogResponse,
-  type ContentSource as GrpcContentSource,
   type DocumentResponse,
   type NowResponse,
   type Project as GrpcProject,
@@ -69,16 +68,8 @@ type ContentCache = Readonly<{
   staleUntil: string;
 }>;
 
-type ContentSource = Readonly<{
-  repository: string;
-  path: string;
-  revision: string;
-  url: string;
-}>;
-
 type ContentCatalog = Readonly<{
   entries: ReadonlyArray<VirtualCorpusCatalogEntry>;
-  source: ContentSource;
   cache: ContentCache;
 }>;
 
@@ -198,15 +189,6 @@ function mapCache(value: GrpcCacheMetadata): ContentCache {
     fetchedAt: value.fetchedAt,
     freshUntil: value.freshUntil,
     staleUntil: value.staleUntil,
-  };
-}
-
-function mapSource(value: GrpcContentSource): ContentSource {
-  return {
-    repository: value.repository,
-    path: value.path,
-    revision: value.revision,
-    url: value.url,
   };
 }
 
@@ -459,7 +441,6 @@ export class GrpcContentClient implements ContentClient {
       kind: "available",
       value: {
         entries: response.entries.map(mapCatalogEntry),
-        source: mapSource(response.source!),
         cache: mapCache(response.cache!),
       },
     };
@@ -595,29 +576,21 @@ export class GrpcContentClient implements ContentClient {
       return changelog;
     }
 
-    try {
-      const projectReadmes = createProjectReadmes(projects.value);
-      const derived = derivedDocuments(now.value, changelog.value);
-      const virtual = virtualCatalog(catalog.value, derived, projectReadmes);
-      const filesystem = createVirtualFilesystem(virtual.catalog);
-      const documents = this.documentSupplier(virtual.documentsByHandle);
-      const corpus = { filesystem, documents, projectReadmes };
+    const projectReadmes = createProjectReadmes(projects.value);
+    const derived = derivedDocuments(now.value, changelog.value);
+    const virtual = virtualCatalog(catalog.value, derived, projectReadmes);
+    const filesystem = createVirtualFilesystem(virtual.catalog);
+    const documents = this.documentSupplier(virtual.documentsByHandle);
+    const corpus = { filesystem, documents, projectReadmes };
 
-      if (virtual.catalog.entries.length === 1) {
-        return { kind: "empty" };
-      }
-
-      return freshness(catalog.value, projects.value, now.value, changelog.value) ===
-        "stale"
-        ? { kind: "stale", corpus }
-        : { kind: "available", corpus };
-    } catch (error: unknown) {
-      if (signal.aborted || isAbortError(error)) {
-        return { kind: "cancelled" };
-      }
-
-      return { kind: "failed", message: "The content corpus could not be assembled." };
+    if (virtual.catalog.entries.length === 1) {
+      return { kind: "empty" };
     }
+
+    return freshness(catalog.value, projects.value, now.value, changelog.value) ===
+      "stale"
+      ? { kind: "stale", corpus }
+      : { kind: "available", corpus };
   }
 
   private documentSupplier(
@@ -642,13 +615,7 @@ export class GrpcContentClient implements ContentClient {
           };
         }
 
-        const id = ContentId.tryCreate(handle, "document handle");
-
-        if (id.kind === "invalid") {
-          return { kind: "missing", handle };
-        }
-
-        const result = await this.readDocument(id.value, signal);
+        const result = await this.readDocument(ContentId.fromGenerated(handle), signal);
 
         switch (result.kind) {
           case "available": {

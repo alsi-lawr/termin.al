@@ -103,7 +103,7 @@ function mapSnapshot(message: StatsSnapshotMessage): StatsSnapshot {
     totalSessions: Number(message.totalSessions),
     totalPageViews: Number(message.totalPageViews),
     pageViewsByContent: message.pageViewsByContent.map((count) => ({
-      contentId: { value: count.contentId },
+      contentId: ContentId.fromGenerated(count.contentId),
       pageViews: Number(count.pageViews),
     })),
     daily: message.daily.map((count) => ({

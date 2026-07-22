@@ -9,6 +9,10 @@ export class ContentId {
     this.value = value;
   }
 
+  static fromGenerated(value: string): ContentId {
+    return new ContentId(value);
+  }
+
   static tryCreate(value: string, field: string): ContentValidation<ContentId> {
     const stableIdentifier = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 

@@ -36,6 +36,10 @@ type SessionEnvelope = Readonly<{
   csrfToken: CsrfToken;
 }>;
 
+type SessionEnvelopeResult =
+  | Readonly<{ kind: "available"; envelope: SessionEnvelope }>
+  | Readonly<{ kind: "failed" }>;
+
 const authenticationFailed = {
   kind: "failed",
   message: "Authentication failed.",
@@ -122,7 +126,7 @@ async function readEnvelope(
   client: SessionRpcClient,
   context: BrowserGrpcContext,
   signal: AbortSignal,
-): Promise<SessionEnvelope | undefined> {
+): Promise<SessionEnvelopeResult> {
   let response: SessionResponse;
 
   try {
@@ -132,12 +136,12 @@ async function readEnvelope(
       throw new DOMException("The operation was aborted.", "AbortError");
     }
 
-    return undefined;
+    return { kind: "failed" };
   }
 
   const envelope = generatedSession(response);
   context.recordCsrfToken(envelope.csrfToken);
-  return envelope;
+  return { kind: "available", envelope };
 }
 
 function waitForPopup(
@@ -191,13 +195,13 @@ export class GrpcSessionClient implements SessionClient {
   }
 
   async read(signal: AbortSignal): Promise<SessionResult> {
-    const envelope = await readEnvelope(this.client, this.context, signal);
+    const result = await readEnvelope(this.client, this.context, signal);
 
-    if (envelope === undefined) {
+    if (result.kind === "failed") {
       return authenticationFailed;
     }
 
-    return { kind: "available", session: envelope.session };
+    return { kind: "available", session: result.envelope.session };
   }
 
   async login(signal: AbortSignal): Promise<SessionResult> {
@@ -223,7 +227,7 @@ export class GrpcSessionClient implements SessionClient {
   async logout(signal: AbortSignal): Promise<SessionResult> {
     const current = await readEnvelope(this.client, this.context, signal);
 
-    if (current === undefined) {
+    if (current.kind === "failed") {
       return authenticationFailed;
     }
 
