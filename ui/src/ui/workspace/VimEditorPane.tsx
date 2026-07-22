@@ -24,7 +24,6 @@ import {
   vimBufferCursorOffset,
   vimBufferText,
   type VimBuffer,
-  type VimMode,
 } from "../../domain/vim/VimBuffer.ts";
 import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
 import { vimLineStartOffset } from "../../domain/vim/VimMotion.ts";
@@ -46,6 +45,7 @@ import {
 } from "./MobilePaneControls";
 import type { MobileCtrlInputResolution } from "./MobileCtrlModifier.ts";
 import {
+  vimEditorModePresentation,
   vimEditorModeStatus,
   vimEditorStatusLine,
 } from "./VimEditorModeStatus.ts";
@@ -74,23 +74,6 @@ type VimEditorPaneProps = Readonly<{
     input: InputCapturePaneKeyInput,
   ) => MobileCtrlInputResolution;
 }>;
-
-function vimModeSegmentClass(mode: VimMode): string {
-  switch (mode.kind) {
-    case "normal":
-      return "shrink-0 whitespace-nowrap bg-surface-muted px-2 py-1 font-semibold text-text-bright";
-    case "insert":
-      return "shrink-0 whitespace-nowrap bg-surface-addition px-2 py-1 font-semibold text-text-bright";
-    case "visual-character":
-    case "visual-line":
-    case "visual-block":
-      return "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright";
-    case "command":
-      return "shrink-0 whitespace-nowrap bg-surface-dark px-2 py-1 font-semibold text-text-bright";
-    case "search":
-      return "shrink-0 whitespace-nowrap bg-surface-error px-2 py-1 font-semibold text-text-on-error";
-  }
-}
 
 function editorTextareaClass(
   syntax: VimEditorSyntax,
@@ -219,6 +202,7 @@ export function VimEditorPane({
   const [compositionActive, setCompositionActive] = useState(false);
   const modeStatusId = useId();
   const modeStatus = vimEditorModeStatus(buffer);
+  const modePresentation = vimEditorModePresentation(buffer.mode);
   const statusLine = vimEditorStatusLine(buffer, title);
   const commandEffect = commandEffectLabel(buffer);
   const bufferStatus = bufferStatusLabel(buffer);
@@ -576,7 +560,7 @@ export function VimEditorPane({
           />
         </div>
         <div className="mt-2 flex min-w-0 shrink-0 items-center bg-surface-raised text-xs text-text-muted">
-          <span className={vimModeSegmentClass(buffer.mode)}>
+          <span className={modePresentation.className}>
             {statusLine.mode}
           </span>
           <span className="min-w-0 flex-1 truncate px-2" title={statusLine.title}>

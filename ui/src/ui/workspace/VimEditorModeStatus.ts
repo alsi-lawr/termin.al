@@ -5,37 +5,41 @@ import {
 } from "../../domain/vim/VimBuffer.ts";
 import { vimVisualRange } from "../../domain/vim/VimVisualSelection.ts";
 
+type VimEditorModeLabel =
+  | "NORMAL"
+  | "INSERT"
+  | "VISUAL"
+  | "VISUAL LINE"
+  | "VISUAL BLOCK"
+  | "COMMAND"
+  | "SEARCH";
+
+type VimEditorModePresentation = Readonly<{
+  label: VimEditorModeLabel;
+  className: string;
+}>;
+
 type VimEditorStatusLine = Readonly<{
-  mode:
-    | "NORMAL"
-    | "INSERT"
-    | "VISUAL"
-    | "VISUAL LINE"
-    | "VISUAL BLOCK"
-    | "COMMAND"
-    | "SEARCH";
+  mode: VimEditorModeLabel;
   title: string;
   position: string;
   progress: string;
 }>;
 
-function modeLabel(mode: VimMode): VimEditorStatusLine["mode"] {
-  switch (mode.kind) {
-    case "normal":
-      return "NORMAL";
-    case "insert":
-      return "INSERT";
-    case "visual-character":
-      return "VISUAL";
-    case "visual-line":
-      return "VISUAL LINE";
-    case "visual-block":
-      return "VISUAL BLOCK";
-    case "command":
-      return "COMMAND";
-    case "search":
-      return "SEARCH";
-  }
+const modePresentations = {
+  normal: { label: "NORMAL", className: "shrink-0 whitespace-nowrap bg-surface-muted px-2 py-1 font-semibold text-text-bright" },
+  insert: { label: "INSERT", className: "shrink-0 whitespace-nowrap bg-surface-addition px-2 py-1 font-semibold text-text-bright" },
+  "visual-character": { label: "VISUAL", className: "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright" },
+  "visual-line": { label: "VISUAL LINE", className: "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright" },
+  "visual-block": { label: "VISUAL BLOCK", className: "shrink-0 whitespace-nowrap bg-surface-selected px-2 py-1 font-semibold text-text-bright" },
+  command: { label: "COMMAND", className: "shrink-0 whitespace-nowrap bg-surface-dark px-2 py-1 font-semibold text-text-bright" },
+  search: { label: "SEARCH", className: "shrink-0 whitespace-nowrap bg-ui-search px-2 py-1 font-semibold text-text-on-accent" },
+} as const satisfies Readonly<Record<VimMode["kind"], VimEditorModePresentation>>;
+
+export function vimEditorModePresentation(
+  mode: VimMode,
+): VimEditorModePresentation {
+  return modePresentations[mode.kind];
 }
 
 function visualBounds(buffer: VimBuffer): string {
@@ -63,20 +67,20 @@ function visualBounds(buffer: VimBuffer): string {
 }
 
 export function vimEditorModeStatus(buffer: VimBuffer): string {
-  const label = modeLabel(buffer.mode);
+  const mode = vimEditorModePresentation(buffer.mode);
 
   switch (buffer.mode.kind) {
     case "visual-character":
-      return label + visualBounds(buffer);
+      return mode.label + visualBounds(buffer);
     case "visual-line":
-      return label + visualBounds(buffer);
+      return mode.label + visualBounds(buffer);
     case "visual-block":
-      return label + visualBounds(buffer);
+      return mode.label + visualBounds(buffer);
     case "normal":
     case "insert":
     case "command":
     case "search":
-      return label;
+      return mode.label;
   }
 }
 
@@ -96,7 +100,7 @@ export function vimEditorStatusLine(
     : Math.round(buffer.cursor.line / (buffer.lines.length - 1) * 100);
 
   return {
-    mode: modeLabel(buffer.mode),
+    mode: vimEditorModePresentation(buffer.mode).label,
     title: title + marker,
     position: `${buffer.cursor.line + 1}:${buffer.cursor.column + 1}`,
     progress: `${progress}%`,
