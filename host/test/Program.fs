@@ -662,7 +662,7 @@ module Program =
         runAnonymousMutationBoundaryChecks ()
 
         let now () =
-            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+            DateTimeOffset.Parse("2026-07-22T12:00:00.1234567Z")
 
         let suppliedTokens = ResizeArray<string>()
 

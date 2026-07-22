@@ -676,7 +676,7 @@ module Auth =
 
                                 consumed
                                 && storedExpiry >= runtime.Now()
-                                && expected.ExpiresAt = storedExpiry
+                                && expected.ExpiresAt.ToUnixTimeSeconds() = storedExpiry.ToUnixTimeSeconds()
                                 && fixedTimeEqualsText expected.State returnedState
                             | _ -> false
 
