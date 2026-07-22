@@ -95,9 +95,7 @@ test("keeps bounded distinct command and search histories for one workspace", ()
   assert.equal(shared.messages.length, 100);
   assert.equal(shared.messages.every((message) => message.text === "Unknown command"), true);
 
-  const secondPane = shared;
   const remountedWorkspace = createVimSessionState();
-  assert.equal(secondPane.commandHistory, shared.commandHistory);
   assert.deepEqual(remountedWorkspace, {
     commandHistory: [],
     searchHistory: [],
