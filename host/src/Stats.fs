@@ -8,9 +8,7 @@ open System.Text
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
-open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Http
-open Microsoft.AspNetCore.Routing
 open Microsoft.Extensions.Configuration
 
 [<RequireQualifiedAccess>]
@@ -77,7 +75,6 @@ module Stats =
     type private Message =
         | GetSnapshot of AsyncReplyChannel<Snapshot option>
         | RecordView of string * string * Set<string> * DateTimeOffset * AsyncReplyChannel<RecordResult>
-        | Flush of AsyncReplyChannel<unit>
         | Stop of AsyncReplyChannel<unit>
 
     let private utcDate (value: DateTimeOffset) =
@@ -373,7 +370,6 @@ module Stats =
 
         let initial = load dataPath (now ())
         let lifecycleGate = obj ()
-        let mutable stopped = false
         let mutable shutdownTask: Task<unit> option = None
 
         let initialState: State =
@@ -409,9 +405,6 @@ module Stats =
                         match message with
                         | GetSnapshot reply ->
                             state.Persisted |> Option.map (snapshot state.Writable) |> reply.Reply
-                            return! loop state
-                        | Flush reply ->
-                            reply.Reply()
                             return! loop state
                         | Stop reply ->
                             reply.Reply()
@@ -503,19 +496,12 @@ module Stats =
             agent.PostAndAsyncReply(fun reply -> RecordView(sessionId, contentId, allowedContentIds, timestamp, reply))
             |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
 
-        member _.Flush(cancellationToken: CancellationToken) : Task =
-            agent.PostAndAsyncReply Flush
-            |> fun work -> Async.StartAsTask(work, cancellationToken = cancellationToken)
-            :> Task
-
         member _.Shutdown() =
             let work =
                 lock lifecycleGate (fun () ->
                     match shutdownTask with
                     | Some work -> work
                     | None ->
-                        stopped <- true
-
                         let work = agent.PostAndAsyncReply Stop |> Async.StartImmediateAsTask
 
                         shutdownTask <- Some work

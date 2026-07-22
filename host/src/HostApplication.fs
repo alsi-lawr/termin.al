@@ -59,8 +59,7 @@ module HostApplication =
             let worker =
                 new ContentCacheRefreshWorker(
                     ContentHeadProbe.live httpClient githubConfiguration,
-                    generation,
-                    ContentCacheRefresh.liveDelay
+                    generation
                 )
 
             contentClient, Some httpClient, Some worker

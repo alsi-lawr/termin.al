@@ -11,7 +11,7 @@ import {
 import {
   formatPortfolioStats,
   workspaceStatsAfterDisconnect,
-  workspaceStatsAfterInvalidEvent,
+  workspaceStatsAfterFailure,
   workspaceStatsFromSnapshot,
   workspaceStatsStatus,
   type WorkspaceStatsState,
@@ -110,9 +110,9 @@ test("presents live, reconnecting, stale, no-data, loading, and unavailable stat
     totalPageViews: 3,
   });
   assert.equal(workspaceStatsStatus(workspaceStatsAfterDisconnect(live)).label, "RECONNECTING");
-  assert.equal(workspaceStatsStatus(workspaceStatsAfterInvalidEvent(live)).label, "STALE");
+  assert.equal(workspaceStatsStatus(workspaceStatsAfterFailure(live)).label, "STALE");
   assert.equal(workspaceStatsAfterDisconnect({ kind: "loading" }).kind, "unavailable");
-  assert.equal(workspaceStatsAfterInvalidEvent({ kind: "loading" }).kind, "unavailable");
+  assert.equal(workspaceStatsAfterFailure({ kind: "loading" }).kind, "unavailable");
   assert.equal(workspaceStatsStatus(noData).label, "NO DATA");
   assert.equal(
     workspaceStatsFromSnapshot({ ...zeroSnapshot, storageState: "read-only" }).kind,
@@ -372,8 +372,6 @@ test("owns one polling lifecycle, retains snapshots through poll failures, and r
   listener({ kind: "snapshot", snapshot: liveSnapshot });
   listener({ kind: "unavailable" });
   assert.equal(stateKind(), "reconnecting");
-  listener({ kind: "invalid" });
-  assert.equal(stateKind(), "stale");
   listener({ kind: "snapshot", snapshot: zeroSnapshot });
   assert.equal(stateKind(), "no-data");
 

@@ -10,9 +10,6 @@ open Microsoft.Extensions.Hosting
 type ContentHeadProbe =
     abstract Read: CancellationToken -> Task<string option>
 
-type ContentRefreshDelay =
-    abstract Wait: TimeSpan * CancellationToken -> Task
-
 [<RequireQualifiedAccess>]
 module ContentHeadProbe =
     let private apiBase = Uri("https://api.github.com/")
@@ -109,12 +106,7 @@ module ContentCacheRefresh =
             | None -> return false
         }
 
-    let liveDelay =
-        { new ContentRefreshDelay with
-            member _.Wait(interval, cancellationToken) = Task.Delay(interval, cancellationToken) }
-
-type ContentCacheRefreshWorker(probe: ContentHeadProbe, generation: ContentCacheGeneration, delay: ContentRefreshDelay)
-    =
+type ContentCacheRefreshWorker(probe: ContentHeadProbe, generation: ContentCacheGeneration) =
     inherit BackgroundService()
 
     override _.ExecuteAsync(stoppingToken: CancellationToken) =
@@ -122,7 +114,7 @@ type ContentCacheRefreshWorker(probe: ContentHeadProbe, generation: ContentCache
             while not stoppingToken.IsCancellationRequested do
                 try
                     let! _ = ContentCacheRefresh.observe probe generation stoppingToken
-                    do! delay.Wait(TimeSpan.FromMinutes(5.0), stoppingToken)
+                    do! Task.Delay(TimeSpan.FromMinutes(5.0), stoppingToken)
                 with :? OperationCanceledException when stoppingToken.IsCancellationRequested ->
                     ()
         }

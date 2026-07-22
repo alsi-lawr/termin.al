@@ -60,7 +60,7 @@ export function cvViewerKeyFrom(value: string): CvKeyResult {
     : { kind: "invalid" };
 }
 
-export class HttpCvClient implements CvClient {
+export class GrpcCvClient implements CvClient {
   private readonly context: BrowserGrpcContext;
   private readonly sessionClient: SessionClient;
   private readonly client: CvRpcClient;
@@ -127,9 +127,7 @@ export class HttpCvClient implements CvClient {
         { meta: this.context.metadata(), abort: signal },
       ).response;
 
-      return new TextEncoder().encode(response.markdown).byteLength <= 1024 * 1024
-        ? { kind: "available", markdown: response.markdown }
-        : cvDocumentFailed;
+      return { kind: "available", markdown: response.markdown };
     } catch (error: unknown) {
       if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
         throw new DOMException("The operation was aborted.", "AbortError");

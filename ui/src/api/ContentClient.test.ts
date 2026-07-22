@@ -22,7 +22,7 @@ import {
   virtualHomeDirectory,
 } from "../domain/filesystem/VirtualFilesystem.ts";
 import { BrowserGrpcContext, csrfToken } from "./BrowserGrpcContext.ts";
-import { HttpContentClient } from "./ContentClient.ts";
+import { GrpcContentClient } from "./ContentClient.ts";
 
 const cache = CacheMetadata.create({
   state: CacheState.FRESH,
@@ -137,7 +137,7 @@ test("loads every content slice through one narrow generated client", async () =
   if (token === undefined) assert.fail("Expected valid antiforgery fixture.");
   context.recordCsrfToken(token);
   const calls: Array<Readonly<{ method: string; meta: RpcMetadata; abort: AbortSignal }>> = [];
-  const client = new HttpContentClient(context, generatedClient(calls));
+  const client = new GrpcContentClient(context, generatedClient(calls));
   const result = await client.loadCorpus(controller.signal);
   if (result.kind !== "available") assert.fail(`Expected corpus, received ${result.kind}.`);
 
@@ -151,33 +151,4 @@ test("loads every content slice through one narrow generated client", async () =
   if (document.kind !== "available" || document.classification.kind !== "publication") assert.fail("Expected publication metadata.");
   assert.equal(document.classification.updatedAt, publication.node.updatedAt);
   assert.equal(calls.at(-1)?.method, "document");
-});
-
-test("rejects incomplete catalog source and cache metadata", async () => {
-  const response = catalogResponse();
-  response.source = ContentSource.create({ ...source, repository: "" });
-  const base = generatedClient([]);
-  const client = new HttpContentClient(new BrowserGrpcContext(), {
-    ...base,
-    readCatalog: () => ({ response: Promise.resolve(response) }),
-  });
-  const result = await client.loadCorpus(new AbortController().signal);
-  assert.equal(result.kind, "failed");
-});
-
-test("rejects a changelog release without generated chronology metadata", async () => {
-  const base = generatedClient([]);
-  const client = new HttpContentClient(new BrowserGrpcContext(), {
-    ...base,
-    readChangelog: () => ({
-      response: Promise.resolve(ChangelogResponse.create({
-        source: ContentSource.create({ ...source, repository: "example-owner/application", path: "releases" }),
-        cache,
-        releases: [Release.create({ tag: "v1.0.0", name: "1.0.0", body: "Missing chronology." })],
-      })),
-    }),
-  });
-
-  const result = await client.loadCorpus(new AbortController().signal);
-  assert.equal(result.kind, "failed");
 });

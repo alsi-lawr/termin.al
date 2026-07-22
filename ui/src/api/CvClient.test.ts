@@ -3,8 +3,8 @@ import { describe, test } from "node:test";
 import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
 import { SessionKind, SessionResponse } from "../generated/browser/browser.ts";
 import { BrowserGrpcContext } from "./BrowserGrpcContext.ts";
-import { cvViewerKeyFrom, DemoCvClient, HttpCvClient } from "./CvClient.ts";
-import { DemoCapabilityState, HttpSessionClient } from "./SessionClient.ts";
+import { cvViewerKeyFrom, DemoCvClient, GrpcCvClient } from "./CvClient.ts";
+import { DemoCapabilityState, GrpcSessionClient } from "./SessionClient.ts";
 
 test("unlocks and locks through generated clients after the shared session boundary", async () => {
   const originalFetch = globalThis.fetch;
@@ -15,7 +15,7 @@ test("unlocks and locks through generated clients after the shared session bound
   try {
     const context = new BrowserGrpcContext();
     const signal = new AbortController().signal;
-    const session = new HttpSessionClient(context, {
+    const session = new GrpcSessionClient(context, {
       readSession: () => ({
         response: Promise.resolve(SessionResponse.create({
           kind: SessionKind.ANONYMOUS,
@@ -25,7 +25,7 @@ test("unlocks and locks through generated clients after the shared session bound
       logout: () => ({ response: Promise.resolve({}) }),
     });
     const calls: Array<Readonly<{ method: string; metadata: RpcMetadata }>> = [];
-    const client = new HttpCvClient(context, session, {
+    const client = new GrpcCvClient(context, session, {
       unlock: (_request, options) => {
         calls.push({ method: "unlock", metadata: options.meta });
         return { response: Promise.resolve({}) };
@@ -54,7 +54,7 @@ test("preserves cancellation when generated CV calls reject with transport error
   const controller = new AbortController();
   controller.abort();
   const context = new BrowserGrpcContext();
-  const session = new HttpSessionClient(context, {
+  const session = new GrpcSessionClient(context, {
     readSession: () => ({
       response: Promise.resolve(SessionResponse.create({
         kind: SessionKind.ANONYMOUS,
@@ -63,7 +63,7 @@ test("preserves cancellation when generated CV calls reject with transport error
     }),
     logout: () => ({ response: Promise.resolve({}) }),
   });
-  const client = new HttpCvClient(context, session, {
+  const client = new GrpcCvClient(context, session, {
     unlock: () => ({ response: Promise.reject(new Error("transport cancelled")) }),
     lock: () => ({ response: Promise.reject(new Error("transport cancelled")) }),
     read: () => ({ response: Promise.reject(new Error("transport cancelled")) }),

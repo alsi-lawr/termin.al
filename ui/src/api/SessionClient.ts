@@ -9,7 +9,6 @@ import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
 import {
   BrowserGrpcContext,
   createBrowserGrpcTransport,
-  csrfToken,
   type CsrfToken,
 } from "./BrowserGrpcContext.ts";
 
@@ -36,10 +35,6 @@ type SessionEnvelope = Readonly<{
   session: Session;
   csrfToken: CsrfToken;
 }>;
-
-type ParsedSessionResult =
-  | Readonly<{ kind: "valid"; envelope: SessionEnvelope }>
-  | Readonly<{ kind: "invalid" }>;
 
 const authenticationFailed = {
   kind: "failed",
@@ -69,53 +64,32 @@ function demoLogin(): AuthenticatedLogin {
   return login;
 }
 
-function authenticatedSessionKind(kind: SessionKind): "github-viewer" | "github-cv-viewer" | "owner" {
-  switch (kind) {
-    case SessionKind.GITHUB_VIEWER:
-      return "github-viewer";
-    case SessionKind.GITHUB_CV_VIEWER:
-      return "github-cv-viewer";
-    case SessionKind.OWNER:
-      return "owner";
-    case SessionKind.UNSPECIFIED:
-    case SessionKind.ANONYMOUS:
-    case SessionKind.CV_VIEWER:
-    default:
-      throw new Error("The protobuf session is not authenticated.");
-  }
-}
-
-function parseSession(value: SessionResponse): ParsedSessionResult {
-  const token = csrfToken(value.csrfToken);
-
-  if (token === undefined) {
-    return { kind: "invalid" };
-  }
+function generatedSession(value: SessionResponse): SessionEnvelope {
+  const csrfToken = value.csrfToken as CsrfToken;
 
   switch (value.kind) {
     case SessionKind.ANONYMOUS:
-      return { kind: "valid", envelope: { session: { kind: "anonymous" }, csrfToken: token } };
+      return { session: { kind: "anonymous" }, csrfToken };
     case SessionKind.CV_VIEWER:
-      return { kind: "valid", envelope: { session: { kind: "cv-viewer" }, csrfToken: token } };
+      return { session: { kind: "cv-viewer" }, csrfToken };
     case SessionKind.GITHUB_VIEWER:
-    case SessionKind.GITHUB_CV_VIEWER:
-    case SessionKind.OWNER: {
-      const login = authenticatedLogin(value.login);
-
-      if (login === undefined) {
-        return { kind: "invalid" };
-      }
-
-      const kind = authenticatedSessionKind(value.kind);
-
       return {
-        kind: "valid",
-        envelope: { session: { kind, login }, csrfToken: token },
+        session: { kind: "github-viewer", login: value.login as AuthenticatedLogin },
+        csrfToken,
       };
-    }
+    case SessionKind.GITHUB_CV_VIEWER:
+      return {
+        session: { kind: "github-cv-viewer", login: value.login as AuthenticatedLogin },
+        csrfToken,
+      };
+    case SessionKind.OWNER:
+      return {
+        session: { kind: "owner", login: value.login as AuthenticatedLogin },
+        csrfToken,
+      };
     case SessionKind.UNSPECIFIED:
     default:
-      return { kind: "invalid" };
+      throw new Error("The generated session kind is unsupported.");
   }
 }
 
@@ -148,24 +122,22 @@ async function readEnvelope(
   client: SessionRpcClient,
   context: BrowserGrpcContext,
   signal: AbortSignal,
-): Promise<ParsedSessionResult> {
+): Promise<SessionEnvelope | undefined> {
+  let response: SessionResponse;
+
   try {
-    const call = client.readSession({}, { meta: context.metadata(), abort: signal });
-    const response = await call.response;
-    const parsed = parseSession(response);
-
-    if (parsed.kind === "valid") {
-      context.recordCsrfToken(parsed.envelope.csrfToken);
-    }
-
-    return parsed;
+    response = await client.readSession({}, { meta: context.metadata(), abort: signal }).response;
   } catch (error: unknown) {
     if (signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
       throw new DOMException("The operation was aborted.", "AbortError");
     }
 
-    return { kind: "invalid" };
+    return undefined;
   }
+
+  const envelope = generatedSession(response);
+  context.recordCsrfToken(envelope.csrfToken);
+  return envelope;
 }
 
 function waitForPopup(
@@ -206,7 +178,7 @@ function waitForPopup(
   });
 }
 
-export class HttpSessionClient implements SessionClient {
+export class GrpcSessionClient implements SessionClient {
   private readonly context: BrowserGrpcContext;
   private readonly client: SessionRpcClient;
 
@@ -219,13 +191,13 @@ export class HttpSessionClient implements SessionClient {
   }
 
   async read(signal: AbortSignal): Promise<SessionResult> {
-    const parsed = await readEnvelope(this.client, this.context, signal);
+    const envelope = await readEnvelope(this.client, this.context, signal);
 
-    if (parsed.kind === "invalid") {
+    if (envelope === undefined) {
       return authenticationFailed;
     }
 
-    return { kind: "available", session: parsed.envelope.session };
+    return { kind: "available", session: envelope.session };
   }
 
   async login(signal: AbortSignal): Promise<SessionResult> {
@@ -251,7 +223,7 @@ export class HttpSessionClient implements SessionClient {
   async logout(signal: AbortSignal): Promise<SessionResult> {
     const current = await readEnvelope(this.client, this.context, signal);
 
-    if (current.kind === "invalid") {
+    if (current === undefined) {
       return authenticationFailed;
     }
 

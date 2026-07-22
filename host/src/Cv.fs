@@ -7,7 +7,6 @@ open System.Security.Cryptography
 open System.Text
 open System.Text.Json
 open System.Threading.Tasks
-open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.DataProtection
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
@@ -133,9 +132,6 @@ module Cv =
                 CryptographicOperations.ZeroMemory(actual)
                 CryptographicOperations.ZeroMemory(parsed.Salt)
                 CryptographicOperations.ZeroMemory(parsed.DerivedKey)
-
-    let private genericProblem status =
-        Results.Problem(statusCode = Nullable<int>(status), title = "CV access failed.")
 
     let private runtime (context: HttpContext) =
         context.RequestServices.GetRequiredService<Runtime>()

@@ -6,7 +6,7 @@ import {
   SessionResponse,
 } from "../generated/browser/browser.ts";
 import { BrowserGrpcContext } from "./BrowserGrpcContext.ts";
-import { DemoSessionClient, HttpSessionClient } from "./SessionClient.ts";
+import { DemoSessionClient, GrpcSessionClient } from "./SessionClient.ts";
 
 test("reads a generated protobuf session and retains its antiforgery metadata", async () => {
   const context = new BrowserGrpcContext();
@@ -17,7 +17,7 @@ test("reads a generated protobuf session and retains its antiforgery metadata", 
   });
   const metadata: RpcMetadata[] = [];
   const signal = new AbortController().signal;
-  const client = new HttpSessionClient(context, {
+  const client = new GrpcSessionClient(context, {
     readSession: (_request, options) => {
       metadata.push(options.meta);
       assert.equal(options.abort, signal);
@@ -55,7 +55,7 @@ test("preserves cancellation when generated session calls reject with transport 
   });
   const readController = new AbortController();
   readController.abort();
-  const readClient = new HttpSessionClient(new BrowserGrpcContext(), {
+  const readClient = new GrpcSessionClient(new BrowserGrpcContext(), {
     readSession: () => ({ response: Promise.reject(new Error("transport cancelled")) }),
     logout: () => ({ response: Promise.resolve({}) }),
   });
@@ -64,7 +64,7 @@ test("preserves cancellation when generated session calls reject with transport 
 
   const logoutController = new AbortController();
   logoutController.abort();
-  const logoutClient = new HttpSessionClient(new BrowserGrpcContext(), {
+  const logoutClient = new GrpcSessionClient(new BrowserGrpcContext(), {
     readSession: () => ({ response: Promise.resolve(response) }),
     logout: () => ({ response: Promise.reject(new Error("transport cancelled")) }),
   });

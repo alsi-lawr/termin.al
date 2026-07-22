@@ -10,7 +10,7 @@ import type {
 import {
   formatPortfolioStats,
   workspaceStatsAfterDisconnect,
-  workspaceStatsAfterInvalidEvent,
+  workspaceStatsAfterFailure,
   workspaceStatsFromSnapshot,
   workspaceStatsStatus,
   type WorkspaceStatsState,
@@ -38,8 +38,6 @@ function applyPollEvent(
       return workspaceStatsFromSnapshot(event.snapshot);
     case "unavailable":
       return workspaceStatsAfterDisconnect(state);
-    case "invalid":
-      return workspaceStatsAfterInvalidEvent(state);
   }
 }
 
@@ -102,7 +100,7 @@ export function createWorkspaceAcceptedOpenRecorder(
       }
     }).catch(() => {
       if (!requestSignal.aborted) {
-        dispatch(workspaceStatsAfterInvalidEvent);
+        dispatch(workspaceStatsAfterFailure);
       }
     });
   };

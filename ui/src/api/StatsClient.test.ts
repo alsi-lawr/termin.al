@@ -10,22 +10,9 @@ import { BrowserGrpcContext, csrfToken } from "./BrowserGrpcContext.ts";
 import { ContentId } from "./ContentContracts.ts";
 import {
   DemoStatsClient,
-  HttpStatsClient,
+  GrpcStatsClient,
   demoStatsSnapshot,
-  validateStatsSnapshot,
 } from "./StatsClient.ts";
-
-function wireSnapshot(): unknown {
-  return {
-    totalSessions: demoStatsSnapshot.totalSessions,
-    totalPageViews: demoStatsSnapshot.totalPageViews,
-    pageViewsByContent: Object.fromEntries(
-      demoStatsSnapshot.pageViewsByContent.map((count) => [count.contentId.value, count.pageViews]),
-    ),
-    daily: demoStatsSnapshot.daily,
-    storageState: demoStatsSnapshot.storageState,
-  };
-}
 
 function generatedSnapshot(): StatsSnapshot {
   return StatsSnapshot.create({
@@ -47,12 +34,6 @@ function contentId(value: string): ContentId {
   return validation.value;
 }
 
-test("validates consecutive statistics snapshots", () => {
-  assert.equal(validateStatsSnapshot(wireSnapshot()).kind, "valid");
-  const invalid = { ...wireSnapshot() as object, totalPageViews: 511 };
-  assert.equal(validateStatsSnapshot(invalid).kind, "invalid");
-});
-
 test("uses generated unary calls and one non-overlapping 30-second polling lifecycle", async () => {
   const context = new BrowserGrpcContext();
   const token = csrfToken("statistics-antiforgery-token");
@@ -60,7 +41,7 @@ test("uses generated unary calls and one non-overlapping 30-second polling lifec
   context.recordCsrfToken(token);
   const calls: Array<Readonly<{ method: string; meta: RpcMetadata; abort: AbortSignal }>> = [];
   const scheduled: Array<Readonly<{ callback: () => void; milliseconds: number }>> = [];
-  const client = new HttpStatsClient(context, {
+  const client = new GrpcStatsClient(context, {
     readSnapshot: (_request, options) => {
       calls.push({ method: "read", meta: options.meta, abort: options.abort });
       return { response: Promise.resolve(generatedSnapshot()) };

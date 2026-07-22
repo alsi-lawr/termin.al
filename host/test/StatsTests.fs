@@ -2,16 +2,9 @@ namespace Termin.Al.Host.Tests
 
 open System
 open System.IO
-open System.Net
-open System.Net.Http
-open System.Text
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
-open Microsoft.AspNetCore.Builder
-open Microsoft.AspNetCore.Hosting.Server
-open Microsoft.AspNetCore.Hosting.Server.Features
-open Microsoft.Extensions.DependencyInjection
 open Termin.Al.Host
 
 [<RequireQualifiedAccess>]
@@ -181,7 +174,6 @@ module StatsTests =
             if secondSession.TotalSessions <> 2L || secondSession.TotalPageViews <> 3L then
                 failwith "A first view in another session must increment both totals."
 
-            store.Flush(CancellationToken.None).GetAwaiter().GetResult()
             store.Shutdown()
 
             let persistedPath = Path.Combine(path, "statistics.json")

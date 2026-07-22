@@ -34,7 +34,7 @@ export function workspaceStatsAfterDisconnect(
     : { kind: "unavailable" };
 }
 
-export function workspaceStatsAfterInvalidEvent(
+export function workspaceStatsAfterFailure(
   state: WorkspaceStatsState,
 ): WorkspaceStatsState {
   return "snapshot" in state
