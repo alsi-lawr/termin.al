@@ -179,8 +179,8 @@ test("lists typed histories and records only existing visible submission message
   state = messages.state;
 
   assert.deepEqual(state.messages, [
-    { kind: "effect", text: "Write requested" },
-    { kind: "status", text: "Read-only: :w" },
+    { text: "Write requested" },
+    { text: "Read-only: :w" },
   ]);
   assert.deepEqual(vimSessionListing(history.state, history.next.commandEffect), {
     kind: "lines",

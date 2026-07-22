@@ -7,7 +7,6 @@ import type {
 export type VimHistoryKind = "command" | "search";
 
 export type VimMessage = Readonly<{
-  kind: "effect" | "status";
   text: string;
 }>;
 
@@ -138,13 +137,13 @@ export function vimCommandEffectMessage(
     case "show-messages":
       return { kind: "none" };
     case "write":
-      return { kind: "message", message: { kind: "effect", text: "Write requested" } };
+      return { kind: "message", message: { text: "Write requested" } };
     case "quit":
-      return { kind: "message", message: { kind: "effect", text: "Quit requested" } };
+      return { kind: "message", message: { text: "Quit requested" } };
     case "force-quit":
-      return { kind: "message", message: { kind: "effect", text: "Force quit requested" } };
+      return { kind: "message", message: { text: "Force quit requested" } };
     case "unrecognized-command":
-      return { kind: "message", message: { kind: "effect", text: "Unknown command" } };
+      return { kind: "message", message: { text: "Unknown command" } };
   }
 }
 
@@ -153,19 +152,19 @@ export function vimStatusMessage(status: VimStatus): VimMessagePresentation {
     case "none":
       return { kind: "none" };
     case "invalid-input":
-      return { kind: "message", message: { kind: "status", text: `Invalid input: ${status.source}` } };
+      return { kind: "message", message: { text: `Invalid input: ${status.source}` } };
     case "invalid-search":
-      return { kind: "message", message: { kind: "status", text: `Invalid pattern: ${status.query}` } };
+      return { kind: "message", message: { text: `Invalid pattern: ${status.query}` } };
     case "no-search-match":
-      return { kind: "message", message: { kind: "status", text: `Pattern not found: ${status.query}` } };
+      return { kind: "message", message: { text: `Pattern not found: ${status.query}` } };
     case "no-previous-search":
-      return { kind: "message", message: { kind: "status", text: "No previous search pattern" } };
+      return { kind: "message", message: { text: "No previous search pattern" } };
     case "invalid-substitution":
-      return { kind: "message", message: { kind: "status", text: `Invalid substitution: ${status.message}` } };
+      return { kind: "message", message: { text: `Invalid substitution: ${status.message}` } };
     case "no-substitution-match":
-      return { kind: "message", message: { kind: "status", text: `Pattern not found: ${status.pattern}` } };
+      return { kind: "message", message: { text: `Pattern not found: ${status.pattern}` } };
     case "read-only":
-      return { kind: "message", message: { kind: "status", text: `Read-only: ${status.source}` } };
+      return { kind: "message", message: { text: `Read-only: ${status.source}` } };
   }
 }
 
