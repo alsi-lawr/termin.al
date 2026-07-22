@@ -94,6 +94,7 @@ module HostApplication =
             now
             Auth.randomBytes
             Auth.keyRingAvailable
+            Cv.SecretFilePath
 
         let application = builder.Build()
 
@@ -147,6 +148,7 @@ module HostApplication =
             now
             Auth.randomBytes
             Auth.keyRingAvailable
+            Cv.SecretFilePath
 
         let application = builder.Build()
 

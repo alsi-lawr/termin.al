@@ -1,6 +1,8 @@
 namespace Termin.Al.Host.Tests
 
 open System
+open System.Collections.Concurrent
+open System.IO
 open System.Net
 open System.Net.Http
 open System.Text
@@ -12,15 +14,43 @@ open Microsoft.AspNetCore.Hosting.Server
 open Microsoft.AspNetCore.Hosting.Server.Features
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Logging
 open Termin.Al.Host
 
 module Program =
+    type private EmptyScope() =
+        interface IDisposable with
+            member _.Dispose() = ()
+
+    type private CapturingLogger(messages: ConcurrentQueue<string>) =
+        interface ILogger with
+            member _.BeginScope<'TState>(_: 'TState) : IDisposable = new EmptyScope()
+            member _.IsEnabled(_) = true
+
+            member _.Log<'TState>
+                (_: LogLevel, _: EventId, state: 'TState, error: exn, formatter: Func<'TState, exn, string>)
+                =
+                messages.Enqueue(formatter.Invoke(state, error))
+
+                if not (isNull error) then
+                    messages.Enqueue(error.ToString())
+
+    type private CapturingLoggerProvider(messages: ConcurrentQueue<string>) =
+        interface ILoggerProvider with
+            member _.CreateLogger(_) =
+                new CapturingLogger(messages) :> ILogger
+
+            member _.Dispose() = ()
+
     type private GitHubHandler(now: unit -> DateTimeOffset, expiredAccess: bool) =
         inherit HttpMessageHandler()
 
         let mutable refreshAttempts = 0
+        let accessToken = String('a', 48)
+        let refreshToken = String('r', 48)
 
         member _.RefreshAttempts = refreshAttempts
+        member _.SensitiveValues = [ accessToken; refreshToken ]
 
         override _.SendAsync(request, _) =
             let response =
@@ -32,8 +62,6 @@ module Program =
                         new HttpResponseMessage(HttpStatusCode.Unauthorized)
                     else
                         let expiresIn = if expiredAccess then -60 else 3600
-                        let accessToken = String('a', 48)
-                        let refreshToken = String('r', 48)
 
                         let json =
                             $"""{{"access_token":"{accessToken}","refresh_token":"{refreshToken}","expires_in":{expiresIn},"refresh_token_expires_in":7200}}"""
@@ -312,7 +340,7 @@ module Program =
         if Cv.verifyViewerKey "invalid" wrongKey then
             failwith "An invalid configured CV hash must fail closed."
 
-    let private authenticationApplication viewerHash cvKeyRingReady expiredAccess now =
+    let private authenticationApplication viewerHash cvKeyRingReady expiredAccess now cvPath =
         let arguments =
             [ "--GitHub:App:ClientId=" + String('c', 24)
               "--GitHub:App:ClientSecret=" + String('s', 32)
@@ -326,13 +354,21 @@ module Program =
             |> List.toArray
 
         let builder = WebApplication.CreateBuilder(WebApplicationOptions(Args = arguments))
+        let capturedLogs = ConcurrentQueue<string>()
+        builder.Logging.AddProvider(new CapturingLoggerProvider(capturedLogs)) |> ignore
         let githubHandler = new GitHubHandler(now, expiredAccess)
         let githubClient = new HttpClient(githubHandler, true)
 
         Auth.configureServices builder.Services builder.Configuration true githubClient now Auth.randomBytes
 
-        Cv.configureServices builder.Services builder.Configuration false now Auth.randomBytes (fun () ->
-            cvKeyRingReady)
+        Cv.configureServices
+            builder.Services
+            builder.Configuration
+            false
+            now
+            Auth.randomBytes
+            (fun () -> cvKeyRingReady)
+            cvPath
 
         let application = builder.Build()
 
@@ -341,7 +377,7 @@ module Program =
 
         Auth.mapEndpoints application
         Cv.mapEndpoints application
-        application, githubHandler
+        application, githubHandler, capturedLogs
 
     let private establishOwnerSession (client: HttpClient) =
         use start = client.GetAsync("/api/auth/github/start").GetAwaiter().GetResult()
@@ -355,12 +391,18 @@ module Program =
             |> Seq.find (fun pair -> pair[0] = "state")
             |> fun pair -> Uri.UnescapeDataString(pair[1])
 
+        let callbackCode = String('o', 37)
+
         use callback =
-            client.GetAsync($"/api/auth/github/callback?code=accepted&state={Uri.EscapeDataString(state)}")
+            client.GetAsync(
+                $"/api/auth/github/callback?code={Uri.EscapeDataString(callbackCode)}&state={Uri.EscapeDataString(state)}"
+            )
             |> fun pending -> pending.GetAwaiter().GetResult()
 
         if callback.StatusCode <> HttpStatusCode.OK then
             failwithf "Expected owner callback success, but received %O." callback.StatusCode
+
+        [ callbackCode; state ]
 
     let private assertGenericCvFailure (response: HttpResponseMessage) expectedStatus =
         if response.StatusCode <> expectedStatus then
@@ -386,27 +428,25 @@ module Program =
 
         let viewerHash = (Cv.generateViewerKey ()).CanonicalHash
 
-        authenticationApplication None true false now
-        |> fst
-        |> fun application ->
+        authenticationApplication None true false now Cv.SecretFilePath
+        |> fun (application, _, _) ->
             withRunningHost application (fun client ->
-                establishOwnerSession client
+                establishOwnerSession client |> ignore
                 use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
                 assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
 
-        authenticationApplication (Some viewerHash) false false now
-        |> fst
-        |> fun application ->
+        authenticationApplication (Some viewerHash) false false now Cv.SecretFilePath
+        |> fun (application, _, _) ->
             withRunningHost application (fun client ->
-                establishOwnerSession client
+                establishOwnerSession client |> ignore
                 use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
                 assertGenericCvFailure response HttpStatusCode.ServiceUnavailable)
 
-        let application, githubHandler =
-            authenticationApplication (Some viewerHash) true true now
+        let application, githubHandler, _ =
+            authenticationApplication (Some viewerHash) true true now Cv.SecretFilePath
 
         withRunningHost application (fun client ->
-            establishOwnerSession client
+            establishOwnerSession client |> ignore
             use response = client.GetAsync("/api/cv").GetAwaiter().GetResult()
             assertGenericCvFailure response HttpStatusCode.Forbidden
 
@@ -426,6 +466,67 @@ module Program =
 
             if sessionDocument.RootElement.GetProperty("kind").GetString() <> "github-viewer" then
                 failwith "Failed owner refresh must atomically demote the browser to GitHub viewer.")
+
+    let private runSensitiveLoggingChecks () =
+        let now () =
+            DateTimeOffset.Parse("2026-07-22T12:00:00Z")
+
+        let viewerKey = Cv.generateViewerKey ()
+        let cvBytes = "# " + String('v', 41)
+        let cvPath = Path.GetTempFileName()
+
+        try
+            File.WriteAllText(cvPath, cvBytes, Encoding.UTF8)
+
+            let application, githubHandler, capturedLogs =
+                authenticationApplication (Some viewerKey.CanonicalHash) true false now cvPath
+
+            let mutable callbackValues = []
+
+            withRunningHost application (fun client ->
+                callbackValues <- establishOwnerSession client
+                use session = client.GetAsync("/api/session").GetAwaiter().GetResult()
+                let sessionBody = session.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+                use sessionDocument = JsonDocument.Parse(sessionBody)
+                let csrfToken = sessionDocument.RootElement.GetProperty("csrfToken").GetString()
+                use unlock = new HttpRequestMessage(HttpMethod.Post, "/api/auth/cv")
+                unlock.Headers.Add("Origin", "http://127.0.0.1")
+                unlock.Headers.Add(Auth.AntiforgeryHeaderName, csrfToken)
+
+                unlock.Content <-
+                    new StringContent(
+                        JsonSerializer.Serialize({| key = viewerKey.Plaintext |}),
+                        Encoding.UTF8,
+                        "application/json"
+                    )
+
+                use unlocked = client.Send(unlock)
+
+                if unlocked.StatusCode <> HttpStatusCode.NoContent then
+                    failwith "Expected logging contract CV unlock to succeed."
+
+                use cv = client.GetAsync("/api/cv").GetAwaiter().GetResult()
+
+                if cv.StatusCode <> HttpStatusCode.OK then
+                    failwith "Expected logging contract CV read to succeed."
+
+                if cv.Content.ReadAsStringAsync().GetAwaiter().GetResult() <> cvBytes then
+                    failwith "Expected logging contract CV bytes to reach the authorized caller.")
+
+            let retained = String.Join("\n", capturedLogs)
+
+            if
+                callbackValues
+                @ githubHandler.SensitiveValues
+                @ [ viewerKey.Plaintext; cvBytes ]
+                |> List.exists (fun sensitive -> retained.Contains(sensitive, StringComparison.Ordinal))
+            then
+                failwith "Host diagnostics retained a protected authentication or CV value."
+
+            if not (retained.Contains("HTTP: GET /api/session", StringComparison.Ordinal)) then
+                failwith "The logging boundary must preserve safe endpoint diagnostics."
+        finally
+            File.Delete(cvPath)
 
     let private runFreshCacheEndpointCheck () =
         HostApplication.createWithContentClient [||] (freshContentClient ())
@@ -503,6 +604,7 @@ module Program =
             runAuthenticationContractChecks ()
             runCvCryptographyChecks ()
             runOwnerCvFailClosedChecks ()
+            runSensitiveLoggingChecks ()
             runFreshCacheEndpointCheck ()
             runStaleCacheEndpointCheck ()
             0

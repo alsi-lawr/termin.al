@@ -19,7 +19,7 @@ module Cv =
     let private viewerHashConfigurationName = "Cv:ViewerKeyHash"
 
     [<Literal>]
-    let private cvPath = "/run/secrets/termin.al-cv.md"
+    let SecretFilePath = "/run/secrets/termin.al-cv.md"
 
     [<Literal>]
     let private attemptCookieName = "termin.al.cv-attempt"
@@ -50,6 +50,7 @@ module Cv =
     type private Runtime =
         { ViewerHash: ViewerKeyHash option
           KeyRingReady: bool
+          CvPath: string
           AllowLocalHttpCookie: bool
           Now: unit -> DateTimeOffset
           RandomBytes: int -> byte array
@@ -294,14 +295,14 @@ module Cv =
             | :? InvalidOperationException -> return None
         }
 
-    let private readCv () =
+    let private readCv path =
         task {
             let bytes = Array.zeroCreate<byte> (maximumCvBytes + 1)
 
             try
                 try
                     use stream =
-                        new FileStream(cvPath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true)
+                        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true)
 
                     let mutable total = 0
                     let mutable reading = true
@@ -411,7 +412,7 @@ module Cv =
                         if not (hasCvAccess session configured.Fingerprint) then
                             return genericProblem StatusCodes.Status403Forbidden
                         else
-                            let! content = readCv ()
+                            let! content = readCv state.CvPath
 
                             match content with
                             | Some markdown -> return Results.Text(markdown, "text/markdown", Encoding.UTF8)
@@ -427,6 +428,7 @@ module Cv =
         (now: unit -> DateTimeOffset)
         (randomBytes: int -> byte array)
         (keyRingAvailable: unit -> bool)
+        (cvPath: string)
         =
         let viewerHash =
             match configuration[viewerHashConfigurationName] with
@@ -436,6 +438,7 @@ module Cv =
         services.AddSingleton<Runtime>(
             { ViewerHash = viewerHash
               KeyRingReady = keyRingAvailable () || allowLocalHttpCookie
+              CvPath = cvPath
               AllowLocalHttpCookie = allowLocalHttpCookie
               Now = now
               RandomBytes = randomBytes

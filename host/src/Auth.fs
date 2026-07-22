@@ -19,6 +19,7 @@ open Microsoft.AspNetCore.DataProtection
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
+open Microsoft.Extensions.Logging
 
 [<RequireQualifiedAccess>]
 module Auth =
@@ -803,6 +804,15 @@ module Auth =
         (randomBytes: int -> byte array)
         =
         let ready = keyRingAvailable ()
+
+        services.AddLogging(fun logging ->
+            logging.AddFilter("Microsoft.AspNetCore.Hosting.Diagnostics", LogLevel.None)
+            |> ignore
+
+            logging.AddFilter("Microsoft.AspNetCore.Http.Result.RedirectResult", LogLevel.None)
+            |> ignore)
+        |> ignore
+
         let dataProtection = services.AddDataProtection().SetApplicationName("termin.al")
 
         if ready then
