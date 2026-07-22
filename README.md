@@ -312,8 +312,10 @@ accepted, and a content ID is counted at most once per active session state.
 CV views are not counted.
 
 The NixOS service persists the snapshot at
-`/var/lib/termin.al/stats/statistics.json`. Invalid or unwritable storage makes
-statistics unavailable rather than replacing it with guessed data.
+`/var/lib/termin.al/stats/statistics.json`. Invalid storage with no recoverable
+snapshot makes statistics unavailable rather than replacing it with guessed
+data. A valid snapshot that becomes unwritable remains readable as `STALE`, but
+cannot record new views.
 
 ## NixOS deployment
 
@@ -344,10 +346,12 @@ interface, `nixosModules.default`:
 }
 ```
 
-These are all five module options. `environmentFile` and `cvFile` are optional
-absolute runtime paths; omit `cvFile` when CV access is disabled. Ports are
-limited to 1024–65535. The service does not open a firewall port, configure DNS,
-terminate TLS or create a reverse proxy.
+These are all five module options. Their defaults are `enable = false`,
+`listenAddress = "127.0.0.1"`, `port = 5000`, `environmentFile = null` (unset)
+and `cvFile = null` (unset). The two file options accept optional absolute
+runtime paths; omit `cvFile` when CV access is disabled. Ports are limited to
+1024–65535. The service does not open a firewall port, configure DNS, terminate
+TLS or create a reverse proxy.
 
 Create runtime inputs without placing their contents in the Nix store:
 
