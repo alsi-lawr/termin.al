@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/termin-al-logo.svg" width="520" alt="termin.al — a terminal prompt inside a browser window" />
+  <img src="docs/assets/termin-al-logo.webp" width="520" alt="termin.al — a terminal prompt inside a browser window" />
   <p><strong>A portfolio that behaves like a terminal.</strong></p>
   <p>
     Explore projects, writing, notes, activity, and more through a virtual shell built for the browser.
