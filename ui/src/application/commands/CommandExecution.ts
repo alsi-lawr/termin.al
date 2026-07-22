@@ -1185,6 +1185,9 @@ async function executePipeline(
 
   let pipelineInput: CommandInvocation["stdin"] = { kind: "none" };
   let outcome: CommandOutcome | undefined;
+  let firstRedirectionFailure:
+    | Extract<CommandOutcome, { kind: "failed" }>
+    | undefined;
 
   for (const entry of resolved) {
     if (options.signal.aborted) {
@@ -1210,6 +1213,7 @@ async function executePipeline(
 
     if (setup.kind === "failed") {
       outcome = setup.outcome;
+      firstRedirectionFailure ??= setup.outcome;
       pipelineInput = {
         kind: "text",
         text: routeFailureThroughStandardError(
@@ -1222,7 +1226,7 @@ async function executePipeline(
       };
 
       if (isFinal) {
-        return setup.outcome;
+        return firstRedirectionFailure;
       }
 
       continue;
@@ -1251,6 +1255,13 @@ async function executePipeline(
     outcome = routed.outcome;
     pipelineInput = { kind: "text", text: routed.pipelineText };
 
+    if (
+      outcome.kind === "failed" &&
+      outcome.failure.kind === "redirection-error"
+    ) {
+      firstRedirectionFailure ??= outcome;
+    }
+
     if (outcome.kind === "cancelled") {
       return outcome;
     }
@@ -1267,7 +1278,7 @@ async function executePipeline(
     throw new Error("A parsed pipeline must contain a command.");
   }
 
-  return outcome;
+  return firstRedirectionFailure ?? outcome;
 }
 
 function completedLine(

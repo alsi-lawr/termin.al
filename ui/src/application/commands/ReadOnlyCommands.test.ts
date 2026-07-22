@@ -1384,6 +1384,20 @@ test("applies ordered redirections through the shared virtual reader boundary", 
     outputText(await execute("missing 2>&1 > unused | head", registry)),
     "Command not found: missing",
   );
+  const pipedSetupFailure = await execute(
+    "echo x 2>&1 > missing/child | head && echo continued",
+    registry,
+  );
+  assert.equal(pipedSetupFailure.kind, "failed");
+  assert.deepEqual(failureMessages(pipedSetupFailure), []);
+  assert.deepEqual(
+    pipedSetupFailure.events.flatMap((event) =>
+      event.kind === "output" && event.output.kind === "text"
+        ? [event.output.text]
+        : []
+    ),
+    ["Redirection parent does not exist: ~/missing/child"],
+  );
   assert.equal(
     outputText(await execute("missing > captured 2>&1 || cat captured", registry)),
     "Command not found: missing",
