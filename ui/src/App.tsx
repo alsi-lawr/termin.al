@@ -26,6 +26,7 @@ function App({
       contentClient={applicationClientComposition.contentClient}
       statsClient={applicationClientComposition.statsClient}
       authentication={authentication}
+      publicationClient={applicationClientComposition.publicationClient}
     />
   );
 }

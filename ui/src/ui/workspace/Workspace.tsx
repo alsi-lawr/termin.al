@@ -11,6 +11,7 @@ import { usePaneWorkspace } from "./usePaneWorkspace";
 import { WorkspaceStatusLine } from "./WorkspaceStatusLine";
 import { useWorkspaceStats } from "./useWorkspaceStats.ts";
 import type { AuthenticationBinding } from "../../auth/useAuthentication.ts";
+import type { PublicationClient } from "../../api/PublicationClient.ts";
 import {
   authenticationCapabilityLabel,
   authenticationPromptIdentity,
@@ -21,6 +22,7 @@ type WorkspaceProps = Readonly<{
   corpus: ContentCorpus;
   statsClient: StatsClient;
   authentication: AuthenticationBinding;
+  publicationClient: PublicationClient | undefined;
 }>;
 
 export function Workspace({
@@ -28,6 +30,7 @@ export function Workspace({
   corpus,
   statsClient,
   authentication,
+  publicationClient,
 }: WorkspaceProps): ReactElement {
   const stats = useWorkspaceStats(statsClient, applicationMode);
   const controller = usePaneWorkspace(
@@ -35,6 +38,7 @@ export function Workspace({
     stats.recordAcceptedOpen,
     applicationMode,
     authentication.controller,
+    publicationClient,
   );
   const dropCvContent = controller.dropCvContent;
   const theme = useTheme();

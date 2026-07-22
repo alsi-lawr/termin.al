@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ContentCorpus } from "../api/ContentClient.ts";
 import type { CvClient } from "../api/CvClient.ts";
 import type { AuthenticatedLogin, SessionClient } from "../api/SessionClient.ts";
+import type { PublicationClient } from "../api/PublicationClient.ts";
 import { AuthenticationController } from "../auth/Authentication.ts";
 import {
   createVirtualFilesystem,
@@ -70,6 +71,12 @@ class MemoryDraftStore implements DraftStore {
       if (!retained) this.assets.delete(destinationPath);
     }
     return Promise.resolve();
+  }
+}
+
+class NoAssetReadDraftStore extends MemoryDraftStore {
+  override readAssets(): Promise<ReadonlyArray<StagedAsset>> {
+    throw new Error("Asset-free publication must not read a missing IndexedDB asset row.");
   }
 }
 
@@ -169,6 +176,42 @@ test("opens a missing recursive path with a real new-document base and recovers 
     (await service.open("~/notes/runtime/example.md", virtualHomeDirectory(), new AbortController().signal)).kind,
     "rejected",
   );
+});
+
+test("publishes a new asset-free draft before its first save and discards only that exact state", async () => {
+  const auth = authentication();
+  await auth.refresh(new AbortController().signal);
+  const store = new NoAssetReadDraftStore();
+  let submittedPath = "";
+  const publication: PublicationClient = {
+    mutate: (_mutation, draft) => {
+      submittedPath = draft.repositoryPath;
+      return Promise.resolve({
+        kind: "published",
+        sha: "b".repeat(40),
+        url: `https://github.com/example/content/commit/${"b".repeat(40)}`,
+        defaultBranch: "main",
+        documentBlobSha: "c".repeat(40),
+      });
+    },
+  };
+  const service = new AuthoringService(corpus(), auth, store, publication);
+  const opened = await service.open(
+    "notes/runtime/direct.md",
+    virtualHomeDirectory(),
+    new AbortController().signal,
+  );
+  if (opened.kind !== "opened") assert.fail("The new draft must open.");
+  const result = await service.publish(
+    "publish",
+    opened.draft,
+    opened.draft.source,
+    "",
+    new AbortController().signal,
+  );
+  assert.equal(result.kind, "published");
+  assert.equal(submittedPath, "notes/runtime/direct.md");
+  assert.equal(store.drafts.size, 0);
 });
 
 test("rejects stale saves and discards without replacing the newer stored revision", async () => {

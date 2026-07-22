@@ -180,6 +180,16 @@ export function publicationBodyFromSource(source: string): string {
   return closing < 0 ? source : lines.slice(closing + 1).join("\n");
 }
 
+export function publicationConflictSource(localMarkdown: string, upstreamMarkdown: string): string {
+  return [
+    "<<<<<<< LOCAL",
+    localMarkdown,
+    "=======",
+    upstreamMarkdown,
+    ">>>>>>> UPSTREAM",
+  ].join("\n");
+}
+
 function assetExtension(fileName: string): keyof typeof assetMediaTypes | undefined {
   for (const extension of assetExtensions) {
     if (fileName.endsWith(extension)) return extension;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContentCorpus } from "../../api/ContentClient.ts";
 import type { ApplicationMode } from "../../ApplicationComposition.ts";
 import type { AuthenticationController } from "../../auth/Authentication.ts";
+import type { PublicationClient } from "../../api/PublicationClient.ts";
 import { AuthoringService } from "../../authoring/AuthoringService.ts";
 import { IndexedDbDraftStore } from "../../authoring/DraftStore.ts";
 import type { ContentId } from "../../api/ContentContracts.ts";
@@ -148,12 +149,13 @@ export function usePaneWorkspace(
   onAcceptedContentOpen: (contentId: ContentId) => void,
   applicationMode: ApplicationMode,
   authentication: AuthenticationController,
+  publicationClient: PublicationClient | undefined,
 ): PaneWorkspaceController {
   const currentDirectory = corpus.filesystem.root.path;
   const [authoring] = useState<AuthoringService | undefined>(() => {
-    if (applicationMode === "demo") return undefined;
+    if (applicationMode === "demo" || publicationClient === undefined) return undefined;
     try {
-      return new AuthoringService(corpus, authentication, new IndexedDbDraftStore(window.indexedDB));
+      return new AuthoringService(corpus, authentication, new IndexedDbDraftStore(window.indexedDB), publicationClient);
     } catch {
       return undefined;
     }

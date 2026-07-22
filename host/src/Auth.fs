@@ -541,6 +541,20 @@ module Auth =
     let resolveSession (context: HttpContext) =
         readSession context |> refreshOwner context
 
+    type OwnerAccessToken = private OwnerAccessToken of string
+
+    let tryOwnerAccessToken value =
+        if String.IsNullOrWhiteSpace value then None else Some(OwnerAccessToken value)
+
+    let resolveOwnerAccessToken (context: HttpContext) =
+        task {
+            match! resolveSession context with
+            | Owner(_, tokens) -> return Some(OwnerAccessToken tokens.AccessToken)
+            | _ -> return None
+        }
+
+    let ownerAccessTokenValue (OwnerAccessToken value) = value
+
     let sessionView =
         function
         | Anonymous -> AnonymousView

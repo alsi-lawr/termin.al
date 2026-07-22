@@ -204,3 +204,44 @@ service CvApi {
   rpc Lock(EmptyRequest) returns (EmptyRequest);
   rpc Read(EmptyRequest) returns (CvDocumentResponse);
 }
+
+enum PublicationOperation {
+  PUBLICATION_OPERATION_UNSPECIFIED = 0;
+  PUBLICATION_OPERATION_ADD = 1;
+  PUBLICATION_OPERATION_UPDATE = 2;
+  PUBLICATION_OPERATION_REMOVE = 3;
+}
+
+message PublicationAsset {
+  string destination_path = 1;
+  string declared_media_type = 2;
+  bytes content = 3;
+}
+
+message PublicationRequest {
+  PublicationOperation operation = 1;
+  string repository_path = 2;
+  string virtual_path = 3;
+  string markdown = 4;
+  string expected_default_branch = 5;
+  string expected_head_sha = 6;
+  string expected_blob_sha = 7;
+  repeated PublicationAsset assets = 8;
+  string removal_confirmation = 9;
+}
+
+message PublicationResponse {
+  bool conflict = 1;
+  string sha = 2;
+  string url = 3;
+  string default_branch = 4;
+  string document_blob_sha = 5;
+  string local_markdown = 6;
+  string upstream_markdown = 7;
+  string head_sha = 8;
+  string blob_sha = 9;
+}
+
+service PublicationApi {
+  rpc Publish(PublicationRequest) returns (PublicationResponse);
+}

@@ -28,6 +28,7 @@ async function createApplicationClientComposition(
         statsClient: new DemoStatsClient(),
         sessionClient: new DemoSessionClient(demoCapabilities),
         cvClient: new DemoCvClient(demoCapabilities),
+        publicationClient: undefined,
       });
     }
     case "live": {
@@ -36,6 +37,7 @@ async function createApplicationClientComposition(
       const { GrpcStatsClient } = await import("./api/StatsClient.ts");
       const { GrpcSessionClient } = await import("./api/SessionClient.ts");
       const { GrpcCvClient } = await import("./api/CvClient.ts");
+      const { GrpcPublicationClient } = await import("./api/PublicationClient.ts");
 
       const grpcContext = new BrowserGrpcContext();
       const sessionClient = new GrpcSessionClient(grpcContext);
@@ -45,6 +47,7 @@ async function createApplicationClientComposition(
         statsClient: new GrpcStatsClient(grpcContext),
         sessionClient,
         cvClient: new GrpcCvClient(grpcContext, sessionClient),
+        publicationClient: new GrpcPublicationClient(grpcContext, sessionClient),
       });
     }
   }

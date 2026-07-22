@@ -35,6 +35,7 @@ module HostApplication =
         Auth.mapOAuthEndpoints application
         application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<ContentGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<PublicationGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<StatisticsGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<CvGrpcService>().EnableGrpcWeb() |> ignore
         application.MapFallbackToFile("/demo/{*path:nonfile}", "index.html") |> ignore
@@ -42,9 +43,9 @@ module HostApplication =
 
     let private liveContentClient
         (configuration: IConfiguration)
-        : ContentClient * HttpClient option * IHostedService option =
+        : ContentClient * GitHubPublication.Client * HttpClient option * IHostedService option =
         match GitHubContentConfiguration.tryCreate configuration with
-        | Error _ -> ContentClient.configurationInvalid (), None, None
+        | Error _ -> ContentClient.configurationInvalid (), GitHubPublication.unavailable, None, None
         | Ok githubConfiguration ->
             let httpClient = new HttpClient()
             let generation = ContentCacheGeneration()
@@ -62,7 +63,9 @@ module HostApplication =
                     generation
                 )
 
-            contentClient, Some httpClient, Some worker
+            let publication = GitHubPublication.live httpClient githubConfiguration generation (fun () -> DateTimeOffset.UtcNow)
+
+            contentClient, publication, Some httpClient, Some worker
 
     let createWithContentClientAndStats
         (args: string array)
@@ -77,6 +80,7 @@ module HostApplication =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+        builder.Services.AddSingleton<GitHubPublication.Client>(GitHubPublication.unavailable) |> ignore
 
         let statsRuntime: Stats.BrowserRuntime =
             { Store = statsStore
@@ -129,7 +133,7 @@ module HostApplication =
     let create (args: string array) : WebApplication =
         let builder = WebApplication.CreateBuilder(createOptions args)
 
-        let contentClient, httpClient, refreshWorker =
+        let contentClient, publication, httpClient, refreshWorker =
             liveContentClient builder.Configuration
 
         let now () = DateTimeOffset.UtcNow
@@ -138,6 +142,7 @@ module HostApplication =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+        builder.Services.AddSingleton<GitHubPublication.Client>(publication) |> ignore
 
         match refreshWorker with
         | Some worker -> builder.Services.AddSingleton<IHostedService>(worker) |> ignore

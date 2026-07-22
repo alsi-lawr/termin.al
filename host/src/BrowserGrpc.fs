@@ -2,6 +2,7 @@ namespace Termin.Al.Host
 
 open System.Globalization
 open Grpc.Core
+open Google.Protobuf
 open Microsoft.AspNetCore.Antiforgery
 open Microsoft.AspNetCore.Http
 open Microsoft.Extensions.DependencyInjection
@@ -322,6 +323,78 @@ type ContentGrpcService(contentClient: ContentClient) =
                 response.Unreleased.Add(ContentDomain.Changelog.unreleased value |> List.map BrowserGrpcWire.commit)
                 response.Releases.Add(ContentDomain.Changelog.releases value |> List.map BrowserGrpcWire.release)
                 return response
+        }
+
+type PublicationGrpcService(publication: GitHubPublication.Client) =
+    inherit PublicationApi.PublicationApiBase()
+
+    override _.Publish(request: PublicationRequest, context: ServerCallContext) =
+        task {
+            BrowserGrpcWire.noStore context
+            let httpContext = context.GetHttpContext()
+            let! validMutation = Auth.validateMutation httpContext
+
+            if not validMutation then
+                return raise (BrowserGrpcWire.generic StatusCode.PermissionDenied "Publication failed.")
+            else
+                match! Auth.resolveOwnerAccessToken httpContext with
+                | None -> return raise (BrowserGrpcWire.generic StatusCode.PermissionDenied "Publication failed.")
+                | Some ownerToken ->
+                    let operation =
+                        match request.Operation with
+                        | PublicationOperation.Add -> Some GitHubPublication.Operation.Add
+                        | PublicationOperation.Update -> Some GitHubPublication.Operation.Update
+                        | PublicationOperation.Remove -> Some GitHubPublication.Operation.Remove
+                        | PublicationOperation.Unspecified
+                        | _ -> None
+
+                    match operation with
+                    | None -> return raise (BrowserGrpcWire.generic StatusCode.InvalidArgument "Publication failed.")
+                    | Some value ->
+                        let publicationRequest: GitHubPublication.Request =
+                            { Operation = value
+                              RepositoryPath = request.RepositoryPath
+                              VirtualPath = request.VirtualPath
+                              Markdown = request.Markdown
+                              ExpectedDefaultBranch = request.ExpectedDefaultBranch
+                              ExpectedHeadSha = request.ExpectedHeadSha
+                              ExpectedBlobSha = request.ExpectedBlobSha
+                              Assets =
+                                request.Assets
+                                |> Seq.map (fun (asset: Termin.Al.Contracts.V1.PublicationAsset) ->
+                                    let value: GitHubPublication.Asset =
+                                        { DestinationPath = asset.DestinationPath
+                                          DeclaredMediaType = asset.DeclaredMediaType
+                                          Bytes = asset.Content.ToByteArray() }
+
+                                    value)
+                                |> Seq.toList
+                              RemovalConfirmation = request.RemovalConfirmation }
+
+                        match! publication.Publish(ownerToken, publicationRequest, context.CancellationToken) with
+                        | GitHubPublication.Result.Invalid ->
+                            return raise (BrowserGrpcWire.generic StatusCode.InvalidArgument "Publication failed.")
+                        | GitHubPublication.Result.Unavailable ->
+                            return raise (BrowserGrpcWire.generic StatusCode.Unavailable "Publication failed.")
+                        | GitHubPublication.Result.Published commit ->
+                            return
+                                PublicationResponse(
+                                    Conflict = false,
+                                    Sha = commit.Sha,
+                                    Url = commit.Url,
+                                    DefaultBranch = commit.DefaultBranch,
+                                    DocumentBlobSha = commit.DocumentBlobSha
+                                )
+                        | GitHubPublication.Result.Conflict conflict ->
+                            return
+                                PublicationResponse(
+                                    Conflict = true,
+                                    LocalMarkdown = conflict.LocalMarkdown,
+                                    UpstreamMarkdown = conflict.UpstreamMarkdown,
+                                    DefaultBranch = conflict.DefaultBranch,
+                                    HeadSha = conflict.HeadSha,
+                                    BlobSha = conflict.BlobSha
+                                )
         }
 
 type StatisticsGrpcService(runtime: Stats.BrowserRuntime) =

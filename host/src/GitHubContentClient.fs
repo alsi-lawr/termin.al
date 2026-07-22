@@ -93,6 +93,12 @@ type ContentCacheGeneration() =
                 generation <- generation + 1L
                 true)
 
+    member _.Advance(head: string) =
+        lock gate (fun () ->
+            observedHead <- Some head
+            generation <- generation + 1L
+            generation)
+
 [<RequireQualifiedAccess>]
 module GitHubContentClient =
     type private CachedPayload =

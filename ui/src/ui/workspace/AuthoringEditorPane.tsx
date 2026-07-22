@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactElement } from "react";
 import type { AuthoringService } from "../../authoring/AuthoringService.ts";
 import {
   browserAssetPreviewUrlApi,
@@ -7,6 +7,7 @@ import {
 } from "../../authoring/StagedAssetPreviewUrls.ts";
 import {
   publicationBodyFromSource,
+  publicationConflictSource,
   validatePublicationSource,
   type StagedAssetMetadata,
 } from "../../authoring/PublicationDraft.ts";
@@ -67,6 +68,11 @@ export function AuthoringEditorPane({
   const [previewUrls] = useState(() => new StagedAssetPreviewUrls(browserAssetPreviewUrlApi()));
   const [previews, setPreviews] = useState<PreviewState>({ kind: "loading" });
   const [pendingFiles, setPendingFiles] = useState<ReadonlyArray<File>>([]);
+  const [removeConfirmation, setRemoveConfirmation] = useState<string | undefined>(undefined);
+  const [publicationPending, setPublicationPending] = useState(false);
+  const publicationAbort = useRef<AbortController | undefined>(undefined);
+
+  useEffect(() => () => { publicationAbort.current?.abort(); }, []);
 
   useEffect(() => {
     let abandoned = false;
@@ -171,6 +177,74 @@ export function AuthoringEditorPane({
     }
   };
 
+  const publish = async (mutation: "publish" | "remove", confirmation = ""): Promise<void> => {
+    if (publicationPending) return;
+    const submittedBuffer = content.buffer;
+    const submittedSource = vimBufferText(submittedBuffer);
+    const controller = new AbortController();
+    publicationAbort.current?.abort();
+    publicationAbort.current = controller;
+    setPublicationPending(true);
+    try {
+      const result = await authoring.publish(
+        mutation,
+        content.draft,
+        submittedSource,
+        confirmation,
+        controller.signal,
+      );
+      if (result.kind === "invalid" || result.kind === "failed") {
+        showMessage(result.message);
+        return;
+      }
+      if (result.kind === "conflict") {
+        const conflictSource = publicationConflictSource(result.localMarkdown, result.upstreamMarkdown);
+        onOperation({
+          kind: "complete-authoring-conflict",
+          paneId,
+          draft: result.draft,
+          submittedSource,
+          conflictBuffer: applyVimTextReplacement(submittedBuffer, conflictSource, 0),
+          upstreamMarkdown: result.upstreamMarkdown,
+          message: "Publication conflict loaded with the latest upstream base; edit, save, and resubmit.",
+        });
+        return;
+      }
+      if (result.persistedState === "newer-revision-retained") {
+        showMessage(`Published ${result.sha}, but a newer stored draft revision was retained. ${result.url}`);
+        return;
+      }
+      setRemoveConfirmation(undefined);
+      onOperation({
+        kind: "complete-authoring-publication",
+        paneId,
+        draft: result.draft,
+        submittedSource,
+        message: `Published ${result.sha}. ${result.url}`,
+        closeIfBufferMatchesSubmittedSource: false,
+      });
+    } catch (error: unknown) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        showMessage("Publication failed.");
+      }
+    } finally {
+      if (publicationAbort.current === controller) {
+        publicationAbort.current = undefined;
+        setPublicationPending(false);
+      }
+    }
+  };
+
+  const confirmRemoval = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const confirmation = removeConfirmation ?? "";
+    if (confirmation !== content.draft.repositoryPath) {
+      showMessage("Removal confirmation must match the exact recursive document path.");
+      return;
+    }
+    void publish("remove", confirmation);
+  };
+
   const handleEffect = async (effect: VimCommandEffect, buffer: VimBuffer): Promise<void> => {
     const source = vimBufferText(buffer);
     if (effect.kind === "quit") {
@@ -202,6 +276,15 @@ export function AuthoringEditorPane({
           statsIdentity: { kind: "uncounted" },
         }),
       });
+      return;
+    }
+    if (effect.kind === "publish") {
+      void publish("publish");
+      return;
+    }
+    if (effect.kind === "remove") {
+      setRemoveConfirmation("");
+      showMessage(`Type ${content.draft.repositoryPath} below to confirm removal.`);
       return;
     }
     if (effect.kind !== "write" && effect.kind !== "write-quit") return;
@@ -244,6 +327,29 @@ export function AuthoringEditorPane({
           resolveMobileCtrlInput={resolveMobileCtrlInput}
         />
       </div>
+      {removeConfirmation === undefined ? null : (
+        <form className="shrink-0 border-t border-surface-border bg-surface-raised p-2" onSubmit={confirmRemoval}>
+          <label className="block text-xs text-text-muted" htmlFor={`remove-${paneId}`}>
+            Type the exact recursive path <span className="text-text-bright">{content.draft.repositoryPath}</span> to remove only its Markdown and catalog entry.
+          </label>
+          <div className="mt-2 flex gap-2">
+            <input
+              id={`remove-${paneId}`}
+              className="min-w-0 flex-1 rounded border border-surface-border bg-surface-deepest px-2 py-1 text-sm text-text-bright focus:border-ui-focus focus:outline-none"
+              autoComplete="off"
+              value={removeConfirmation}
+              disabled={publicationPending}
+              onChange={(event) => { setRemoveConfirmation(event.currentTarget.value); }}
+            />
+            <button className="rounded border border-surface-border px-2 py-1 text-sm text-text-bright hover:border-ui-focus disabled:opacity-50" type="submit" disabled={publicationPending}>
+              {publicationPending ? "Removing…" : "Remove"}
+            </button>
+            <button className="rounded border border-surface-border px-2 py-1 text-sm text-text-bright hover:border-ui-focus disabled:opacity-50" type="button" disabled={publicationPending} onClick={() => { setRemoveConfirmation(undefined); }}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
       <section className="shrink-0 border-t border-surface-border bg-surface-raised p-2" aria-label="Staged assets">
         <div className="flex items-center justify-between gap-2 text-xs text-text-muted">
           <span>Staged assets · use :asset, paste, or drop files</span>

@@ -127,6 +127,8 @@ export type VimCommandEffect =
   | Readonly<{ kind: "write-quit" }>
   | Readonly<{ kind: "preview" }>
   | Readonly<{ kind: "asset" }>
+  | Readonly<{ kind: "publish" }>
+  | Readonly<{ kind: "remove" }>
   | Readonly<{
       kind: "show-history";
       history: "command" | "search";
@@ -221,6 +223,8 @@ export type VimParsedCommand =
   | Readonly<{ kind: "write-quit" }>
   | Readonly<{ kind: "preview" }>
   | Readonly<{ kind: "asset" }>
+  | Readonly<{ kind: "publish" }>
+  | Readonly<{ kind: "remove" }>
   | Readonly<{ kind: "quit" }>
   | Readonly<{ kind: "force-quit" }>
   | Readonly<{
@@ -3330,6 +3334,10 @@ export function parseVimCommand(source: string): VimCommandParseResult {
       return { kind: "recognized", command: { kind: "preview" } };
     case "asset":
       return { kind: "recognized", command: { kind: "asset" } };
+    case "publish":
+      return { kind: "recognized", command: { kind: "publish" } };
+    case "remove":
+      return { kind: "recognized", command: { kind: "remove" } };
     case "history":
     case "history cmd":
       return {
@@ -3363,6 +3371,9 @@ function writeCapabilityClassification(
       return { kind: "write-effect", source: ":" + source };
     case "asset":
       return { kind: "text-mutation", source: ":asset" };
+    case "publish":
+    case "remove":
+      return { kind: "write-effect", source: ":" + source };
     default:
       return { kind: "none" };
   }

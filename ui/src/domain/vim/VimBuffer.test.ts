@@ -575,6 +575,8 @@ test("retains command, search, and insert-mode behavior", () => {
     ["wq", { kind: "write-quit" }],
     ["preview", { kind: "preview" }],
     ["asset", { kind: "asset" }],
+    ["publish", { kind: "publish" }],
+    ["remove", { kind: "remove" }],
   ] as const) {
     const supported = submitVimCommand(appendVimCommandInput(press(start, ":"), source));
     assert.deepEqual(supported.commandEffect, commandEffect);

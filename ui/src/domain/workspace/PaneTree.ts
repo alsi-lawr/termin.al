@@ -1,11 +1,12 @@
 import {
   createEmptyVimBuffer,
   createVimBuffer,
+  applyVimTextReplacement,
   isVimBufferDirty,
   vimBufferText,
   type VimBuffer,
 } from "../vim/VimBuffer.ts";
-import type { PublicationDraft } from "../../authoring/PublicationDraft.ts";
+import { publicationConflictSource, type PublicationDraft } from "../../authoring/PublicationDraft.ts";
 import {
   createPlaceholderViewerContent,
   type ViewerContent,
@@ -178,6 +179,23 @@ export type PaneOperation =
       draft: PublicationDraft;
       submittedSource: string;
       completedBuffer: VimBuffer;
+      message: string;
+    }>
+  | Readonly<{
+      kind: "complete-authoring-publication";
+      paneId: PaneId;
+      draft: PublicationDraft;
+      submittedSource: string;
+      message: string;
+      closeIfBufferMatchesSubmittedSource: boolean;
+    }>
+  | Readonly<{
+      kind: "complete-authoring-conflict";
+      paneId: PaneId;
+      draft: PublicationDraft;
+      submittedSource: string;
+      conflictBuffer: VimBuffer;
+      upstreamMarkdown: string;
       message: string;
     }>
   | Readonly<{
@@ -1165,6 +1183,55 @@ export function applyPaneOperation(
               ...pane.content,
               draft: operation.draft,
               savedSource: operation.draft.source,
+              buffer,
+              message: operation.message,
+            },
+          }),
+        },
+      };
+    }
+    case "complete-authoring-publication": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      const unchanged = vimBufferText(pane.content.buffer) === operation.submittedSource;
+      const updated = {
+        ...workspace,
+        tree: replacePane(workspace.tree, pane.id, {
+          ...pane,
+          content: {
+            ...pane.content,
+            draft: operation.draft,
+            savedSource: operation.submittedSource,
+            message: operation.message,
+          },
+        }),
+      };
+      return unchanged && operation.closeIfBufferMatchesSubmittedSource
+        ? closePane(updated, pane.id, true)
+        : { kind: "applied", workspace: updated };
+    }
+    case "complete-authoring-conflict": {
+      const pane = paneLeaves(workspace.tree).find((candidate) => candidate.id === operation.paneId);
+      if (pane === undefined) return { kind: "rejected", reason: "target-pane-unavailable" };
+      if (pane.content.kind !== "authoring-editor") return { kind: "rejected", reason: "pane-is-not-editor" };
+      const currentSource = vimBufferText(pane.content.buffer);
+      const buffer = currentSource === operation.submittedSource
+        ? operation.conflictBuffer
+        : applyVimTextReplacement(
+            pane.content.buffer,
+            publicationConflictSource(currentSource, operation.upstreamMarkdown),
+            0,
+          );
+      return {
+        kind: "applied",
+        workspace: {
+          ...workspace,
+          tree: replacePane(workspace.tree, pane.id, {
+            ...pane,
+            content: {
+              ...pane.content,
+              draft: operation.draft,
               buffer,
               message: operation.message,
             },

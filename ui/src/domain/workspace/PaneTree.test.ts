@@ -362,3 +362,83 @@ test("async media completion inserts at the submitted cursor without replacing a
   assert.equal(preservedPane.content.savedSource, stagedSource);
   assert.equal(preservedPane.content.draft.recordRevision, 1);
 });
+
+test("publication completion can close an unchanged submitted buffer and retains concurrent text against the published base", () => {
+  const source = minimalPublicationSource("example");
+  const concurrentSource = source + "\nTyped while publishing.";
+  const initial = split(
+    createPaneWorkspace({ initialContent: createShellPaneContent() }),
+    "vertical",
+    createAuthoringEditorPaneContent(authoringDraft(source)),
+  );
+  const editorId = initial.activePaneId;
+  const publishedDraft = {
+    ...authoringDraft(source),
+    base: { kind: "existing", defaultBranch: "main", headSha: "b".repeat(40), blobSha: "c".repeat(40) },
+    dirty: false,
+    unpublished: false,
+  } satisfies PublicationDraft;
+  const closed = applied(applyPaneOperation(initial, {
+    kind: "complete-authoring-publication",
+    paneId: editorId,
+    draft: publishedDraft,
+    submittedSource: source,
+    message: "published",
+    closeIfBufferMatchesSubmittedSource: true,
+  }));
+  assert.equal(paneLeaves(closed.tree).some((pane) => pane.id === editorId), false);
+
+  const concurrent = applied(applyPaneOperation(initial, {
+    kind: "replace-editor-buffer",
+    paneId: editorId,
+    buffer: createVimBuffer({ text: concurrentSource, mode: { kind: "normal" } }),
+  }));
+  const retained = applied(applyPaneOperation(concurrent, {
+    kind: "complete-authoring-publication",
+    paneId: editorId,
+    draft: publishedDraft,
+    submittedSource: source,
+    message: "published",
+    closeIfBufferMatchesSubmittedSource: true,
+  }));
+  const pane = paneLeaves(retained.tree).find((candidate) => candidate.id === editorId);
+  if (pane?.content.kind !== "authoring-editor") assert.fail("Concurrent publication typing must remain open.");
+  assert.equal(vimBufferText(pane.content.buffer), concurrentSource);
+  assert.equal(pane.content.savedSource, source);
+  assert.deepEqual(pane.content.draft.base, publishedDraft.base);
+});
+
+test("conflict completion wraps concurrent typing in the LOCAL side of whole-document markers", () => {
+  const submitted = minimalPublicationSource("example");
+  const concurrent = submitted + "\nTyped while awaiting conflict.";
+  const upstream = minimalPublicationSource("upstream");
+  const initial = split(
+    createPaneWorkspace({ initialContent: createShellPaneContent() }),
+    "vertical",
+    createAuthoringEditorPaneContent(authoringDraft(submitted)),
+  );
+  const editorId = initial.activePaneId;
+  const changed = applied(applyPaneOperation(initial, {
+    kind: "replace-editor-buffer",
+    paneId: editorId,
+    buffer: createVimBuffer({ text: concurrent, mode: { kind: "normal" } }),
+  }));
+  const conflicted = applied(applyPaneOperation(changed, {
+    kind: "complete-authoring-conflict",
+    paneId: editorId,
+    draft: {
+      ...authoringDraft(submitted),
+      base: { kind: "existing", defaultBranch: "main", headSha: "b".repeat(40), blobSha: "c".repeat(40) },
+    },
+    submittedSource: submitted,
+    conflictBuffer: createVimBuffer({ text: "unused submitted markers", mode: { kind: "normal" } }),
+    upstreamMarkdown: upstream,
+    message: "conflict",
+  }));
+  const pane = paneLeaves(conflicted.tree).find((candidate) => candidate.id === editorId);
+  if (pane?.content.kind !== "authoring-editor") assert.fail("Conflict must retain the authoring editor.");
+  assert.equal(
+    vimBufferText(pane.content.buffer),
+    `<<<<<<< LOCAL\n${concurrent}\n=======\n${upstream}\n>>>>>>> UPSTREAM`,
+  );
+});

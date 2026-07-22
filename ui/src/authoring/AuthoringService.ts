@@ -1,4 +1,5 @@
 import type { ContentCorpus } from "../api/ContentClient.ts";
+import type { PublicationClient, PublicationMutation } from "../api/PublicationClient.ts";
 import type { AuthenticationController } from "../auth/Authentication.ts";
 import {
   normalizeVirtualPath,
@@ -28,19 +29,43 @@ export type AuthoringAssetMutationResult =
   | Readonly<{ kind: "stale"; current: PublicationDraft }>
   | Readonly<{ kind: "invalid"; message: string }>;
 
+export type AuthoringPublicationResult =
+  | Readonly<{
+      kind: "published";
+      sha: string;
+      url: string;
+      draft: PublicationDraft;
+      persistedState: "discarded" | "newer-revision-retained";
+    }>
+  | Readonly<{
+      kind: "conflict";
+      draft: PublicationDraft;
+      localMarkdown: string;
+      upstreamMarkdown: string;
+    }>
+  | Readonly<{ kind: "invalid"; message: string }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+const unavailablePublicationClient: PublicationClient = {
+  mutate: () => Promise.resolve({ kind: "failed", message: "Publication failed." }),
+};
+
 export class AuthoringService {
   readonly #corpus: ContentCorpus;
   readonly #authentication: AuthenticationController;
   readonly #store: DraftStore;
+  readonly #publication: PublicationClient;
 
   constructor(
     corpus: ContentCorpus,
     authentication: AuthenticationController,
     store: DraftStore,
+    publication: PublicationClient = unavailablePublicationClient,
   ) {
     this.#corpus = corpus;
     this.#authentication = authentication;
     this.#store = store;
+    this.#publication = publication;
   }
 
   async open(input: string, currentDirectory: VirtualDirectoryPath, signal: AbortSignal): Promise<AuthoringOpenResult> {
@@ -141,6 +166,77 @@ export class AuthoringService {
 
   assets(draft: PublicationDraft): Promise<ReadonlyArray<StagedAsset>> {
     return this.#store.readAssets(draft.repositoryPath);
+  }
+
+  async publish(
+    mutation: PublicationMutation,
+    draft: PublicationDraft,
+    source: string,
+    removalConfirmation: string,
+    signal: AbortSignal,
+  ): Promise<AuthoringPublicationResult> {
+    const parsed = validatePublicationSource(source);
+    if (parsed.kind === "invalid") return parsed;
+    if (mutation === "remove" && removalConfirmation !== draft.repositoryPath) {
+      return { kind: "invalid", message: "Removal confirmation must match the exact recursive document path." };
+    }
+
+    const assets = draft.stagedAssets.length === 0
+      ? []
+      : await this.#store.readAssets(draft.repositoryPath);
+    const result = await this.#publication.mutate(
+      mutation,
+      draft,
+      source,
+      assets,
+      removalConfirmation,
+      signal,
+    );
+    if (result.kind === "failed") return result;
+    if (result.kind === "conflict") {
+      const base = result.blobSha.length === 0
+        ? { kind: "new", defaultBranch: result.defaultBranch, headSha: result.headSha } as const
+        : {
+            kind: "existing",
+            defaultBranch: result.defaultBranch,
+            headSha: result.headSha,
+            blobSha: result.blobSha,
+          } as const;
+      return {
+        kind: "conflict",
+        draft: { ...draft, base, dirty: true, unpublished: true },
+        localMarkdown: result.localMarkdown,
+        upstreamMarkdown: result.upstreamMarkdown,
+      };
+    }
+
+    const discarded = await this.#store.discard(draft.repositoryPath, draft.recordRevision);
+    const nextBase = mutation === "remove"
+      ? { kind: "new", defaultBranch: result.defaultBranch, headSha: result.sha } as const
+      : {
+          kind: "existing",
+          defaultBranch: result.defaultBranch,
+          headSha: result.sha,
+          blobSha: result.documentBlobSha,
+        } as const;
+    return {
+      kind: "published",
+      sha: result.sha,
+      url: result.url,
+      draft: discarded.kind === "stale"
+        ? discarded.current
+        : {
+            ...draft,
+            recordRevision: 0,
+            source,
+            frontMatter: parsed.value,
+            base: nextBase,
+            dirty: false,
+            unpublished: mutation === "remove",
+            stagedAssets: [],
+          },
+      persistedState: discarded.kind === "stale" ? "newer-revision-retained" : "discarded",
+    };
   }
 
   async stageAssets(

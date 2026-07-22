@@ -461,6 +461,105 @@ export interface CvDocumentResponse {
     markdown: string;
 }
 /**
+ * @generated from protobuf message terminal.v1.PublicationAsset
+ */
+export interface PublicationAsset {
+    /**
+     * @generated from protobuf field: string destination_path = 1
+     */
+    destinationPath: string;
+    /**
+     * @generated from protobuf field: string declared_media_type = 2
+     */
+    declaredMediaType: string;
+    /**
+     * @generated from protobuf field: bytes content = 3
+     */
+    content: Uint8Array;
+}
+/**
+ * @generated from protobuf message terminal.v1.PublicationRequest
+ */
+export interface PublicationRequest {
+    /**
+     * @generated from protobuf field: terminal.v1.PublicationOperation operation = 1
+     */
+    operation: PublicationOperation;
+    /**
+     * @generated from protobuf field: string repository_path = 2
+     */
+    repositoryPath: string;
+    /**
+     * @generated from protobuf field: string virtual_path = 3
+     */
+    virtualPath: string;
+    /**
+     * @generated from protobuf field: string markdown = 4
+     */
+    markdown: string;
+    /**
+     * @generated from protobuf field: string expected_default_branch = 5
+     */
+    expectedDefaultBranch: string;
+    /**
+     * @generated from protobuf field: string expected_head_sha = 6
+     */
+    expectedHeadSha: string;
+    /**
+     * @generated from protobuf field: string expected_blob_sha = 7
+     */
+    expectedBlobSha: string;
+    /**
+     * @generated from protobuf field: repeated terminal.v1.PublicationAsset assets = 8
+     */
+    assets: PublicationAsset[];
+    /**
+     * @generated from protobuf field: string removal_confirmation = 9
+     */
+    removalConfirmation: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.PublicationResponse
+ */
+export interface PublicationResponse {
+    /**
+     * @generated from protobuf field: bool conflict = 1
+     */
+    conflict: boolean;
+    /**
+     * @generated from protobuf field: string sha = 2
+     */
+    sha: string;
+    /**
+     * @generated from protobuf field: string url = 3
+     */
+    url: string;
+    /**
+     * @generated from protobuf field: string default_branch = 4
+     */
+    defaultBranch: string;
+    /**
+     * @generated from protobuf field: string document_blob_sha = 5
+     */
+    documentBlobSha: string;
+    /**
+     * @generated from protobuf field: string local_markdown = 6
+     */
+    localMarkdown: string;
+    /**
+     * @generated from protobuf field: string upstream_markdown = 7
+     */
+    upstreamMarkdown: string;
+    /**
+     * @generated from protobuf field: string head_sha = 8
+     */
+    headSha: string;
+    /**
+     * @generated from protobuf field: string blob_sha = 9
+     */
+    blobSha: string;
+}
+/**
  * @generated from protobuf enum terminal.v1.SessionKind
  */
 export const SessionKind = { UNSPECIFIED: 0, ANONYMOUS: 1, GITHUB_VIEWER: 2, CV_VIEWER: 3, GITHUB_CV_VIEWER: 4, OWNER: 5 } as const;
@@ -485,6 +584,11 @@ export type DocumentKind = number;
  */
 export const StatsStorageState = { UNSPECIFIED: 0, WRITABLE: 1, READ_ONLY: 2 } as const;
 export type StatsStorageState = number;
+/**
+ * @generated from protobuf enum terminal.v1.PublicationOperation
+ */
+export const PublicationOperation = { UNSPECIFIED: 0, ADD: 1, UPDATE: 2, REMOVE: 3 } as const;
+export type PublicationOperation = number;
 // @generated message type with reflection information, may provide speed optimized methods
 class EmptyRequest$Type extends MessageType<EmptyRequest> {
     constructor() {
@@ -2011,6 +2115,291 @@ class CvDocumentResponse$Type extends MessageType<CvDocumentResponse> {
  * @generated MessageType for protobuf message terminal.v1.CvDocumentResponse
  */
 export const CvDocumentResponse = new CvDocumentResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PublicationAsset$Type extends MessageType<PublicationAsset> {
+    constructor() {
+        super("terminal.v1.PublicationAsset", [
+            { no: 1, name: "destination_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "declared_media_type", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "content", kind: "scalar", T: 12 /*ScalarType.BYTES*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PublicationAsset>): PublicationAsset {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.destinationPath = "";
+        message.declaredMediaType = "";
+        message.content = new Uint8Array(0);
+        if (value !== undefined)
+            reflectionMergePartial<PublicationAsset>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PublicationAsset): PublicationAsset {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string destination_path */ 1:
+                    message.destinationPath = reader.string();
+                    break;
+                case /* string declared_media_type */ 2:
+                    message.declaredMediaType = reader.string();
+                    break;
+                case /* bytes content */ 3:
+                    message.content = reader.bytes();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PublicationAsset, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string destination_path = 1; */
+        if (message.destinationPath !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.destinationPath);
+        /* string declared_media_type = 2; */
+        if (message.declaredMediaType !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.declaredMediaType);
+        /* bytes content = 3; */
+        if (message.content.length)
+            writer.tag(3, WireType.LengthDelimited).bytes(message.content);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.PublicationAsset
+ */
+export const PublicationAsset = new PublicationAsset$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PublicationRequest$Type extends MessageType<PublicationRequest> {
+    constructor() {
+        super("terminal.v1.PublicationRequest", [
+            { no: 1, name: "operation", kind: "enum", T: () => ["terminal.v1.PublicationOperation", PublicationOperation, "PUBLICATION_OPERATION_"] },
+            { no: 2, name: "repository_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "virtual_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "markdown", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "expected_default_branch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "expected_head_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "expected_blob_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "assets", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => PublicationAsset },
+            { no: 9, name: "removal_confirmation", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PublicationRequest>): PublicationRequest {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.operation = 0;
+        message.repositoryPath = "";
+        message.virtualPath = "";
+        message.markdown = "";
+        message.expectedDefaultBranch = "";
+        message.expectedHeadSha = "";
+        message.expectedBlobSha = "";
+        message.assets = [];
+        message.removalConfirmation = "";
+        if (value !== undefined)
+            reflectionMergePartial<PublicationRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PublicationRequest): PublicationRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* terminal.v1.PublicationOperation operation */ 1:
+                    message.operation = reader.int32();
+                    break;
+                case /* string repository_path */ 2:
+                    message.repositoryPath = reader.string();
+                    break;
+                case /* string virtual_path */ 3:
+                    message.virtualPath = reader.string();
+                    break;
+                case /* string markdown */ 4:
+                    message.markdown = reader.string();
+                    break;
+                case /* string expected_default_branch */ 5:
+                    message.expectedDefaultBranch = reader.string();
+                    break;
+                case /* string expected_head_sha */ 6:
+                    message.expectedHeadSha = reader.string();
+                    break;
+                case /* string expected_blob_sha */ 7:
+                    message.expectedBlobSha = reader.string();
+                    break;
+                case /* repeated terminal.v1.PublicationAsset assets */ 8:
+                    message.assets.push(PublicationAsset.internalBinaryRead(reader, reader.uint32(), options));
+                    break;
+                case /* string removal_confirmation */ 9:
+                    message.removalConfirmation = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PublicationRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* terminal.v1.PublicationOperation operation = 1; */
+        if (message.operation !== 0)
+            writer.tag(1, WireType.Varint).int32(message.operation);
+        /* string repository_path = 2; */
+        if (message.repositoryPath !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.repositoryPath);
+        /* string virtual_path = 3; */
+        if (message.virtualPath !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.virtualPath);
+        /* string markdown = 4; */
+        if (message.markdown !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.markdown);
+        /* string expected_default_branch = 5; */
+        if (message.expectedDefaultBranch !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.expectedDefaultBranch);
+        /* string expected_head_sha = 6; */
+        if (message.expectedHeadSha !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.expectedHeadSha);
+        /* string expected_blob_sha = 7; */
+        if (message.expectedBlobSha !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.expectedBlobSha);
+        /* repeated terminal.v1.PublicationAsset assets = 8; */
+        for (let i = 0; i < message.assets.length; i++)
+            PublicationAsset.internalBinaryWrite(message.assets[i], writer.tag(8, WireType.LengthDelimited).fork(), options).join();
+        /* string removal_confirmation = 9; */
+        if (message.removalConfirmation !== "")
+            writer.tag(9, WireType.LengthDelimited).string(message.removalConfirmation);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.PublicationRequest
+ */
+export const PublicationRequest = new PublicationRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class PublicationResponse$Type extends MessageType<PublicationResponse> {
+    constructor() {
+        super("terminal.v1.PublicationResponse", [
+            { no: 1, name: "conflict", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 2, name: "sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 3, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 4, name: "default_branch", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 5, name: "document_blob_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 6, name: "local_markdown", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 7, name: "upstream_markdown", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 8, name: "head_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 9, name: "blob_sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<PublicationResponse>): PublicationResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.conflict = false;
+        message.sha = "";
+        message.url = "";
+        message.defaultBranch = "";
+        message.documentBlobSha = "";
+        message.localMarkdown = "";
+        message.upstreamMarkdown = "";
+        message.headSha = "";
+        message.blobSha = "";
+        if (value !== undefined)
+            reflectionMergePartial<PublicationResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: PublicationResponse): PublicationResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* bool conflict */ 1:
+                    message.conflict = reader.bool();
+                    break;
+                case /* string sha */ 2:
+                    message.sha = reader.string();
+                    break;
+                case /* string url */ 3:
+                    message.url = reader.string();
+                    break;
+                case /* string default_branch */ 4:
+                    message.defaultBranch = reader.string();
+                    break;
+                case /* string document_blob_sha */ 5:
+                    message.documentBlobSha = reader.string();
+                    break;
+                case /* string local_markdown */ 6:
+                    message.localMarkdown = reader.string();
+                    break;
+                case /* string upstream_markdown */ 7:
+                    message.upstreamMarkdown = reader.string();
+                    break;
+                case /* string head_sha */ 8:
+                    message.headSha = reader.string();
+                    break;
+                case /* string blob_sha */ 9:
+                    message.blobSha = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: PublicationResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* bool conflict = 1; */
+        if (message.conflict !== false)
+            writer.tag(1, WireType.Varint).bool(message.conflict);
+        /* string sha = 2; */
+        if (message.sha !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.sha);
+        /* string url = 3; */
+        if (message.url !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.url);
+        /* string default_branch = 4; */
+        if (message.defaultBranch !== "")
+            writer.tag(4, WireType.LengthDelimited).string(message.defaultBranch);
+        /* string document_blob_sha = 5; */
+        if (message.documentBlobSha !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.documentBlobSha);
+        /* string local_markdown = 6; */
+        if (message.localMarkdown !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.localMarkdown);
+        /* string upstream_markdown = 7; */
+        if (message.upstreamMarkdown !== "")
+            writer.tag(7, WireType.LengthDelimited).string(message.upstreamMarkdown);
+        /* string head_sha = 8; */
+        if (message.headSha !== "")
+            writer.tag(8, WireType.LengthDelimited).string(message.headSha);
+        /* string blob_sha = 9; */
+        if (message.blobSha !== "")
+            writer.tag(9, WireType.LengthDelimited).string(message.blobSha);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.PublicationResponse
+ */
+export const PublicationResponse = new PublicationResponse$Type();
 /**
  * @generated ServiceType for protobuf service terminal.v1.SessionApi
  */
@@ -2043,4 +2432,10 @@ export const CvApi = new ServiceType("terminal.v1.CvApi", [
     { name: "Unlock", options: {}, I: UnlockCvRequest, O: EmptyRequest },
     { name: "Lock", options: {}, I: EmptyRequest, O: EmptyRequest },
     { name: "Read", options: {}, I: EmptyRequest, O: CvDocumentResponse }
+]);
+/**
+ * @generated ServiceType for protobuf service terminal.v1.PublicationApi
+ */
+export const PublicationApi = new ServiceType("terminal.v1.PublicationApi", [
+    { name: "Publish", options: {}, I: PublicationRequest, O: PublicationResponse }
 ]);

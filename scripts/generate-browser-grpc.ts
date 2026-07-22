@@ -78,6 +78,10 @@ async function normalizeGeneratedFiles(outputRoot: string): Promise<void> {
       .replace(
         /export enum StatsStorageState \{[\s\S]*?\n\}/u,
         "export const StatsStorageState = { UNSPECIFIED: 0, WRITABLE: 1, READ_ONLY: 2 } as const;\nexport type StatsStorageState = number;",
+      )
+      .replace(
+        /export enum PublicationOperation \{[\s\S]*?\n\}/u,
+        "export const PublicationOperation = { UNSPECIFIED: 0, ADD: 1, UPDATE: 2, REMOVE: 3 } as const;\nexport type PublicationOperation = number;",
       );
     await writeFile(path, normalized);
   }

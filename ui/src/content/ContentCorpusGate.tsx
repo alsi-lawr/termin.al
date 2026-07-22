@@ -5,12 +5,14 @@ import type { StatsClient } from "../api/StatsClient.ts";
 import { Workspace } from "../ui/workspace/Workspace.tsx";
 import { useContentCorpus } from "./useContentCorpus.ts";
 import type { AuthenticationBinding } from "../auth/useAuthentication.ts";
+import type { PublicationClient } from "../api/PublicationClient.ts";
 
 type ContentCorpusGateProps = Readonly<{
   applicationMode: ApplicationMode;
   contentClient: ContentClient;
   statsClient: StatsClient;
   authentication: AuthenticationBinding;
+  publicationClient: PublicationClient | undefined;
 }>;
 
 function ContentStatus({
@@ -40,6 +42,7 @@ export function ContentCorpusGate({
   contentClient,
   statsClient,
   authentication,
+  publicationClient,
 }: ContentCorpusGateProps): ReactElement {
   const state = useContentCorpus(contentClient);
 
@@ -65,14 +68,14 @@ export function ContentCorpusGate({
         <ContentStatus role="alert" title="Content unavailable" message={state.message} />
       );
     case "available":
-      return <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} statsClient={statsClient} />;
+      return <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} />;
     case "stale":
       return (
         <div className="min-h-dvh bg-surface-deepest">
           <p className="border-b border-ui-subtle bg-surface-raised px-4 py-2 text-center text-sm text-foreground-muted" role="status">
             Displaying recently cached content while GitHub is unavailable.
           </p>
-          <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} statsClient={statsClient} />
+          <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} />
         </div>
       );
   }

@@ -539,6 +539,7 @@ module Program =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
+        builder.Services.AddSingleton<GitHubPublication.Client>(GitHubPublication.unavailable) |> ignore
 
         let statsRuntime: Stats.BrowserRuntime =
             { Store = statsStore
@@ -572,6 +573,7 @@ module Program =
         application.MapGrpcService<SessionGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<CvGrpcService>().EnableGrpcWeb() |> ignore
         application.MapGrpcService<StatisticsGrpcService>().EnableGrpcWeb() |> ignore
+        application.MapGrpcService<PublicationGrpcService>().EnableGrpcWeb() |> ignore
         application, githubHandler, capturedLogs
 
     let private runMutationBoundaryChecks () =
@@ -594,7 +596,10 @@ module Program =
                       "/terminal.v1.CvApi/Lock", EmptyRequest(), int StatusCode.PermissionDenied
                       "/terminal.v1.StatisticsApi/RecordView",
                       RecordViewRequest(ContentId = "about"),
-                      int StatusCode.InvalidArgument ]
+                      int StatusCode.InvalidArgument
+                      "/terminal.v1.PublicationApi/Publish",
+                      PublicationRequest(Operation = PublicationOperation.Add),
+                      int StatusCode.PermissionDenied ]
 
                 let rejectedHeaders =
                     [ [ Auth.AntiforgeryHeaderName, session.CsrfToken ]
@@ -818,6 +823,7 @@ module Program =
         try
             PublicationMediaTests.run ()
             GitHubContentClientTests.run ()
+            GitHubPublicationTests.run ()
             StatsTests.run ()
             runHostContractChecks ()
             runAuthenticationContractChecks ()

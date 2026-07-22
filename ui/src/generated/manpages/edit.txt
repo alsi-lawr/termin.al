@@ -19,29 +19,35 @@ EDITOR COMMANDS
      saves and closes. :q! discards only the current stored revision and refuses
      to remove a newer cross-tab revision. :preview opens  or  updates  one  un‐
      counted  Markdown  split  without publishing. :asset opens the browser file
-     picker; raster files may also be pasted or dropped into the editor.
+     picker; raster files may also be pasted or dropped into the  editor.  :pub‐
+     lish atomically adds or updates the Markdown, staged assets and catalog en‐
+     try on the configured repository's current default branch. :remove opens an
+     exact recursive-path confirmation and removes only the Markdown and catalog
+     entry.
 
 ASSETS
-     PNG, JPEG, WebP and GIF files with canonical filenames can be staged,  pre‐
-     viewed,  replaced  and  removed. Staging inserts a repository-root-relative
+     PNG,  JPEG, WebP and GIF files with canonical filenames can be staged, pre‐
+     viewed, replaced and removed. Staging  inserts  a  repository-root-relative
      Markdown image link at the Vim cursor. Recursive document hierarchy is mir‐
      rored below assets/blog or assets/notes. Draft metadata and Blob values are
-     committed together under optimistic revision control; object URLs are  pre‐
+     committed  together under optimistic revision control; object URLs are pre‐
      view-only and are never stored.
 
 FAILURES
-     Authoring  requires the live owner session and browser IndexedDB. Demo mode
-     rejects every invocation. Invalid roots, traversal, noncanonical  slugs  or
-     asset  filenames, mismatched raster types or signatures, invalid front mat‐
-     ter, unavailable repository bases and stale mutations are rejected  without
-     mutating  repository  content  or  discarding  the buffer or selected local
-     File.
+     Authoring and publication require the live owner session  and  browser  In‐
+     dexedDB.  Demo mode rejects every invocation without host, network or stor‐
+     age writes. Invalid roots, traversal, noncanonical  slugs  or  asset  file‐
+     names,  mismatched  raster  types  or signatures, invalid front matter, un‐
+     available repository bases, stale mutations,  upstream  failures  and  con‐
+     flicts  do not discard local source or staged files. A conflict replaces an
+     unchanged submitted buffer with whole-document local/upstream  markers  and
+     the latest base; text typed after submission remains visible instead.
 
 NOTES
-     Drafts contain publication source, base branch/head/blob references,  revi‐
-     sion state and staged-asset metadata. Authentication, session and CV values
-     are  never  stored. Publication and repository writes are outside this com‐
-     mand.
+     Drafts  contain publication source, base branch/head/blob references, revi‐
+     sion state and  staged-asset  metadata.  Authentication,  session,  CV  and
+     GitHub  token  values  are never stored. Successful publication reports the
+     commit SHA and URL and clears only the exact published draft revision.
 
 EXAMPLES
      $ edit notes/runtime/files/sample-note.md
