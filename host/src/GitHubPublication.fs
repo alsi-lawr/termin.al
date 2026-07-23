@@ -13,6 +13,7 @@ open System.Text
 open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
+open Microsoft.Extensions.Logging
 
 [<RequireQualifiedAccess>]
 module GitHubPublication =
@@ -745,6 +746,7 @@ module GitHubPublication =
         (configuration: GitHubContentConfiguration)
         (generation: ContentCacheGeneration)
         (now: unit -> DateTimeOffset)
+        (logger: ILogger)
         : Client =
         let repository =
             configuration
@@ -919,7 +921,16 @@ module GitHubPublication =
                                                                     | _ -> return Result.Unavailable
                             finally
                                 gate.Release() |> ignore
-                        with :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                        with
+                        | :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                            return raise error
+                        | error ->
+                            logger.LogError(
+                                error,
+                                "GitHub publication failed for {Operation} {RepositoryPath} in {Repository}.",
+                                [| box request.Operation; box request.RepositoryPath; box repository |]
+                            )
+
                             return raise error
                 }
 
@@ -1004,7 +1015,16 @@ module GitHubPublication =
                                                         | _ -> return ManagedRemovalResult.Unavailable
                         finally
                             gate.Release() |> ignore
-                    with :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                    with
+                    | :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                        return raise error
+                    | error ->
+                        logger.LogError(
+                            error,
+                            "GitHub managed removal failed for {VirtualPath} in {Repository}.",
+                            [| box request.VirtualPath; box repository |]
+                        )
+
                         return raise error
                 } }
 

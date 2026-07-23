@@ -10,6 +10,7 @@ open Microsoft.AspNetCore.HttpOverrides
 open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
+open Microsoft.Extensions.Logging
 
 [<RequireQualifiedAccess>]
 module HostApplication =
@@ -145,9 +146,9 @@ module HostApplication =
 
     let private liveContentClient
         (configuration: IConfiguration)
-        : ContentClient * GitHubPublication.Client * HttpClient option * IHostedService option =
+        : ContentClient * (ILogger -> GitHubPublication.Client) * HttpClient option * IHostedService option =
         match GitHubContentConfiguration.tryCreate configuration with
-        | Error _ -> ContentClient.configurationInvalid (), GitHubPublication.unavailable, None, None
+        | Error _ -> ContentClient.configurationInvalid (), (fun _ -> GitHubPublication.unavailable), None, None
         | Ok githubConfiguration ->
             let httpClient = new HttpClient()
             let generation = ContentCacheGeneration()
@@ -162,8 +163,13 @@ module HostApplication =
             let worker =
                 new ContentCacheRefreshWorker(ContentHeadProbe.live httpClient githubConfiguration, generation)
 
-            let publication =
-                GitHubPublication.live httpClient githubConfiguration generation (fun () -> DateTimeOffset.UtcNow)
+            let publication logger =
+                GitHubPublication.live
+                    httpClient
+                    githubConfiguration
+                    generation
+                    (fun () -> DateTimeOffset.UtcNow)
+                    logger
 
             contentClient, publication, Some httpClient, Some worker
 
@@ -256,7 +262,14 @@ module HostApplication =
 
         builder.Services.AddGrpc() |> ignore
         builder.Services.AddSingleton<ContentClient>(contentClient) |> ignore
-        builder.Services.AddSingleton<GitHubPublication.Client>(publication) |> ignore
+        builder.Services.AddSingleton<GitHubPublication.Client>(fun provider ->
+            let logger =
+                provider
+                    .GetRequiredService<ILoggerFactory>()
+                    .CreateLogger("Termin.Al.Host.GitHubPublication")
+
+            publication logger)
+        |> ignore
 
         match refreshWorker with
         | Some worker -> builder.Services.AddSingleton<IHostedService>(worker) |> ignore

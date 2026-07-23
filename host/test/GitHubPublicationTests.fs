@@ -10,6 +10,7 @@ open System.Text.Json
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Configuration
+open Microsoft.Extensions.Logging.Abstractions
 open Termin.Al.Host
 
 [<RequireQualifiedAccess>]
@@ -157,7 +158,7 @@ module GitHubPublicationTests =
 
         let client =
             GitHubPublication.live httpClient (configuration ()) generation (fun () ->
-                DateTimeOffset(2026, 7, 22, 12, 0, 0, TimeSpan.Zero))
+                DateTimeOffset(2026, 7, 22, 12, 0, 0, TimeSpan.Zero)) NullLogger.Instance
 
         match client.Publish(token (), addRequest, CancellationToken.None).GetAwaiter().GetResult() with
         | GitHubPublication.Result.Published commit ->
@@ -265,7 +266,7 @@ module GitHubPublicationTests =
 
             let client =
                 GitHubPublication.live httpClient (configuration ()) (ContentCacheGeneration()) (fun () ->
-                    DateTimeOffset.UtcNow)
+                    DateTimeOffset.UtcNow) NullLogger.Instance
 
             let request =
                 { addRequest with
@@ -324,7 +325,7 @@ module GitHubPublicationTests =
 
         let client =
             GitHubPublication.live httpClient (configuration ()) (ContentCacheGeneration()) (fun () ->
-                DateTimeOffset.UtcNow)
+                DateTimeOffset.UtcNow) NullLogger.Instance
 
         let request =
             { addRequest with
@@ -411,7 +412,7 @@ module GitHubPublicationTests =
 
         let client =
             GitHubPublication.live httpClient (configuration ()) (ContentCacheGeneration()) (fun () ->
-                DateTimeOffset.UtcNow)
+                DateTimeOffset.UtcNow) NullLogger.Instance
 
         let request =
             { addRequest with
@@ -499,7 +500,12 @@ module GitHubPublicationTests =
             let generation = ContentCacheGeneration()
 
             let client =
-                GitHubPublication.live httpClient (configuration ()) generation (fun () -> DateTimeOffset.UtcNow)
+                GitHubPublication.live
+                    httpClient
+                    (configuration ())
+                    generation
+                    (fun () -> DateTimeOffset.UtcNow)
+                    NullLogger.Instance
 
             let request =
                 { addRequest with
@@ -536,7 +542,7 @@ module GitHubPublicationTests =
 
         let client =
             GitHubPublication.live httpClient (configuration ()) (ContentCacheGeneration()) (fun () ->
-                DateTimeOffset.UtcNow)
+                DateTimeOffset.UtcNow) NullLogger.Instance
 
         use cancellation = new CancellationTokenSource()
         cancellation.Cancel()
