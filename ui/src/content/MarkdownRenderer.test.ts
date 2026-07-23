@@ -106,6 +106,7 @@ test("renders the GitHub HTML preview while searching the raw Markdown", () => {
   assert.match(markup, /<h1>Profile<\/h1>/u);
   assert.match(markup, /href="https:\/\/github\.com\/alsi-lawr"/u);
   assert.match(markup, /src="https:\/\/images\.example\.com\/profile\.png"/u);
+  assert.match(markup, /class="github-markdown rounded ring-1 ring-ui-search"/u);
   assert.match(markup, /data-markdown-current="true"/u);
   assert.equal(markdownBlockCount(document), 1);
   assert.deepEqual(markdownSearchMatches(document, "linked image"), [0]);

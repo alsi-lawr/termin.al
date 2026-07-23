@@ -697,7 +697,7 @@ module GitHubContentClient =
             let fullName = repositoryName repository.RepositoryFullName
             let escapedRevision = Uri.EscapeDataString revision
 
-            let resolve attribute value =
+            let resolve (isSource: bool) (value: string) =
                 if
                     String.IsNullOrWhiteSpace value
                     || value.StartsWith("#", StringComparison.Ordinal)
@@ -714,18 +714,44 @@ module GitHubContentClient =
                     | false, _ ->
                         let path = repositoryRelativePath sourcePath value
 
-                        if attribute = "src" then
+                        if isSource then
                             $"https://raw.githubusercontent.com/{fullName}/{escapedRevision}/{path}"
                         else
                             $"https://github.com/{fullName}/blob/{escapedRevision}/{path}"
 
+            let resolveSourceSet (value: string) =
+                if value.StartsWith("data:", StringComparison.OrdinalIgnoreCase) then
+                    value
+                else
+                    value.Split(',')
+                    |> Array.map (fun candidate ->
+                        let trimmed = candidate.Trim()
+
+                        let descriptorStart =
+                            trimmed.IndexOfAny([| ' '; '\t'; '\r'; '\n' |])
+
+                        if descriptorStart < 0 then
+                            resolve true trimmed
+                        else
+                            let target = trimmed.Substring(0, descriptorStart)
+                            let descriptor = trimmed.Substring(descriptorStart)
+                            resolve true target + descriptor)
+                    |> String.concat ", "
+
             Regex.Replace(
                 html,
-                "(?<![A-Za-z0-9_-])(?<attribute>href|src)=\"(?<value>[^\"]*)\"",
+                "(?<![A-Za-z0-9_-])(?<attribute>href|src|srcset)=\"(?<value>[^\"]*)\"",
                 MatchEvaluator(fun matched ->
                     let attribute = matched.Groups["attribute"].Value
                     let value = matched.Groups["value"].Value
-                    $"{attribute}=\"{resolve attribute value}\"")
+
+                    let resolved =
+                        if attribute = "srcset" then
+                            resolveSourceSet value
+                        else
+                            resolve (attribute = "src") value
+
+                    $"{attribute}=\"{resolved}\"")
             )
 
         let renderedHtml

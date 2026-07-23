@@ -725,7 +725,7 @@ module GitHubContentClientTests =
                     if request.Accept = "application/vnd.github.html+json" then
                         response
                             HttpStatusCode.OK
-                            "<p><a href=\"../assets/diagram.svg\">Diagram</a><img src=\"images/cover.png\"></p>"
+                            "<p><a href=\"../assets/diagram.svg\">Diagram</a><picture><source srcset=\"../assets/dark.svg 1x, images/light.svg 2x\"><img src=\"images/cover.png\"></picture></p>"
                             None
                     else
                         let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
@@ -809,6 +809,12 @@ module GitHubContentClientTests =
             || not (
                 renderedHtml.Contains(
                     $"src=\"https://raw.githubusercontent.com/example-owner/content/{headSha}/blog/images/cover.png\"",
+                    StringComparison.Ordinal
+                )
+            )
+            || not (
+                renderedHtml.Contains(
+                    $"srcset=\"https://raw.githubusercontent.com/example-owner/content/{headSha}/assets/dark.svg 1x, https://raw.githubusercontent.com/example-owner/content/{headSha}/blog/images/light.svg 2x\"",
                     StringComparison.Ordinal
                 )
             )

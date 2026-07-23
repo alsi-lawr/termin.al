@@ -895,7 +895,9 @@ export function MarkdownRenderer({
         "aria-label": `GitHub-rendered Markdown from ${document.source.path}`,
       },
       createElement("div", {
-        className: activeBlockIndex === 0 ? "rounded ring-1 ring-ui-search" : undefined,
+        className: activeBlockIndex === 0
+          ? "github-markdown rounded ring-1 ring-ui-search"
+          : "github-markdown",
         "data-markdown-block-index": 0,
         "data-markdown-current": activeBlockIndex === 0 ? "true" : undefined,
         "aria-current": activeBlockIndex === 0 ? "true" : undefined,

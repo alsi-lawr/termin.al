@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./github-markdown.css";
 @source not "../public/highlighting";
 
 @font-face {
