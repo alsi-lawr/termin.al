@@ -88,6 +88,17 @@ module HostApplication =
             application.UseForwardedHeaders() |> ignore
 
         application.Use(fun (context: HttpContext) (next: RequestDelegate) ->
+            let shellRequest =
+                (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
+                && (context.Request.Path = PathString("/")
+                    || context.Request.Path = PathString("/index.html")
+                    || context.Request.Path.StartsWithSegments(PathString("/demo")))
+
+            if shellRequest then
+                context.Request.Headers.Remove("If-None-Match") |> ignore
+                context.Request.Headers.Remove("If-Modified-Since") |> ignore
+                context.Response.Headers.CacheControl <- "no-store"
+
             context.Response.Headers.ContentSecurityPolicy <-
                 "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https:; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-attr 'unsafe-inline'"
 

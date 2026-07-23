@@ -409,6 +409,9 @@ module Program =
                 if isNull index.Headers.ETag then
                     failwith "Static files must retain an ETag validator."
 
+                if index.Headers.CacheControl.ToString() <> "no-store" then
+                    failwith "The SPA shell must not be cached across deployments."
+
                 let csp = index.Headers.GetValues("Content-Security-Policy") |> Seq.exactlyOne
 
                 if
@@ -435,10 +438,8 @@ module Program =
                 conditionalIndexRequest.Headers.IfNoneMatch.Add(index.Headers.ETag)
                 use conditionalIndex = client.Send(conditionalIndexRequest)
 
-                if conditionalIndex.StatusCode <> HttpStatusCode.NotModified then
-                    failwithf
-                        "Expected conditional static GET to return 304 Not Modified, but received %O."
-                        conditionalIndex.StatusCode
+                if conditionalIndex.StatusCode <> HttpStatusCode.OK then
+                    failwithf "The SPA shell must ignore stale conditional validators, but received %O." conditionalIndex.StatusCode
 
                 for path in
                     [ "/api/session"
