@@ -5,13 +5,11 @@
     Explore projects, writing, notes, activity, and more through a virtual shell built for the browser.
   </p>
   <p>
-    <img src="docs/assets/badges/desktop-first.svg" alt="Experience: desktop-first" />
-    <img src="docs/assets/badges/demo-read-only.svg" alt="Demo: read-only" />
-    <img src="docs/assets/badges/nixos-x86-64.svg" alt="Deployment: NixOS on x86_64" />
+    <a href="https://term.blokegeezington.com"><img src="https://img.shields.io/website?url=https%3A%2F%2Fterm.blokegeezington.com&amp;style=flat-square&amp;label=Live%20site" alt="Live site availability" /></a>
+    <a href="docs/architecture-and-limits.md"><img src="https://img.shields.io/badge/API-gRPC%20%2B%20Protobuf-244c5a?style=flat-square&amp;logo=protobuf&amp;logoColor=white" alt="API: gRPC and Protobuf" /></a>
+    <a href="docs/nixos-operations.md"><img src="https://img.shields.io/badge/deploy-NixOS%20x86__64-5277C3?style=flat-square&amp;logo=nixos&amp;logoColor=white" alt="Deployment: NixOS on x86-64" /></a>
   </p>
   <p>
-    <a href="https://github.com/alsi-lawr/termin.al"><img src="docs/assets/github.svg" width="18" alt="GitHub" /> View the source</a>
-    &nbsp;&middot;&nbsp;
     <a href="#explore-the-terminal">Explore</a>
     &nbsp;&middot;&nbsp;
     <a href="docs/README.md">Documentation</a>
