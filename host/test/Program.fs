@@ -419,7 +419,7 @@ module Program =
 
                 for required in
                     [ "default-src 'none'"
-                      "script-src 'self'"
+                      "script-src 'self' 'wasm-unsafe-eval'"
                       "style-src 'self'"
                       "style-src-attr 'unsafe-inline'"
                       "connect-src 'self'" ] do
