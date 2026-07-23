@@ -153,18 +153,35 @@ module GitHubPublication =
 
         request
 
-    let private send (httpClient: HttpClient) token method path payload cancellationToken =
+    let private send
+        (allowedFailureStatuses: HttpStatusCode list)
+        (httpClient: HttpClient)
+        token
+        (method: HttpMethod)
+        path
+        payload
+        cancellationToken
+        =
         task {
             use request = requestMessage token method path payload
             use! response = httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
             let! body = response.Content.ReadAsStringAsync(cancellationToken)
-            return response.StatusCode, body
+
+            if response.IsSuccessStatusCode || allowedFailureStatuses |> List.contains response.StatusCode then
+                return response.StatusCode, body
+            else
+                return
+                    raise (
+                        HttpRequestException(
+                            $"GitHub API {method.Method} {path} returned {int response.StatusCode} {response.StatusCode}: {body}"
+                        )
+                    )
         }
 
     let private readRepositoryState httpClient token repository cancellationToken =
         task {
             let! repositoryStatus, repositoryBody =
-                send httpClient token HttpMethod.Get $"repos/{repository}" None cancellationToken
+                send [] httpClient token HttpMethod.Get $"repos/{repository}" None cancellationToken
 
             match repositoryStatus, parseJson repositoryBody with
             | HttpStatusCode.OK, Some repositoryJson ->
@@ -173,6 +190,7 @@ module GitHubPublication =
                 | Some defaultBranch ->
                     let! referenceStatus, referenceBody =
                         send
+                            []
                             httpClient
                             token
                             HttpMethod.Get
@@ -194,6 +212,7 @@ module GitHubPublication =
                         | Some head when isSha head ->
                             let! commitStatus, commitBody =
                                 send
+                                    []
                                     httpClient
                                     token
                                     HttpMethod.Get
@@ -229,6 +248,7 @@ module GitHubPublication =
         task {
             let! status, body =
                 send
+                    [ HttpStatusCode.NotFound ]
                     httpClient
                     token
                     HttpMethod.Get
@@ -419,7 +439,14 @@ module GitHubPublication =
                    encoding = "base64" |}
 
             let! status, body =
-                send httpClient token HttpMethod.Post $"repos/{repository}/git/blobs" (Some payload) cancellationToken
+                send
+                    []
+                    httpClient
+                    token
+                    HttpMethod.Post
+                    $"repos/{repository}/git/blobs"
+                    (Some payload)
+                    cancellationToken
 
             match status, parseJson body with
             | HttpStatusCode.Created, Some json ->
@@ -442,7 +469,14 @@ module GitHubPublication =
             let payload = {| baseTree = baseTree; tree = tree |}
 
             let! status, body =
-                send httpClient token HttpMethod.Post $"repos/{repository}/git/trees" (Some payload) cancellationToken
+                send
+                    []
+                    httpClient
+                    token
+                    HttpMethod.Post
+                    $"repos/{repository}/git/trees"
+                    (Some payload)
+                    cancellationToken
 
             match status, parseJson body with
             | HttpStatusCode.Created, Some json ->
@@ -460,7 +494,14 @@ module GitHubPublication =
                    parents = [| head |] |}
 
             let! status, body =
-                send httpClient token HttpMethod.Post $"repos/{repository}/git/commits" (Some payload) cancellationToken
+                send
+                    []
+                    httpClient
+                    token
+                    HttpMethod.Post
+                    $"repos/{repository}/git/commits"
+                    (Some payload)
+                    cancellationToken
 
             match status, parseJson body with
             | HttpStatusCode.Created, Some json ->
@@ -476,6 +517,7 @@ module GitHubPublication =
 
             let! status, _ =
                 send
+                    [ HttpStatusCode.Conflict; HttpStatusCode.UnprocessableEntity ]
                     httpClient
                     token
                     (HttpMethod("PATCH"))

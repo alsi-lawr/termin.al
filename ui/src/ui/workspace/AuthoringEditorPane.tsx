@@ -206,6 +206,8 @@ export function AuthoringEditorPane({
         message: `Published ${result.sha}. ${result.url}`,
         closeIfBufferMatchesSubmittedSource: false,
       });
+    } catch {
+      if (!controller.signal.aborted) showMessage("Publication failed.");
     } finally {
       if (publicationAbort.current === controller) {
         publicationAbort.current = undefined;
