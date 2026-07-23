@@ -167,6 +167,9 @@ module GitHubContentClientTests =
     let private releaseJson tag publishedAt =
         $"{{\"draft\":false,\"prerelease\":false,\"tag_name\":\"{tag}\",\"name\":\"{tag}\",\"published_at\":\"{publishedAt}\",\"body\":\"Release body\",\"html_url\":\"https://github.com/example-owner/application/releases/tag/{tag}\"}}"
 
+    let private repositoryReleaseJson repository tag publishedAt =
+        $"{{\"draft\":false,\"prerelease\":false,\"tag_name\":\"{tag}\",\"name\":\"{tag}\",\"published_at\":\"{publishedAt}\",\"body\":\"Release body\",\"html_url\":\"https://github.com/{repository}/releases/tag/{tag}\"}}"
+
     let private releasePage releases = "[" + String.concat "," releases + "]"
 
     let private draftReleaseJson tag =
@@ -957,7 +960,7 @@ module GitHubContentClientTests =
             "/repos/example-owner/content/contents/content/projects.json?ref=main"
 
         let documents =
-            [ 1..41 ]
+            [ 1..38 ]
             |> List.map (fun index ->
                 let id = cacheDocumentId index
                 let path = cacheDocumentPath index
@@ -1102,6 +1105,14 @@ module GitHubContentClientTests =
                             && projectHead.EndsWith("/git/ref/heads/main", StringComparison.Ordinal)
                             ->
                             response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-project-head\"")
+                        | projectReleases when
+                            projectReleases.StartsWith(
+                                "/repos/example-owner/cache-project-",
+                                StringComparison.Ordinal
+                            )
+                            && projectReleases.EndsWith("/releases?per_page=100", StringComparison.Ordinal)
+                            ->
+                            response HttpStatusCode.OK "[]" (Some "\"cache-project-releases\"")
                         | comparison when comparison.StartsWith(comparisonPrefix, StringComparison.Ordinal) ->
                             let range =
                                 comparison
@@ -1506,8 +1517,15 @@ module GitHubContentClientTests =
                     response HttpStatusCode.OK "# Example owner\n\nBuilding useful software." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     response HttpStatusCode.OK $"[{recentRepository}]" None
-                | "/repos/example-owner/application/releases?per_page=100" ->
-                    response HttpStatusCode.OK (releasePage [ releaseJson "v1.0.0" "2026-07-20T00:00:00Z" ]) None
+                | "/repos/example-owner/recent-project/releases?per_page=100" ->
+                    response
+                        HttpStatusCode.OK
+                        (releasePage
+                            [ repositoryReleaseJson
+                                  "example-owner/recent-project"
+                                  "v1.0.0"
+                                  "2026-07-20T00:00:00Z" ])
+                        None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -1524,7 +1542,7 @@ module GitHubContentClientTests =
         let expectedFragments =
             [ "## Profile\n\n# Example owner\n\nBuilding useful software."
               "## Recent repositories\n\n- [example-owner/recent-project](https://github.com/example-owner/recent-project) — A recent project."
-              "## Recent releases\n\n- [v1.0.0](https://github.com/example-owner/application/releases/tag/v1.0.0) — 2026-07-20"
+              "## Recent releases\n\n- [v1.0.0](https://github.com/example-owner/recent-project/releases/tag/v1.0.0) — 2026-07-20"
               "## Recent public activity\n\n- Pushed commits to [example-owner/recent-project](https://github.com/example-owner/recent-project)" ]
 
         for fragment in expectedFragments do

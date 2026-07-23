@@ -1452,6 +1452,28 @@ module GitHubContentClient =
                         return releases |> Result.map (fun values -> values, firstResponse)
             }
 
+        let getOwnedPublishedReleases repositories cancellationToken =
+            task {
+                let mutable collected: ReleaseData list = []
+                let mutable failure: ContentDomain.Problem option = None
+
+                for repository in repositories do
+                    if failure.IsNone then
+                        let! releases = getPublishedReleases repository cancellationToken
+
+                        match releases with
+                        | Error problem -> failure <- Some problem
+                        | Ok(values, _) -> collected <- values @ collected
+
+                return
+                    match failure with
+                    | Some problem -> Error problem
+                    | None ->
+                        collected
+                        |> List.sortByDescending (fun release -> release.ReleasePublishedAt)
+                        |> Ok
+            }
+
         let nowRepositoryLine (repository: GitHubRepositoryData) =
             let name = repositoryName repository.RepositoryFullName
             let url = ContentDomain.ContentUrl.value repository.RepositoryUrl
@@ -1519,14 +1541,18 @@ module GitHubContentClient =
                     let! activityPayload = getJson activityUri cancellationToken
                     let! profileReadme = getProfileReadme cancellationToken
                     let! repositories = getOwnedRepositories cancellationToken
-                    let! releases = getPublishedReleases applicationRepositoryData cancellationToken
+
+                    let! releases =
+                        match repositories with
+                        | Error problem -> Task.FromResult(Error problem)
+                        | Ok owned -> getOwnedPublishedReleases owned cancellationToken
 
                     match activityPayload, profileReadme, repositories, releases with
                     | Error failure, _, _, _ -> return Error(mapFetchFailure failure)
                     | _, Error problem, _, _
                     | _, _, Error problem, _
                     | _, _, _, Error problem -> return Error problem
-                    | Ok activityResponse, Ok profileReadme, Ok repositories, Ok(releases, _) ->
+                    | Ok activityResponse, Ok profileReadme, Ok repositories, Ok releases ->
                         match
                             parseRecentActivity activityResponse.PayloadBody,
                             cacheMetadata activityResponse,
