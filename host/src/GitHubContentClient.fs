@@ -828,19 +828,24 @@ module GitHubContentClient =
         let readFileAtRevision repository path revision cancellationToken =
             getRaw (contentUri repository path revision) cancellationToken
 
-        let readFileHtml
+        let renderDocumentPreview
             (repository: GitHubRepositoryData)
             (path: ContentDomain.RepositoryPath)
             (revision: string)
+            (markdown: string)
             cancellationToken
             =
             task {
-                let! payload = getHtml (contentUri repository path revision) cancellationToken
-
-                return
-                    match payload with
-                    | Error failure -> Error(mapFetchFailure failure)
-                    | Ok response -> renderedHtml repository path revision response
+                match ContentDomain.FrontMatter.tryParse path markdown with
+                | Error _ -> return Error(invalidProblem ())
+                | Ok frontMatter ->
+                    return!
+                        renderMarkdownPreview
+                            repository
+                            path
+                            revision
+                            (ContentDomain.MarkdownBody.value frontMatter.Body)
+                            cancellationToken
             }
 
         let readReadmeAtRevision
@@ -2198,10 +2203,11 @@ module GitHubContentClient =
                                             | _, Error _ -> return Error(invalidProblem ())
                                             | Ok documentHead, Ok blobSha ->
                                                 let! preview =
-                                                    readFileHtml
+                                                    renderDocumentPreview
                                                         input.CatalogRepository
                                                         locator.ManifestDocumentPath
                                                         revision
+                                                        markdown
                                                         cancellationToken
 
                                                 match preview with
@@ -2236,10 +2242,11 @@ module GitHubContentClient =
                                     match payload with
                                     | Ok documentPayload ->
                                         let! preview =
-                                            readFileHtml
+                                            renderDocumentPreview
                                                 input.CatalogRepository
                                                 locator.ManifestDocumentPath
                                                 revision
+                                                documentPayload.PayloadBody
                                                 cancellationToken
 
                                         match preview with

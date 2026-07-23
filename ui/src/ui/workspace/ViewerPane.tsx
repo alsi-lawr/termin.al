@@ -306,6 +306,148 @@ function resizeLessPagerToContent(
   return capacity === 0 ? state : resizeRawPagerCapacity(state, capacity);
 }
 
+function githubMarkdownRoot(
+  contentElement: HTMLDivElement | null,
+): HTMLElement | undefined {
+  return contentElement?.querySelector<HTMLElement>("[data-github-markdown]") ??
+    undefined;
+}
+
+function githubMarkdownBlocks(root: HTMLElement): ReadonlyArray<HTMLElement> {
+  return Array.from(root.children).filter(
+    (element): element is HTMLElement => element instanceof HTMLElement,
+  );
+}
+
+function searchableTextNodes(root: HTMLElement): ReadonlyArray<Text> {
+  const walker = root.ownerDocument.createTreeWalker(root, 4);
+  const nodes: Array<Text> = [];
+  let current = walker.nextNode();
+
+  while (current !== null) {
+    if (
+      current instanceof Text &&
+      current.parentElement?.closest("script, style, [aria-hidden=\"true\"]") === null
+    ) {
+      nodes.push(current);
+    }
+
+    current = walker.nextNode();
+  }
+
+  return nodes;
+}
+
+function textMatchOffsets(text: string, query: string): ReadonlyArray<number> {
+  const normalizedText = text.toLowerCase();
+  const normalizedQuery = query.toLowerCase();
+  const offsets: Array<number> = [];
+  let offset = 0;
+
+  while (offset <= normalizedText.length - normalizedQuery.length) {
+    const match = normalizedText.indexOf(normalizedQuery, offset);
+
+    if (match < 0) {
+      break;
+    }
+
+    offsets.push(match);
+    offset = match + normalizedQuery.length;
+  }
+
+  return offsets;
+}
+
+function renderedMarkdownSearchMatches(
+  root: HTMLElement,
+  query: string,
+): ReadonlyArray<number> {
+  const normalizedQuery = query.trim();
+
+  if (normalizedQuery === "") {
+    return [];
+  }
+
+  const matches: Array<number> = [];
+
+  for (const [blockIndex, block] of githubMarkdownBlocks(root).entries()) {
+    for (const node of searchableTextNodes(block)) {
+      for (const _ of textMatchOffsets(node.data, normalizedQuery)) {
+        matches.push(blockIndex);
+      }
+    }
+  }
+
+  return matches;
+}
+
+function clearRenderedMarkdownSearchHighlights(root: HTMLElement): void {
+  const highlights = Array.from(
+    root.querySelectorAll<HTMLElement>("mark[data-markdown-search-match]"),
+  );
+
+  for (const highlight of highlights) {
+    highlight.replaceWith(
+      root.ownerDocument.createTextNode(highlight.textContent ?? ""),
+    );
+  }
+
+  root.normalize();
+}
+
+function highlightRenderedMarkdownSearch(
+  root: HTMLElement,
+  query: string,
+  currentMatchIndex: number,
+): HTMLElement | undefined {
+  clearRenderedMarkdownSearchHighlights(root);
+
+  const normalizedQuery = query.trim();
+
+  if (normalizedQuery === "") {
+    return undefined;
+  }
+
+  let matchIndex = 0;
+  let currentMatch: HTMLElement | undefined;
+
+  for (const node of searchableTextNodes(root)) {
+    const offsets = textMatchOffsets(node.data, normalizedQuery);
+
+    if (offsets.length === 0) {
+      continue;
+    }
+
+    const fragment = root.ownerDocument.createDocumentFragment();
+    let textOffset = 0;
+
+    for (const offset of offsets) {
+      fragment.append(node.data.slice(textOffset, offset));
+
+      const highlight = root.ownerDocument.createElement("mark");
+      highlight.dataset.markdownSearchMatch = String(matchIndex);
+      highlight.textContent = node.data.slice(
+        offset,
+        offset + normalizedQuery.length,
+      );
+
+      if (matchIndex === currentMatchIndex) {
+        highlight.dataset.markdownCurrentSearch = "true";
+        currentMatch = highlight;
+      }
+
+      fragment.append(highlight);
+      textOffset = offset + normalizedQuery.length;
+      matchIndex += 1;
+    }
+
+    fragment.append(node.data.slice(textOffset));
+    node.replaceWith(fragment);
+  }
+
+  return currentMatch;
+}
+
 export function ViewerPane(props: ViewerPaneProps): ReactElement {
   if (props.viewer.kind !== "collection") {
     return <StandardViewerPane {...props} viewer={props.viewer} />;
@@ -355,6 +497,7 @@ function StandardViewerPane({
   const contentRef = useRef<HTMLDivElement | null>(null);
   const rawPagerMeasurementRef = useRef<HTMLPreElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const markdownGPrefixRef = useRef(false);
   const activeViewer = viewer;
   const title = viewerTitle(activeViewer);
   const isRawPager =
@@ -364,15 +507,24 @@ function StandardViewerPane({
     activeViewer.kind === "document" && activeViewer.presentation === "inline"
       ? activeViewer.document
       : undefined;
+  const githubPreviewHtml = markdownDocument?.preview.kind === "github-html"
+    ? markdownDocument.preview.html
+    : "";
   const rawText =
     activeViewer.kind === "document" &&
     activeViewer.presentation === "raw-pager"
       ? activeViewer.document.text
       : "";
   const rawLogicalLines = rawPagerLogicalLines(rawText);
-  const markdownBlocks = markdownDocument === undefined
+  const sourceMarkdownBlocks = markdownDocument === undefined
     ? 0
     : markdownBlockCount(markdownDocument);
+  const [renderedMarkdownBlocks, setRenderedMarkdownBlocks] = useState<
+    number | undefined
+  >();
+  const markdownBlocks = githubPreviewHtml === ""
+    ? sourceMarkdownBlocks
+    : renderedMarkdownBlocks ?? sourceMarkdownBlocks;
   const [rawPagerState, setRawPagerState] = useState(() =>
     createRawPagerState(rawText),
   );
@@ -390,7 +542,12 @@ function StandardViewerPane({
   const searchMatches =
     markdownDocument === undefined || markdownSearch.kind !== "active"
       ? []
-      : markdownSearchMatches(markdownDocument, markdownSearch.query);
+      : (() => {
+          const root = githubMarkdownRoot(contentRef.current);
+          return root === undefined
+            ? markdownSearchMatches(markdownDocument, markdownSearch.query)
+            : renderedMarkdownSearchMatches(root, markdownSearch.query);
+        })();
   const markdownPositionStatus = markdownViewerPositionStatus(markdownPosition);
   const activeBlockIndex = markdownPositionStatus.kind === "block"
     ? markdownPositionStatus.currentBlock - 1
@@ -403,12 +560,34 @@ function StandardViewerPane({
   }, [focusVersion, isActive]);
 
   useEffect(() => {
+    if (githubPreviewHtml === "") {
+      setRenderedMarkdownBlocks(undefined);
+      return;
+    }
+
+    const root = githubMarkdownRoot(contentRef.current);
+    setRenderedMarkdownBlocks(
+      root === undefined ? sourceMarkdownBlocks : githubMarkdownBlocks(root).length,
+    );
+  }, [githubPreviewHtml, sourceMarkdownBlocks]);
+
+  useEffect(() => {
     const initialRawPagerState = createRawPagerState(rawText);
     rawPagerStateRef.current = initialRawPagerState;
     setRawPagerState(initialRawPagerState);
     setMarkdownPosition(createMarkdownViewerPosition(markdownBlocks));
     setMarkdownSearch(createMarkdownViewerSearch());
-  }, [markdownBlocks, markdownDocument?.text, rawText]);
+    markdownGPrefixRef.current = false;
+    if (contentRef.current !== null) {
+      contentRef.current.scrollTop = 0;
+    }
+  }, [
+    githubPreviewHtml,
+    markdownBlocks,
+    markdownDocument?.source.path,
+    markdownDocument?.text,
+    rawText,
+  ]);
 
   useEffect(() => {
     if (!isRawPager) {
@@ -484,11 +663,59 @@ function StandardViewerPane({
       return;
     }
 
-    const match = contentRef.current?.querySelector<HTMLElement>(
-      `[data-markdown-block-index="${activeBlockIndex}"]`,
+    const contentElement = contentRef.current;
+
+    if (contentElement === null) {
+      return;
+    }
+
+    const githubMarkdown = githubMarkdownRoot(contentElement);
+    const githubBlocks = githubMarkdown === undefined
+      ? []
+      : githubMarkdownBlocks(githubMarkdown);
+
+    for (const block of githubBlocks) {
+      block.removeAttribute("data-markdown-current");
+      block.removeAttribute("aria-current");
+    }
+
+    const match = githubBlocks[activeBlockIndex] ??
+      contentElement.querySelector<HTMLElement>(
+        `[data-markdown-block-index="${activeBlockIndex}"]`,
+      );
+
+    if (match !== null && match !== undefined && githubBlocks.includes(match)) {
+      match.setAttribute("data-markdown-current", "true");
+      match.setAttribute("aria-current", "true");
+    }
+
+    if (activeBlockIndex === 0) {
+      contentElement.scrollTop = 0;
+      return;
+    }
+
+    match?.scrollIntoView({ block: "nearest" });
+  }, [activeBlockIndex, markdownDocument]);
+
+  useEffect(() => {
+    const root = githubMarkdownRoot(contentRef.current);
+
+    if (root === undefined) {
+      return;
+    }
+
+    if (markdownSearch.kind !== "active") {
+      clearRenderedMarkdownSearchHighlights(root);
+      return;
+    }
+
+    const currentMatch = highlightRenderedMarkdownSearch(
+      root,
+      markdownSearch.query,
+      markdownSearch.matchIndex,
     );
-    match?.scrollIntoView({ block: "center" });
-  }, [activeBlockIndex]);
+    currentMatch?.scrollIntoView({ block: "center", inline: "nearest" });
+  }, [githubPreviewHtml, markdownSearch]);
 
   const closeActiveViewer = onClose;
 
@@ -507,9 +734,17 @@ function StandardViewerPane({
   };
 
   const applyMarkdownMotion = (motion: MarkdownViewerMotion): void => {
+    const contentElement = contentRef.current;
+
+    if (motion.kind === "top" && contentElement !== null) {
+      contentElement.scrollTop = 0;
+    } else if (motion.kind === "bottom" && contentElement !== null) {
+      contentElement.scrollTop = contentElement.scrollHeight;
+    }
+
     const pageBlockCount = Math.max(
       1,
-      Math.floor((contentRef.current?.clientHeight ?? 40) / 40),
+      Math.floor((contentElement?.clientHeight ?? 40) / 40),
     );
 
     setMarkdownPosition((current) =>
@@ -561,9 +796,12 @@ function StandardViewerPane({
     }
 
     const query = markdownSearch.query.trim();
+    const root = githubMarkdownRoot(contentRef.current);
     const matches = markdownDocument === undefined
       ? []
-      : markdownSearchMatches(markdownDocument, query);
+      : root === undefined
+      ? markdownSearchMatches(markdownDocument, query)
+      : renderedMarkdownSearchMatches(root, query);
     const transition = transitionMarkdownViewerSearch(markdownSearch, matches);
 
     setMarkdownSearch(transition.search);
@@ -631,6 +869,21 @@ function StandardViewerPane({
       markdownDocument !== undefined &&
       markdownSearch.kind !== "editing"
     ) {
+      if (!input.ctrlKey && !input.metaKey && input.key === "g") {
+        defaultPrevented = true;
+        event.preventDefault();
+
+        if (markdownGPrefixRef.current) {
+          markdownGPrefixRef.current = false;
+          applyMarkdownOperation({ kind: "top" });
+        } else {
+          markdownGPrefixRef.current = true;
+        }
+
+        return;
+      }
+
+      markdownGPrefixRef.current = false;
       const markdownKey = markdownViewerOperationFromKey(input);
 
       if (markdownKey.kind === "handled") {
@@ -654,6 +907,7 @@ function StandardViewerPane({
       return;
     }
 
+    markdownGPrefixRef.current = false;
     onActivate();
     viewerRef.current?.focus({ preventScroll: true });
   };
@@ -827,7 +1081,7 @@ function StandardViewerPane({
               activeBlockIndex={activeBlockIndex}
             />
             <p className="mt-3 text-xs text-text-muted">
-              ↑/↓ or j/k move · PageUp/b and PageDown/Space page · g/G jump · / search · n/N results · Esc/q return
+              ↑/↓ or j/k move · PageUp/b and PageDown/Space page · gg/G jump · / search · n/N results · Esc/q return
             </p>
           </>
         );

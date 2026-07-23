@@ -106,10 +106,21 @@ test("renders the GitHub HTML preview while searching the raw Markdown", () => {
   assert.match(markup, /<h1>Profile<\/h1>/u);
   assert.match(markup, /href="https:\/\/github\.com\/alsi-lawr"/u);
   assert.match(markup, /src="https:\/\/images\.example\.com\/profile\.png"/u);
-  assert.match(markup, /class="github-markdown rounded ring-1 ring-ui-search"/u);
-  assert.match(markup, /data-markdown-current="true"/u);
-  assert.equal(markdownBlockCount(document), 1);
-  assert.deepEqual(markdownSearchMatches(document, "linked image"), [0]);
+  assert.match(markup, /class="github-markdown"/u);
+  assert.match(markup, /data-github-markdown=""/u);
+  assert.doesNotMatch(markup, /data-markdown-current="true"/u);
+  assert.equal(markdownBlockCount(document), 2);
+  assert.deepEqual(markdownSearchMatches(document, "linked image"), [1]);
+});
+
+test("returns every Markdown search occurrence for n/N cycling", () => {
+  const document: MarkdownDocument = {
+    source: { path: "~/repeated.md" },
+    text: "# Term\n\nTerm then term.",
+    preview: { kind: "github-html", html: "<h1>Term</h1><p>Term then term.</p>" },
+  };
+
+  assert.deepEqual(markdownSearchMatches(document, "term"), [0, 1, 1]);
 });
 
 test("preserves allowed Markdown URL destinations", () => {

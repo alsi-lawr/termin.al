@@ -176,8 +176,6 @@ export function markdownViewerOperationFromKey(
     case "PageDown":
     case " ":
       return { kind: "handled", operation: { kind: "page-down" } };
-    case "g":
-      return { kind: "handled", operation: { kind: "top" } };
     case "G":
       return { kind: "handled", operation: { kind: "bottom" } };
     case "/":

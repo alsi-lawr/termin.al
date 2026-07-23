@@ -1,7 +1,22 @@
 .github-markdown {
+  margin: 1rem;
   color: var(--theme-text-primary);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.github-markdown > [data-markdown-current="true"] {
+  border-radius: 0.25rem;
+  outline: 1px solid var(--theme-ui-search);
+}
+
+.github-markdown mark[data-markdown-search-match] {
+  color: var(--theme-surface-deepest);
+  background: var(--theme-ui-match);
+}
+
+.github-markdown mark[data-markdown-current-search="true"] {
+  background: var(--theme-ui-current-search);
 }
 
 .github-markdown > :first-child {

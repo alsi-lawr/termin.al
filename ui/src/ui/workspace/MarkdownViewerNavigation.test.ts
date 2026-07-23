@@ -40,6 +40,10 @@ test("maps Vim navigation, reusable search, and Ctrl+f page-forward", () => {
     markdownViewerOperationFromKey({ key: "b", ctrlKey: true, metaKey: false }),
     { kind: "ignored" },
   );
+  assert.deepEqual(
+    markdownViewerOperationFromKey({ key: "g", ctrlKey: false, metaKey: false }),
+    { kind: "ignored" },
+  );
 });
 
 test("moves one visible logical position for line, page, and document motions", () => {

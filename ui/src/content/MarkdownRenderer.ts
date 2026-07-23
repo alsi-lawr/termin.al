@@ -845,6 +845,25 @@ function searchableText(block: MarkdownBlock): string {
   }
 }
 
+function matchingOffsets(text: string, query: string): ReadonlyArray<number> {
+  const normalizedText = text.toLowerCase();
+  const offsets: Array<number> = [];
+  let offset = 0;
+
+  while (offset <= normalizedText.length - query.length) {
+    const match = normalizedText.indexOf(query, offset);
+
+    if (match < 0) {
+      break;
+    }
+
+    offsets.push(match);
+    offset = match + query.length;
+  }
+
+  return offsets;
+}
+
 export function markdownSearchMatches(
   document: MarkdownDocument,
   query: string,
@@ -855,14 +874,10 @@ export function markdownSearchMatches(
     return [];
   }
 
-  if (document.preview.kind === "github-html") {
-    return document.text.toLowerCase().includes(normalizedQuery) ? [0] : [];
-  }
-
   const matches: Array<number> = [];
 
   for (const [index, block] of parseBlocks(document.text).entries()) {
-    if (searchableText(block).toLowerCase().includes(normalizedQuery)) {
+    for (const _ of matchingOffsets(searchableText(block), normalizedQuery)) {
       matches.push(index);
     }
   }
@@ -871,10 +886,6 @@ export function markdownSearchMatches(
 }
 
 export function markdownBlockCount(document: MarkdownDocument): number {
-  if (document.preview.kind === "github-html") {
-    return 1;
-  }
-
   return parseBlocks(document.text).length;
 }
 
@@ -895,12 +906,8 @@ export function MarkdownRenderer({
         "aria-label": `GitHub-rendered Markdown from ${document.source.path}`,
       },
       createElement("div", {
-        className: activeBlockIndex === 0
-          ? "github-markdown rounded ring-1 ring-ui-search"
-          : "github-markdown",
-        "data-markdown-block-index": 0,
-        "data-markdown-current": activeBlockIndex === 0 ? "true" : undefined,
-        "aria-current": activeBlockIndex === 0 ? "true" : undefined,
+        className: "github-markdown",
+        "data-github-markdown": "",
         dangerouslySetInnerHTML: { __html: document.preview.html },
       }),
     );

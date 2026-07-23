@@ -19,13 +19,20 @@ module GitHubContentClientTests =
           ApiVersion: string option
           UserAgent: string
           IfNoneMatch: string option
-          Authorization: string option }
+          Authorization: string option
+          Body: string option }
 
     let private respondWithRenderedMarkdown request respond =
         if request.PathAndQuery = "/markdown" then
+            let rendered =
+                match request.Body with
+                | Some body when body.Contains("# Body Heading", StringComparison.Ordinal) ->
+                    "<p><a href=\"../assets/diagram.svg\">Diagram</a><picture><source srcset=\"../assets/dark.svg 1x, images/light.svg 2x\"><img src=\"images/cover.png\"></picture></p>"
+                | _ -> "<h1>Rendered Markdown</h1>"
+
             new HttpResponseMessage(
                 HttpStatusCode.OK,
-                Content = new StringContent("<h1>Rendered Markdown</h1>", Encoding.UTF8, "text/html")
+                Content = new StringContent(rendered, Encoding.UTF8, "text/html")
             )
         else
             respond request
@@ -59,7 +66,12 @@ module GitHubContentClientTests =
                     if isNull request.Headers.Authorization then
                         None
                     else
-                        Some(request.Headers.Authorization.ToString()) }
+                        Some(request.Headers.Authorization.ToString())
+                  Body =
+                    if isNull request.Content then
+                        None
+                    else
+                        Some(request.Content.ReadAsStringAsync().GetAwaiter().GetResult()) }
 
             lock requestsLock (fun () -> requests.Add captured)
             Task.FromResult(respondWithRenderedMarkdown captured respond)
@@ -105,7 +117,12 @@ module GitHubContentClientTests =
                     if isNull request.Headers.Authorization then
                         None
                     else
-                        Some(request.Headers.Authorization.ToString()) }
+                        Some(request.Headers.Authorization.ToString())
+                  Body =
+                    if isNull request.Content then
+                        None
+                    else
+                        Some(request.Content.ReadAsStringAsync().GetAwaiter().GetResult()) }
 
             lock requestsLock (fun () -> requests.Add captured)
 
@@ -691,7 +708,7 @@ module GitHubContentClientTests =
         let requests = handler.Requests
 
         if
-            countRequests documentPath requests <> 2
+            countRequests documentPath requests <> 1
             || countRequests projectsPath requests <> 1
         then
             failwith "Different cache keys must retain independent parallel upstream requests."
@@ -722,18 +739,12 @@ module GitHubContentClientTests =
                 | "/repos/example-owner/content/git/ref/heads/main" ->
                     response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
                 | path when path = $"/repos/example-owner/content/contents/blog/validated-metadata.md?ref={headSha}" ->
-                    if request.Accept = "application/vnd.github.html+json" then
-                        response
-                            HttpStatusCode.OK
-                            "<p><a href=\"../assets/diagram.svg\">Diagram</a><picture><source srcset=\"../assets/dark.svg 1x, images/light.svg 2x\"><img src=\"images/cover.png\"></picture></p>"
-                            None
-                    else
-                        let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
+                    let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
 
-                        response
-                            HttpStatusCode.OK
-                            $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}"
-                            None
+                    response
+                        HttpStatusCode.OK
+                        $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}"
+                        None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -820,6 +831,15 @@ module GitHubContentClientTests =
             )
         then
             failwith "GitHub-rendered document links and images must resolve against their repository path."
+
+        match handler.Requests |> List.tryFind (fun request -> request.PathAndQuery = "/markdown") with
+        | Some { Body = Some body } when
+            body.Contains("# Body Heading", StringComparison.Ordinal)
+            && not (body.Contains("Validated Metadata", StringComparison.Ordinal))
+            && not (body.Contains("summary =", StringComparison.Ordinal))
+            ->
+            ()
+        | _ -> failwith "Document previews must render the body without publication front matter."
 
     let private testPublicationFrontMatterContract () =
         let path =
@@ -1187,14 +1207,20 @@ module GitHubContentClientTests =
             | Ok value -> value
             | Error failure -> failwithf "%s: %s" failure.Field failure.Message
 
+        let requestsBeforeRetainedDocument = handler.Requests |> List.length
+
         contentClient.GetDocument(ordinalSecondTieDocumentId, CancellationToken.None).GetAwaiter().GetResult()
         |> expectCacheContent "Retained ordinal-later equal-time cache document"
         |> ignore
 
-        match handler.Requests |> List.last with
-        | { PathAndQuery = path
-            IfNoneMatch = Some _ } when path = ordinalSecondTieDocumentPath -> ()
-        | _ -> failwith "The ordinal-later equal-time cache key must remain retained after overflow."
+        if
+            handler.Requests
+            |> List.skip requestsBeforeRetainedDocument
+            |> List.exists (fun request ->
+                request.PathAndQuery = ordinalSecondTieDocumentPath && request.IfNoneMatch.IsSome)
+            |> not
+        then
+            failwith "The ordinal-later equal-time cache key must remain retained after overflow."
 
         stage <- 3
 
