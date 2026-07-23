@@ -14,3 +14,13 @@ test("renders a non-collapsing cursor cell at an empty prompt", () => {
   assert.equal(markup.includes("animate-pulse"), false);
   assert.equal(markup.includes("motion-reduce:animate-none"), true);
 });
+
+test("starts an end-of-line suggestion beneath the cursor instead of after it", () => {
+  const markup = renderToStaticMarkup(InputRow({
+    activeLine: "❯ he",
+    cursorIndex: 4,
+    suggestionSuffix: "lp",
+  }));
+
+  assert.equal(markup.includes(">l</span><span class=\"text-text-muted\">p</span>"), true);
+});

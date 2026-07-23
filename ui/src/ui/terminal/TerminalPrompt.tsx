@@ -47,10 +47,11 @@ export function TerminalPrompt({
         promptLabel={promptLabel}
       />
       <div aria-hidden="true" className="whitespace-pre-wrap wrap-break-words">
-        <InputRow activeLine={activeLine} cursorIndex={cursorIndex} />
-        {autosuggestion.kind === "suggestion" ? (
-          <span className="text-text-muted">{autosuggestion.suffix}</span>
-        ) : null}
+        <InputRow
+          activeLine={activeLine}
+          cursorIndex={cursorIndex}
+          suggestionSuffix={autosuggestion.kind === "suggestion" ? autosuggestion.suffix : undefined}
+        />
       </div>
       <TerminalStatus status={status} completion={completion} />
     </div>

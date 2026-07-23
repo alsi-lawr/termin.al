@@ -16,7 +16,7 @@ export function VimEditorBlockSelectionMirror({
   return (
     <div
       ref={mirrorRef}
-      className="pointer-events-none absolute inset-0 overflow-hidden rounded border border-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded border border-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent [scrollbar-gutter:stable]"
       aria-hidden="true"
     >
       {lines.map((line, lineIndex) => (

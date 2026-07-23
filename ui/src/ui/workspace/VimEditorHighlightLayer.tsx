@@ -118,7 +118,7 @@ export function VimEditorHighlightLayer({ preview, syntax, layerRef }: VimEditor
   return (
     <div
       ref={layerRef}
-      className="pointer-events-none absolute inset-0 overflow-hidden rounded border border-transparent bg-surface-deepest p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary"
+      className="pointer-events-none absolute inset-0 overflow-hidden rounded border border-transparent bg-surface-deepest p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary [scrollbar-gutter:stable]"
       aria-hidden="true"
       data-editor-highlighting={syntax}
     >

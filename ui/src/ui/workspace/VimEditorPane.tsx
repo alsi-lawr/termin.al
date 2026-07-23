@@ -104,14 +104,14 @@ function editorTextareaClass(
   compositionActive: boolean,
 ): string {
   if (compositionActive) {
-    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none focus:border-ui-focus";
+    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-text-primary outline-none [scrollbar-gutter:stable] focus:border-ui-focus";
   }
 
   if (mode === "command" || mode === "search") {
-    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-transparent outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
+    return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-transparent outline-none selection:bg-surface-selected selection:text-transparent [scrollbar-gutter:stable] focus:border-ui-focus";
   }
 
-  return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-ui-cursor outline-none selection:bg-surface-selected selection:text-text-primary focus:border-ui-focus";
+  return "relative min-h-0 flex-1 resize-none rounded border border-surface-border bg-transparent p-2 font-mono text-sm leading-normal whitespace-pre-wrap break-words text-transparent caret-ui-cursor outline-none selection:bg-surface-selected selection:text-transparent [scrollbar-gutter:stable] focus:border-ui-focus";
 }
 
 function moveInsertCursorForMobile(
