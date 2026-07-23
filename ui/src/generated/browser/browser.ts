@@ -219,6 +219,10 @@ export interface DocumentResponse {
      * @generated from protobuf field: terminal.v1.DocumentBase base = 12
      */
     base?: DocumentBase;
+    /**
+     * @generated from protobuf field: string rendered_html = 13
+     */
+    renderedHtml: string;
 }
 /**
  * @generated from protobuf message terminal.v1.Project
@@ -264,6 +268,10 @@ export interface Project {
      * @generated from protobuf field: string readme = 10
      */
     readme: string;
+    /**
+     * @generated from protobuf field: string rendered_html = 11
+     */
+    renderedHtml: string;
 }
 /**
  * @generated from protobuf message terminal.v1.ProjectsResponse
@@ -306,6 +314,10 @@ export interface NowResponse {
      * @generated from protobuf field: terminal.v1.CacheMetadata cache = 5
      */
     cache?: CacheMetadata;
+    /**
+     * @generated from protobuf field: string rendered_html = 6
+     */
+    renderedHtml: string;
 }
 /**
  * @generated from protobuf message terminal.v1.Commit
@@ -377,6 +389,10 @@ export interface ChangelogResponse {
      * @generated from protobuf field: terminal.v1.CacheMetadata cache = 4
      */
     cache?: CacheMetadata;
+    /**
+     * @generated from protobuf field: string rendered_html = 5
+     */
+    renderedHtml: string;
 }
 /**
  * @generated from protobuf message terminal.v1.StatsContentCount
@@ -558,6 +574,36 @@ export interface PublicationResponse {
      * @generated from protobuf field: string blob_sha = 9
      */
     blobSha: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.ManagedRemovalRequest
+ */
+export interface ManagedRemovalRequest {
+    /**
+     * @generated from protobuf field: string virtual_path = 1
+     */
+    virtualPath: string;
+    /**
+     * @generated from protobuf field: bool recursive = 2
+     */
+    recursive: boolean;
+    /**
+     * @generated from protobuf field: string confirmation = 3
+     */
+    confirmation: string;
+}
+/**
+ * @generated from protobuf message terminal.v1.ManagedRemovalResponse
+ */
+export interface ManagedRemovalResponse {
+    /**
+     * @generated from protobuf field: string sha = 1
+     */
+    sha: string;
+    /**
+     * @generated from protobuf field: string url = 2
+     */
+    url: string;
 }
 /**
  * @generated from protobuf enum terminal.v1.SessionKind
@@ -1176,7 +1222,8 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
             { no: 9, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 10, name: "source", kind: "message", T: () => ContentSource },
             { no: 11, name: "cache", kind: "message", T: () => CacheMetadata },
-            { no: 12, name: "base", kind: "message", T: () => DocumentBase }
+            { no: 12, name: "base", kind: "message", T: () => DocumentBase },
+            { no: 13, name: "rendered_html", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<DocumentResponse>): DocumentResponse {
@@ -1190,6 +1237,7 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
         message.updatedAt = "";
         message.tags = [];
         message.body = "";
+        message.renderedHtml = "";
         if (value !== undefined)
             reflectionMergePartial<DocumentResponse>(this, message, value);
         return message;
@@ -1234,6 +1282,9 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
                     break;
                 case /* terminal.v1.DocumentBase base */ 12:
                     message.base = DocumentBase.internalBinaryRead(reader, reader.uint32(), options, message.base);
+                    break;
+                case /* string rendered_html */ 13:
+                    message.renderedHtml = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1283,6 +1334,9 @@ class DocumentResponse$Type extends MessageType<DocumentResponse> {
         /* terminal.v1.DocumentBase base = 12; */
         if (message.base)
             DocumentBase.internalBinaryWrite(message.base, writer.tag(12, WireType.LengthDelimited).fork(), options).join();
+        /* string rendered_html = 13; */
+        if (message.renderedHtml !== "")
+            writer.tag(13, WireType.LengthDelimited).string(message.renderedHtml);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1306,7 +1360,8 @@ class Project$Type extends MessageType<Project> {
             { no: 7, name: "collection_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 8, name: "updated_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 9, name: "tags", kind: "scalar", repeat: 2 /*RepeatType.UNPACKED*/, T: 9 /*ScalarType.STRING*/ },
-            { no: 10, name: "readme", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+            { no: 10, name: "readme", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 11, name: "rendered_html", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<Project>): Project {
@@ -1321,6 +1376,7 @@ class Project$Type extends MessageType<Project> {
         message.updatedAt = "";
         message.tags = [];
         message.readme = "";
+        message.renderedHtml = "";
         if (value !== undefined)
             reflectionMergePartial<Project>(this, message, value);
         return message;
@@ -1359,6 +1415,9 @@ class Project$Type extends MessageType<Project> {
                     break;
                 case /* string readme */ 10:
                     message.readme = reader.string();
+                    break;
+                case /* string rendered_html */ 11:
+                    message.renderedHtml = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1402,6 +1461,9 @@ class Project$Type extends MessageType<Project> {
         /* string readme = 10; */
         if (message.readme !== "")
             writer.tag(10, WireType.LengthDelimited).string(message.readme);
+        /* string rendered_html = 11; */
+        if (message.renderedHtml !== "")
+            writer.tag(11, WireType.LengthDelimited).string(message.renderedHtml);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1481,7 +1543,8 @@ class NowResponse$Type extends MessageType<NowResponse> {
             { no: 2, name: "body", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 3, name: "updated_at", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
             { no: 4, name: "source", kind: "message", T: () => ContentSource },
-            { no: 5, name: "cache", kind: "message", T: () => CacheMetadata }
+            { no: 5, name: "cache", kind: "message", T: () => CacheMetadata },
+            { no: 6, name: "rendered_html", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<NowResponse>): NowResponse {
@@ -1489,6 +1552,7 @@ class NowResponse$Type extends MessageType<NowResponse> {
         message.title = "";
         message.body = "";
         message.updatedAt = "";
+        message.renderedHtml = "";
         if (value !== undefined)
             reflectionMergePartial<NowResponse>(this, message, value);
         return message;
@@ -1512,6 +1576,9 @@ class NowResponse$Type extends MessageType<NowResponse> {
                     break;
                 case /* terminal.v1.CacheMetadata cache */ 5:
                     message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                case /* string rendered_html */ 6:
+                    message.renderedHtml = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1540,6 +1607,9 @@ class NowResponse$Type extends MessageType<NowResponse> {
         /* terminal.v1.CacheMetadata cache = 5; */
         if (message.cache)
             CacheMetadata.internalBinaryWrite(message.cache, writer.tag(5, WireType.LengthDelimited).fork(), options).join();
+        /* string rendered_html = 6; */
+        if (message.renderedHtml !== "")
+            writer.tag(6, WireType.LengthDelimited).string(message.renderedHtml);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -1715,13 +1785,15 @@ class ChangelogResponse$Type extends MessageType<ChangelogResponse> {
             { no: 1, name: "unreleased", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Commit },
             { no: 2, name: "releases", kind: "message", repeat: 2 /*RepeatType.UNPACKED*/, T: () => Release },
             { no: 3, name: "source", kind: "message", T: () => ContentSource },
-            { no: 4, name: "cache", kind: "message", T: () => CacheMetadata }
+            { no: 4, name: "cache", kind: "message", T: () => CacheMetadata },
+            { no: 5, name: "rendered_html", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
         ]);
     }
     create(value?: PartialMessage<ChangelogResponse>): ChangelogResponse {
         const message = globalThis.Object.create((this.messagePrototype ?? {}));
         message.unreleased = [];
         message.releases = [];
+        message.renderedHtml = "";
         if (value !== undefined)
             reflectionMergePartial<ChangelogResponse>(this, message, value);
         return message;
@@ -1742,6 +1814,9 @@ class ChangelogResponse$Type extends MessageType<ChangelogResponse> {
                     break;
                 case /* terminal.v1.CacheMetadata cache */ 4:
                     message.cache = CacheMetadata.internalBinaryRead(reader, reader.uint32(), options, message.cache);
+                    break;
+                case /* string rendered_html */ 5:
+                    message.renderedHtml = reader.string();
                     break;
                 default:
                     let u = options.readUnknownField;
@@ -1767,6 +1842,9 @@ class ChangelogResponse$Type extends MessageType<ChangelogResponse> {
         /* terminal.v1.CacheMetadata cache = 4; */
         if (message.cache)
             CacheMetadata.internalBinaryWrite(message.cache, writer.tag(4, WireType.LengthDelimited).fork(), options).join();
+        /* string rendered_html = 5; */
+        if (message.renderedHtml !== "")
+            writer.tag(5, WireType.LengthDelimited).string(message.renderedHtml);
         let u = options.writeUnknownFields;
         if (u !== false)
             (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
@@ -2400,6 +2478,124 @@ class PublicationResponse$Type extends MessageType<PublicationResponse> {
  * @generated MessageType for protobuf message terminal.v1.PublicationResponse
  */
 export const PublicationResponse = new PublicationResponse$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ManagedRemovalRequest$Type extends MessageType<ManagedRemovalRequest> {
+    constructor() {
+        super("terminal.v1.ManagedRemovalRequest", [
+            { no: 1, name: "virtual_path", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "recursive", kind: "scalar", T: 8 /*ScalarType.BOOL*/ },
+            { no: 3, name: "confirmation", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ManagedRemovalRequest>): ManagedRemovalRequest {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.virtualPath = "";
+        message.recursive = false;
+        message.confirmation = "";
+        if (value !== undefined)
+            reflectionMergePartial<ManagedRemovalRequest>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ManagedRemovalRequest): ManagedRemovalRequest {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string virtual_path */ 1:
+                    message.virtualPath = reader.string();
+                    break;
+                case /* bool recursive */ 2:
+                    message.recursive = reader.bool();
+                    break;
+                case /* string confirmation */ 3:
+                    message.confirmation = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ManagedRemovalRequest, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string virtual_path = 1; */
+        if (message.virtualPath !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.virtualPath);
+        /* bool recursive = 2; */
+        if (message.recursive !== false)
+            writer.tag(2, WireType.Varint).bool(message.recursive);
+        /* string confirmation = 3; */
+        if (message.confirmation !== "")
+            writer.tag(3, WireType.LengthDelimited).string(message.confirmation);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.ManagedRemovalRequest
+ */
+export const ManagedRemovalRequest = new ManagedRemovalRequest$Type();
+// @generated message type with reflection information, may provide speed optimized methods
+class ManagedRemovalResponse$Type extends MessageType<ManagedRemovalResponse> {
+    constructor() {
+        super("terminal.v1.ManagedRemovalResponse", [
+            { no: 1, name: "sha", kind: "scalar", T: 9 /*ScalarType.STRING*/ },
+            { no: 2, name: "url", kind: "scalar", T: 9 /*ScalarType.STRING*/ }
+        ]);
+    }
+    create(value?: PartialMessage<ManagedRemovalResponse>): ManagedRemovalResponse {
+        const message = globalThis.Object.create((this.messagePrototype ?? {}));
+        message.sha = "";
+        message.url = "";
+        if (value !== undefined)
+            reflectionMergePartial<ManagedRemovalResponse>(this, message, value);
+        return message;
+    }
+    internalBinaryRead(reader: IBinaryReader, length: number, options: BinaryReadOptions, target?: ManagedRemovalResponse): ManagedRemovalResponse {
+        let message = target ?? this.create(), end = reader.pos + length;
+        while (reader.pos < end) {
+            let [fieldNo, wireType] = reader.tag();
+            switch (fieldNo) {
+                case /* string sha */ 1:
+                    message.sha = reader.string();
+                    break;
+                case /* string url */ 2:
+                    message.url = reader.string();
+                    break;
+                default:
+                    let u = options.readUnknownField;
+                    if (u === "throw")
+                        throw new globalThis.Error(`Unknown field ${fieldNo} (wire type ${wireType}) for ${this.typeName}`);
+                    let d = reader.skip(wireType);
+                    if (u !== false)
+                        (u === true ? UnknownFieldHandler.onRead : u)(this.typeName, message, fieldNo, wireType, d);
+            }
+        }
+        return message;
+    }
+    internalBinaryWrite(message: ManagedRemovalResponse, writer: IBinaryWriter, options: BinaryWriteOptions): IBinaryWriter {
+        /* string sha = 1; */
+        if (message.sha !== "")
+            writer.tag(1, WireType.LengthDelimited).string(message.sha);
+        /* string url = 2; */
+        if (message.url !== "")
+            writer.tag(2, WireType.LengthDelimited).string(message.url);
+        let u = options.writeUnknownFields;
+        if (u !== false)
+            (u == true ? UnknownFieldHandler.onWrite : u)(this.typeName, message, writer);
+        return writer;
+    }
+}
+/**
+ * @generated MessageType for protobuf message terminal.v1.ManagedRemovalResponse
+ */
+export const ManagedRemovalResponse = new ManagedRemovalResponse$Type();
 /**
  * @generated ServiceType for protobuf service terminal.v1.SessionApi
  */
@@ -2437,5 +2633,6 @@ export const CvApi = new ServiceType("terminal.v1.CvApi", [
  * @generated ServiceType for protobuf service terminal.v1.PublicationApi
  */
 export const PublicationApi = new ServiceType("terminal.v1.PublicationApi", [
-    { name: "Publish", options: {}, I: PublicationRequest, O: PublicationResponse }
+    { name: "Publish", options: {}, I: PublicationRequest, O: PublicationResponse },
+    { name: "RemoveManaged", options: {}, I: ManagedRemovalRequest, O: ManagedRemovalResponse }
 ]);

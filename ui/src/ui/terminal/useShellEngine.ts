@@ -6,8 +6,10 @@ import {
   getActiveShellPrompt,
   createShellDiagnosticId,
   createShellOutputId,
+  type CommandId,
   type CommandLineOutcome,
   type CompletionCycleDirection,
+  type ConfirmationPromptEffect,
   type ShellAction,
   type ShellState,
 } from "../../domain/terminal/Shell.ts";
@@ -27,7 +29,20 @@ import {
 } from "../../application/commands/SecretPromptEffectConsumption.ts";
 import type { PaneShellRuntimeControl } from "../workspace/PaneShellRuntimes.ts";
 
-export type ShellEngineDiagnostic = SecretPromptEffectConsumptionDiagnostic;
+export type ConfirmationPromptSubmissionResult =
+  | Readonly<{ kind: "succeeded" }>
+  | Readonly<{ kind: "failed"; message: string }>;
+
+export type ConfirmationPromptSubmissionHandler = (
+  effect: Extract<ConfirmationPromptEffect, { kind: "confirmation-submitted" }>,
+) => Promise<ConfirmationPromptSubmissionResult>;
+
+export type ShellEngineDiagnostic =
+  | SecretPromptEffectConsumptionDiagnostic
+  | Readonly<{
+      kind: "confirmation-prompt-delivery-failed";
+      message: string;
+    }>;
 
 export type UseShellEngineOptions = Readonly<{
   state: ShellState;
@@ -37,6 +52,7 @@ export type UseShellEngineOptions = Readonly<{
   registry: CommandRegistry;
   completionService: CompletionService;
   secretPromptSubmissionHandler?: SecretPromptSubmissionHandler;
+  confirmationPromptSubmissionHandler?: ConfirmationPromptSubmissionHandler;
 }>;
 
 export type ShellEngine = Readonly<{
@@ -96,6 +112,7 @@ export function useShellEngine({
   registry,
   completionService,
   secretPromptSubmissionHandler,
+  confirmationPromptSubmissionHandler,
 }: UseShellEngineOptions): ShellEngine {
   const [transientDiagnostic, setTransientDiagnostic] = useState<
     ShellEngineDiagnostic | undefined
@@ -103,6 +120,7 @@ export function useShellEngine({
   const secretPromptEffectConsumption = useRef<SecretPromptEffectConsumptionState>(
     createSecretPromptEffectConsumptionState(),
   );
+  const handledConfirmationPromptId = useRef<CommandId | undefined>(undefined);
   const mounted = useRef(false);
 
   useEffect(() => {
@@ -148,6 +166,48 @@ export function useShellEngine({
     }
 
     const effect = secretPromptConsumption.effect;
+
+    if (
+      effect.kind === "confirmation-submitted" ||
+      effect.kind === "confirmation-cancelled"
+    ) {
+      const requestId = effect.request.id;
+
+      if (handledConfirmationPromptId.current === requestId) {
+        return;
+      }
+
+      handledConfirmationPromptId.current = requestId;
+      onAction({ kind: "confirmation-prompt.effect.consumed", requestId });
+
+      if (effect.kind === "confirmation-cancelled" || !effect.confirmed) {
+        return;
+      }
+
+      const deliverConfirmation = async (): Promise<void> => {
+        const result = confirmationPromptSubmissionHandler === undefined
+          ? { kind: "failed", message: "Confirmation delivery failed." } as const
+          : await confirmationPromptSubmissionHandler(effect);
+
+        if (
+          mounted.current &&
+          isSessionOpen() &&
+          handledConfirmationPromptId.current === requestId
+        ) {
+          setTransientDiagnostic(
+            result.kind === "failed"
+              ? {
+                  kind: "confirmation-prompt-delivery-failed",
+                  message: result.message,
+                }
+              : undefined,
+          );
+        }
+      };
+
+      void deliverConfirmation();
+      return;
+    }
 
     if (effect.kind === "none") {
       return;
@@ -213,6 +273,7 @@ export function useShellEngine({
     isSessionOpen,
     registry,
     runtimeControl,
+    confirmationPromptSubmissionHandler,
     secretPromptSubmissionHandler,
     state.pendingEffect,
   ]);
@@ -265,6 +326,11 @@ export function useShellEngine({
 
     if (prompt.kind === "secret") {
       onAction({ kind: "prompt.submit", submission: { kind: "secret" } });
+      return;
+    }
+
+    if (prompt.kind === "confirmation") {
+      onAction({ kind: "prompt.submit", submission: { kind: "confirmation" } });
       return;
     }
 

@@ -64,7 +64,7 @@ function containsUnsafeControl(text: string): boolean {
   return false;
 }
 
-test("generates an exact deterministic safe 33-manual corpus and manifest", () => {
+test("generates an exact deterministic safe 34-manual corpus and manifest", () => {
   withFixture((root) => {
     const first = runManpageGeneration({ repositoryRoot: root, mode: "generate" });
     const manifestPath = join(root, "ui", "src", "generated", "manpages-manifest.json");

@@ -134,7 +134,11 @@ function existingCorpus(repositoryPath = "notes/runtime/existing.md"): ContentCo
     documents: {
       read: () => Promise.resolve({
         kind: "available",
-        document: { text: "# Existing\n", source: { path: "~/notes/runtime/existing.md" } },
+        document: {
+          text: "# Existing\n",
+          source: { path: "~/notes/runtime/existing.md" },
+          preview: { kind: "markdown" },
+        },
         classification: {
           kind: "publication",
           publicationKind: "note",
@@ -194,6 +198,7 @@ test("publishes a new asset-free draft before its first save and discards only t
         documentBlobSha: "c".repeat(40),
       });
     },
+    removeManaged: () => Promise.resolve({ kind: "failed", message: "Removal failed." }),
   };
   const service = new AuthoringService(corpus(), auth, store, publication);
   const opened = await service.open(

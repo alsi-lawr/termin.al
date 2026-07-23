@@ -103,6 +103,7 @@ message DocumentResponse {
   ContentSource source = 10;
   CacheMetadata cache = 11;
   DocumentBase base = 12;
+  string rendered_html = 13;
 }
 
 message Project {
@@ -116,6 +117,7 @@ message Project {
   string updated_at = 8;
   repeated string tags = 9;
   string readme = 10;
+  string rendered_html = 11;
 }
 
 message ProjectsResponse {
@@ -130,6 +132,7 @@ message NowResponse {
   string updated_at = 3;
   ContentSource source = 4;
   CacheMetadata cache = 5;
+  string rendered_html = 6;
 }
 
 message Commit {
@@ -153,6 +156,7 @@ message ChangelogResponse {
   repeated Release releases = 2;
   ContentSource source = 3;
   CacheMetadata cache = 4;
+  string rendered_html = 5;
 }
 
 service ContentApi {
@@ -242,6 +246,18 @@ message PublicationResponse {
   string blob_sha = 9;
 }
 
+message ManagedRemovalRequest {
+  string virtual_path = 1;
+  bool recursive = 2;
+  string confirmation = 3;
+}
+
+message ManagedRemovalResponse {
+  string sha = 1;
+  string url = 2;
+}
+
 service PublicationApi {
   rpc Publish(PublicationRequest) returns (PublicationResponse);
+  rpc RemoveManaged(ManagedRemovalRequest) returns (ManagedRemovalResponse);
 }

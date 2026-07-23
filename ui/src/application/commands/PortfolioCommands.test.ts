@@ -468,7 +468,11 @@ test("bounds recursive publication loading at the existing traversal limit", asy
       reads += 1;
       return Promise.resolve({
         kind: "available",
-        document: { text: `# ${handle}`, source: { path: `~/blog/${handle}.md` } },
+        document: {
+          text: `# ${handle}`,
+          source: { path: `~/blog/${handle}.md` },
+          preview: { kind: "markdown" },
+        },
         classification: {
           kind: "publication",
           publicationKind: "blog",

@@ -360,6 +360,8 @@ module Program =
                 (ContentDomain.Catalog.cache catalog)
                 []
                 [ release ]
+                (ContentDomain.RenderedHtml.tryCreate "test.changelog.rendered_html" "<h1>Changelog</h1>"
+                 |> requireValid)
             |> requireValid
 
         { new ContentClient with
@@ -409,10 +411,18 @@ module Program =
 
                 let csp = index.Headers.GetValues("Content-Security-Policy") |> Seq.exactlyOne
 
-                if csp.Contains("unsafe-inline", StringComparison.Ordinal) then
-                    failwith "The application CSP must not permit inline script or style execution."
+                if
+                    csp.Contains("script-src 'unsafe-inline'", StringComparison.Ordinal)
+                    || csp.Contains("style-src 'unsafe-inline'", StringComparison.Ordinal)
+                then
+                    failwith "The application CSP must not permit inline script or stylesheet execution."
 
-                for required in [ "default-src 'none'"; "script-src 'self'"; "connect-src 'self'" ] do
+                for required in
+                    [ "default-src 'none'"
+                      "script-src 'self'"
+                      "style-src 'self'"
+                      "style-src-attr 'unsafe-inline'"
+                      "connect-src 'self'" ] do
                     if not (csp.Contains(required, StringComparison.Ordinal)) then
                         failwithf "The application CSP is missing %s." required
 
@@ -700,7 +710,10 @@ module Program =
             { new GitHubPublication.Client with
                 member _.Publish(ownerToken, _, _) =
                     suppliedTokens.Add(Auth.ownerAccessTokenValue ownerToken)
-                    Task.FromResult(GitHubPublication.Result.Unavailable) }
+                    Task.FromResult(GitHubPublication.Result.Unavailable)
+
+                member _.RemoveManaged(_, _, _) =
+                    Task.FromResult(GitHubPublication.ManagedRemovalResult.Unavailable) }
 
         let viewer = Cv.generateViewerKey ()
 

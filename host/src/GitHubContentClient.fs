@@ -6,8 +6,10 @@ open System.Collections.Generic
 open System.Net
 open System.Net.Http
 open System.Net.Http.Headers
+open System.Security.Cryptography
 open System.Text
 open System.Text.Json
+open System.Text.RegularExpressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Configuration
@@ -152,6 +154,12 @@ module GitHubContentClient =
           ReleaseBody: string
           ReleaseUrl: ContentDomain.ContentUrl }
 
+    type private ReadmeData =
+        { ReadmeBody: string
+          ReadmeRenderedHtml: ContentDomain.RenderedHtml
+          ReadmePayload: GitHubPayload
+          ReadmeRevision: string }
+
     type private ReleaseBoundary =
         { BoundaryRelease: ReleaseData
           BoundaryCommit: ContentDomain.CommitSha }
@@ -166,6 +174,7 @@ module GitHubContentClient =
     let private userAgent = "termin.al-content"
     let private jsonMediaType = "application/vnd.github+json"
     let private rawMediaType = "application/vnd.github.raw+json"
+    let private htmlMediaType = "application/vnd.github.html+json"
     let private maximumPaginationPages = 3
     let private maximumPayloadCacheEntries = 512
     let private maximumGitHubPayloadBytes = ContentDomain.DocumentByteLimit * 2
@@ -443,19 +452,25 @@ module GitHubContentClient =
             now
             cacheKey
             cached
+            (method: HttpMethod)
             (uri: Uri)
             (accept: string)
+            (body: string option)
             : Task<Result<GitHubPayload, FetchFailure>> =
             task {
                 use timeout = new CancellationTokenSource()
                 timeout.CancelAfter(TimeSpan.FromSeconds(float ContentDomain.GitHubTimeoutSeconds))
-                use request = new HttpRequestMessage(HttpMethod.Get, uri)
+                use request = new HttpRequestMessage(method, uri)
                 request.Headers.Accept.ParseAdd(accept)
                 request.Headers.UserAgent.ParseAdd(userAgent)
                 request.Headers.Add("X-GitHub-Api-Version", apiVersion)
 
                 match GitHubContentConfiguration.apiToken configuration with
                 | Some token -> request.Headers.Authorization <- AuthenticationHeaderValue("Bearer", token)
+                | None -> ()
+
+                match body with
+                | Some value -> request.Content <- new StringContent(value, Encoding.UTF8, "application/json")
                 | None -> ()
 
                 match cached with
@@ -549,13 +564,15 @@ module GitHubContentClient =
             now
             cacheKey
             cached
+            method
             uri
             accept
+            body
             (completion: TaskCompletionSource<Result<GitHubPayload, FetchFailure>>)
             =
             task {
                 try
-                    let! result = fetchFromGitHub now cacheKey cached uri accept
+                    let! result = fetchFromGitHub now cacheKey cached method uri accept body
                     removeInFlightFetch cacheKey completion
                     completion.TrySetResult(result) |> ignore
                 with
@@ -569,13 +586,21 @@ module GitHubContentClient =
             |> ignore
 
         let fetch
+            (method: HttpMethod)
             (uri: Uri)
             (accept: string)
+            (body: string option)
             (cancellationToken: CancellationToken)
             : Task<Result<GitHubPayload, FetchFailure>> =
             task {
                 let now = clock ()
-                let cacheKey = $"{generation.Current}|{accept}|{uri.AbsoluteUri}"
+
+                let bodyIdentity =
+                    body
+                    |> Option.map (Encoding.UTF8.GetBytes >> SHA256.HashData >> Convert.ToHexString)
+                    |> Option.defaultValue ""
+
+                let cacheKey = $"{generation.Current}|{method.Method}|{accept}|{uri.AbsoluteUri}|{bodyIdentity}"
 
                 let cached, sharedFetch, shouldStart = findCachedPayloadOrStartFetch now cacheKey
 
@@ -589,17 +614,30 @@ module GitHubContentClient =
                               PayloadNextPage = value.CachedNextPage }
                 | None, Some(completion, staleCached) ->
                     if shouldStart then
-                        startSharedFetch now cacheKey staleCached uri accept completion
+                        startSharedFetch now cacheKey staleCached method uri accept body completion
 
                     return! completion.Task.WaitAsync(cancellationToken)
                 | None, None -> return Error Unavailable
             }
 
         let getJson uri cancellationToken =
-            fetch uri jsonMediaType cancellationToken
+            fetch HttpMethod.Get uri jsonMediaType None cancellationToken
 
         let getRaw uri cancellationToken =
-            fetch uri rawMediaType cancellationToken
+            fetch HttpMethod.Get uri rawMediaType None cancellationToken
+
+        let getHtml uri cancellationToken =
+            fetch HttpMethod.Get uri htmlMediaType None cancellationToken
+
+        let renderMarkdown markdown context cancellationToken =
+            let requestBody =
+                JsonSerializer.Serialize(
+                    {| text = markdown
+                       mode = "gfm"
+                       context = context |}
+                )
+
+            fetch HttpMethod.Post (apiUri "markdown") "text/html" (Some requestBody) cancellationToken
 
         let repositorySource
             (repository: GitHubRepositoryData)
@@ -616,27 +654,188 @@ module GitHubContentClient =
 
         let repositoryRootUrl (repository: GitHubRepositoryData) = repository.RepositoryUrl
 
-        let readFile (repository: GitHubRepositoryData) (path: ContentDomain.RepositoryPath) cancellationToken =
-            let branch =
-                Uri.EscapeDataString(ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+        let repositoryRelativePath (sourcePath: ContentDomain.RepositoryPath) (target: string) =
+            let suffixIndex =
+                [ target.IndexOf('?'); target.IndexOf('#') ]
+                |> List.filter (fun index -> index >= 0)
+                |> function
+                    | [] -> target.Length
+                    | indexes -> List.min indexes
 
-            let uri =
-                apiUri
-                    $"repos/{repositoryName repository.RepositoryFullName}/contents/{encodeRepositoryPath path}?ref={branch}"
+            let targetPath = target.Substring(0, suffixIndex)
+            let suffix = target.Substring(suffixIndex)
+            let source = ContentDomain.RepositoryPath.value sourcePath
+            let sourceDirectoryEnd = source.LastIndexOf('/')
 
-            getRaw uri cancellationToken
+            let initialSegments =
+                if sourceDirectoryEnd < 0 then
+                    []
+                else
+                    source.Substring(0, sourceDirectoryEnd).Split('/') |> Array.toList
 
-        let readReadme (repository: GitHubRepositoryData) cancellationToken =
-            let branch =
-                Uri.EscapeDataString(ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+            let rec normalize segments pending =
+                match pending with
+                | [] -> List.rev segments
+                | "" :: remaining
+                | "." :: remaining -> normalize segments remaining
+                | ".." :: remaining ->
+                    match segments with
+                    | [] -> normalize [] remaining
+                    | _ :: parent -> normalize parent remaining
+                | segment :: remaining -> normalize (segment :: segments) remaining
 
-            let uri =
-                apiUri $"repos/{repositoryName repository.RepositoryFullName}/readme?ref={branch}"
+            let relativeSegments = targetPath.Split('/') |> Array.toList
+            let normalized = normalize (List.rev initialSegments) relativeSegments |> String.concat "/"
+            normalized + suffix
 
-            getRaw uri cancellationToken
+        let resolveRenderedHtmlUrls
+            (repository: GitHubRepositoryData)
+            (sourcePath: ContentDomain.RepositoryPath)
+            (revision: string)
+            (html: string)
+            =
+            let fullName = repositoryName repository.RepositoryFullName
+            let escapedRevision = Uri.EscapeDataString revision
+
+            let resolve attribute value =
+                if
+                    String.IsNullOrWhiteSpace value
+                    || value.StartsWith("#", StringComparison.Ordinal)
+                    || value.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                    || value.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+                then
+                    value
+                elif value.StartsWith("//", StringComparison.Ordinal) then
+                    "https:" + value
+                else
+                    match Uri.TryCreate(value, UriKind.Absolute) with
+                    | true, _ -> value
+                    | false, _ when value.StartsWith("/", StringComparison.Ordinal) -> "https://github.com" + value
+                    | false, _ ->
+                        let path = repositoryRelativePath sourcePath value
+
+                        if attribute = "src" then
+                            $"https://raw.githubusercontent.com/{fullName}/{escapedRevision}/{path}"
+                        else
+                            $"https://github.com/{fullName}/blob/{escapedRevision}/{path}"
+
+            Regex.Replace(
+                html,
+                "(?<![A-Za-z0-9_-])(?<attribute>href|src)=\"(?<value>[^\"]*)\"",
+                MatchEvaluator(fun matched ->
+                    let attribute = matched.Groups["attribute"].Value
+                    let value = matched.Groups["value"].Value
+                    $"{attribute}=\"{resolve attribute value}\"")
+            )
+
+        let renderedHtml
+            repository
+            sourcePath
+            revision
+            (payload: GitHubPayload)
+            : Result<ContentDomain.RenderedHtml, ContentDomain.Problem> =
+            resolveRenderedHtmlUrls repository sourcePath revision payload.PayloadBody
+            |> ContentDomain.RenderedHtml.tryCreate "rendered_html"
+            |> Result.mapError mapValidationFailure
+
+        let renderMarkdownPreview repository sourcePath revision markdown cancellationToken =
+            task {
+                let context = repositoryName repository.RepositoryFullName
+                let! payload = renderMarkdown markdown context cancellationToken
+
+                return
+                    match payload with
+                    | Error failure -> Error(mapFetchFailure failure)
+                    | Ok response -> renderedHtml repository sourcePath revision response
+            }
+
+        let contentUri
+            (repository: GitHubRepositoryData)
+            (path: ContentDomain.RepositoryPath)
+            (revision: string)
+            =
+            let reference = Uri.EscapeDataString revision
+
+            apiUri
+                $"repos/{repositoryName repository.RepositoryFullName}/contents/{encodeRepositoryPath path}?ref={reference}"
 
         let invalidProblem () =
             ContentDomain.Problem.create ContentDomain.UpstreamUnavailable "GitHub returned invalid public content."
+
+        let parseGitObjectReference (body: string) : Result<string * ContentDomain.CommitSha, string> =
+            parseJson body (fun root ->
+                if root.ValueKind <> JsonValueKind.Object then
+                    Error "Git reference responses must be objects."
+                else
+                    match property "object" root with
+                    | Some reference when reference.ValueKind = JsonValueKind.Object ->
+                        match requiredString "type" reference, requiredString "sha" reference with
+                        | Ok objectType, Ok sha ->
+                            toDomainResult (ContentDomain.CommitSha.tryCreate "git.object.sha" sha)
+                            |> Result.map (fun parsedSha -> objectType, parsedSha)
+                        | Error message, _
+                        | _, Error message -> Error message
+                    | _ -> Error "Git reference object must be an object.")
+
+        let getDefaultBranchHead (repository: GitHubRepositoryData) cancellationToken =
+            task {
+                let fullName = repositoryName repository.RepositoryFullName
+
+                let branch =
+                    Uri.EscapeDataString(ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+
+                let! reference = getJson (apiUri $"repos/{fullName}/git/ref/heads/{branch}") cancellationToken
+
+                match reference with
+                | Error failure -> return Error(mapFetchFailure failure)
+                | Ok response ->
+                    match parseGitObjectReference response.PayloadBody with
+                    | Ok("commit", commit) -> return Ok commit
+                    | Error _
+                    | Ok _ -> return Error(invalidProblem ())
+            }
+
+        let readFile (repository: GitHubRepositoryData) (path: ContentDomain.RepositoryPath) cancellationToken =
+            let revision = ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch
+            getRaw (contentUri repository path revision) cancellationToken
+
+        let readFileAtRevision repository path revision cancellationToken =
+            getRaw (contentUri repository path revision) cancellationToken
+
+        let readFileHtml
+            (repository: GitHubRepositoryData)
+            (path: ContentDomain.RepositoryPath)
+            (revision: string)
+            cancellationToken
+            =
+            task {
+                let! payload = getHtml (contentUri repository path revision) cancellationToken
+
+                return
+                    match payload with
+                    | Error failure -> Error(mapFetchFailure failure)
+                    | Ok response -> renderedHtml repository path revision response
+            }
+
+        let readReadmeAtRevision
+            (repository: GitHubRepositoryData)
+            (revision: string)
+            accept
+            cancellationToken
+            =
+            let reference = Uri.EscapeDataString revision
+
+            let uri =
+                apiUri $"repos/{repositoryName repository.RepositoryFullName}/readme?ref={reference}"
+
+            fetch HttpMethod.Get uri accept None cancellationToken
+
+        let readReadme (repository: GitHubRepositoryData) cancellationToken =
+            readReadmeAtRevision
+                repository
+                (ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+                rawMediaType
+                cancellationToken
 
         let parseRepositoryElement
             (expected: ContentDomain.RepositoryName option)
@@ -775,6 +974,7 @@ module GitHubContentClient =
             (payload: GitHubPayload)
             (baseRevisions: (ContentDomain.ContentRevision * ContentDomain.ContentRevision) option)
             (markdown: string)
+            (preview: ContentDomain.RenderedHtml)
             =
             match documentUrl repository documentPath, cacheMetadata payload with
             | Ok url, Ok metadata ->
@@ -786,18 +986,44 @@ module GitHubContentClient =
                     baseRevisions
                     metadata
                     markdown
+                    preview
                 |> Result.mapError mapValidationFailure
             | Error problem, _
             | _, Error problem -> Error problem
 
         let getOptionalReadme (repository: GitHubRepositoryData) cancellationToken =
             task {
-                let! payload = readReadme repository cancellationToken
+                let! head = getDefaultBranchHead repository cancellationToken
 
-                match payload with
-                | Ok value -> return Ok(Some(value.PayloadBody, value))
-                | Error Missing -> return Ok None
-                | Error failure -> return Error(mapFetchFailure failure)
+                match head with
+                | Error problem -> return Error problem
+                | Ok headSha ->
+                    let revision = ContentDomain.CommitSha.value headSha
+                    let! markdown = readReadmeAtRevision repository revision rawMediaType cancellationToken
+
+                    match markdown with
+                    | Error Missing -> return Ok None
+                    | Error failure -> return Error(mapFetchFailure failure)
+                    | Ok markdownPayload ->
+                        let! html = readReadmeAtRevision repository revision htmlMediaType cancellationToken
+
+                        match html with
+                        | Error failure -> return Error(mapFetchFailure failure)
+                        | Ok htmlPayload ->
+                            match ContentDomain.RepositoryPath.tryCreate "readme.path" "README.md" with
+                            | Error failure -> return Error(mapValidationFailure failure)
+                            | Ok readmePath ->
+                                match renderedHtml repository readmePath revision htmlPayload with
+                                | Error problem -> return Error problem
+                                | Ok preview ->
+                                    return
+                                        Ok(
+                                            Some
+                                                { ReadmeBody = markdownPayload.PayloadBody
+                                                  ReadmeRenderedHtml = preview
+                                                  ReadmePayload = markdownPayload
+                                                  ReadmeRevision = revision }
+                                        )
             }
 
         let getProfileReadme cancellationToken =
@@ -814,7 +1040,7 @@ module GitHubContentClient =
                     match readme with
                     | Error problem -> return Error problem
                     | Ok None -> return Ok None
-                    | Ok(Some(body, payload)) -> return Ok(Some(profileRepositoryData, body, payload))
+                    | Ok(Some readme) -> return Ok(Some(profileRepositoryData, readme))
             }
 
         let parseOwnedRepositories (body: string) : Result<GitHubRepositoryData list, string> =
@@ -877,18 +1103,28 @@ module GitHubContentClient =
 
             getPages (Some firstPage) 0 []
 
-        let projectFromRepository (repository: GitHubRepositoryData) (readme: string option) =
+        let projectFromRepository (repository: GitHubRepositoryData) (readme: ReadmeData option) =
             let fullName = repositoryName repository.RepositoryFullName
             let repositoryShortName = fullName.Substring(fullName.IndexOf('/') + 1)
             let slugValue = normalizeSlug repositoryShortName
 
-            let readmeBody = readme |> Option.defaultValue missingReadme
+            let readmeBody =
+                readme |> Option.map (fun value -> value.ReadmeBody) |> Option.defaultValue missingReadme
 
             let summary =
                 readme
-                |> Option.bind summaryFromMarkdown
+                |> Option.bind (fun value -> summaryFromMarkdown value.ReadmeBody)
                 |> Option.orElse repository.RepositoryDescription
                 |> Option.defaultValue $"Public repository {repositoryShortName}."
+
+            let preview =
+                readme
+                |> Option.map (fun value -> value.ReadmeRenderedHtml)
+                |> Option.defaultWith (fun () ->
+                    ContentDomain.RenderedHtml.tryCreate "project.rendered_html" "<p>No README found.</p>"
+                    |> function
+                        | Ok value -> value
+                        | Error failure -> failwith failure.Message)
 
             match
                 toDomainResult (ContentDomain.ContentSlug.tryCreate "project.slug" slugValue),
@@ -913,6 +1149,7 @@ module GitHubContentClient =
                             repository.RepositoryUpdatedAt
                             [ tag ])
                         projectReadme
+                        preview
                 )
             | Error message, _, _, _, _, _, _
             | _, Error message, _, _, _, _, _
@@ -924,7 +1161,7 @@ module GitHubContentClient =
 
         let getProjectReadmes (repositories: GitHubRepositoryData list) cancellationToken =
             task {
-                let mutable collected: (GitHubRepositoryData * string option) list = []
+                let mutable collected: (GitHubRepositoryData * ReadmeData option) list = []
                 let mutable failure: ContentDomain.Problem option = None
 
                 for repository in repositories do
@@ -933,7 +1170,7 @@ module GitHubContentClient =
 
                         match readme with
                         | Error problem -> failure <- Some problem
-                        | Ok(Some(body, _)) -> collected <- (repository, Some body) :: collected
+                        | Ok(Some readme) -> collected <- (repository, Some readme) :: collected
                         | Ok None -> collected <- (repository, None) :: collected
 
                 match failure with
@@ -961,13 +1198,25 @@ module GitHubContentClient =
                             | Ok readme ->
                                 let body =
                                     readme
-                                    |> Option.map (fun (value, _) -> value)
+                                    |> Option.map (fun value -> value.ReadmeBody)
                                     |> Option.defaultValue missingReadme
+
+                                let preview =
+                                    readme
+                                    |> Option.map (fun value -> value.ReadmeRenderedHtml)
+                                    |> Option.defaultWith (fun () ->
+                                        ContentDomain.RenderedHtml.tryCreate
+                                            "project.rendered_html"
+                                            "<p>No README found.</p>"
+                                        |> function
+                                            | Ok value -> value
+                                            | Error failure -> failwith failure.Message)
 
                                 match ContentDomain.MarkdownBody.tryCreate "project.readme" body with
                                 | Error validationFailure -> failure <- Some(mapValidationFailure validationFailure)
                                 | Ok markdown ->
-                                    collected <- ContentDomain.ProjectReadme.create project markdown :: collected
+                                    collected <-
+                                        ContentDomain.ProjectReadme.create project markdown preview :: collected
 
                 match failure with
                 | Some problem -> return Error problem
@@ -1052,87 +1301,22 @@ module GitHubContentClient =
                             | _, _, Error _ -> return Error(invalidProblem ())
             }
 
-        let parseLatestActivity (body: string) : Result<string option, string> =
+        let parseRecentActivity (body: string) : Result<(string * string) list, string> =
             parseJson body (fun root ->
                 if root.ValueKind <> JsonValueKind.Array then
                     Error "Activity responses must be arrays."
                 else
                     root.EnumerateArray()
-                    |> Seq.tryPick (fun event ->
+                    |> Seq.choose (fun event ->
                         match property "repo" event with
                         | Some repository when repository.ValueKind = JsonValueKind.Object ->
                             match requiredString "type" event, requiredString "name" repository with
-                            | Ok kind, Ok repositoryName ->
-                                Some $"Latest public activity: {kind} in {repositoryName}."
+                            | Ok kind, Ok repositoryName -> Some(kind, repositoryName)
                             | _ -> None
                         | _ -> None)
+                    |> Seq.truncate 6
+                    |> Seq.toList
                     |> Ok)
-
-        let getNowFromGitHub cancellationToken =
-            task {
-                let applicationRepository =
-                    GitHubContentConfiguration.applicationRepository configuration
-
-                let! repository = getRepository applicationRepository cancellationToken
-
-                match repository with
-                | Error problem -> return Error problem
-                | Ok applicationRepositoryData ->
-                    let activityUri =
-                        apiUri
-                            $"users/{Uri.EscapeDataString(GitHubContentConfiguration.owner configuration)}/events/public?per_page={ContentDomain.PageItemLimit}"
-
-                    let! activityPayload = getJson activityUri cancellationToken
-                    let! applicationReadme = getOptionalReadme applicationRepositoryData cancellationToken
-                    let! profileReadme = getProfileReadme cancellationToken
-
-                    match activityPayload, applicationReadme, profileReadme with
-                    | Error failure, _, _ -> return Error(mapFetchFailure failure)
-                    | _, Error problem, _
-                    | _, _, Error problem -> return Error problem
-                    | Ok activityResponse, Ok applicationReadme, Ok profileReadme ->
-                        match
-                            parseLatestActivity activityResponse.PayloadBody,
-                            cacheMetadata activityResponse,
-                            ContentDomain.RepositoryPath.tryCreate "now.path" "events",
-                            ContentDomain.ContentTitle.tryCreate "now.title" "Now"
-                        with
-                        | Ok activity, Ok metadata, Ok sourcePath, Ok title ->
-                            let activityLine =
-                                activity |> Option.defaultValue "No recent public activity is available."
-
-                            let summary =
-                                applicationReadme
-                                |> Option.bind (fun (body, _) -> summaryFromMarkdown body)
-                                |> Option.orElse (
-                                    profileReadme |> Option.bind (fun (_, body, _) -> summaryFromMarkdown body)
-                                )
-
-                            let body =
-                                match summary with
-                                | Some value -> $"# Now\n\n{activityLine}\n\n{value}"
-                                | None -> $"# Now\n\n{activityLine}"
-
-                            match ContentDomain.MarkdownBody.tryCreate "now.body" body with
-                            | Error failure -> return Error(mapValidationFailure failure)
-                            | Ok markdown ->
-                                return
-                                    Ok(
-                                        ContentDomain.Now.create
-                                            title
-                                            markdown
-                                            applicationRepositoryData.RepositoryUpdatedAt
-                                            (repositorySource
-                                                applicationRepositoryData
-                                                sourcePath
-                                                (repositoryRootUrl applicationRepositoryData))
-                                            metadata
-                                    )
-                        | Error _, _, _, _
-                        | _, Error _, _, _
-                        | _, _, Error _, _
-                        | _, _, _, Error _ -> return Error(invalidProblem ())
-            }
 
         let parseRelease (element: JsonElement) : Result<ReleaseData option, string> =
             match requiredBoolean "draft" element, requiredBoolean "prerelease" element with
@@ -1237,6 +1421,162 @@ module GitHubContentClient =
                         return releases |> Result.map (fun values -> values, firstResponse)
             }
 
+        let nowRepositoryLine (repository: GitHubRepositoryData) =
+            let name = repositoryName repository.RepositoryFullName
+            let url = ContentDomain.ContentUrl.value repository.RepositoryUrl
+
+            match repository.RepositoryDescription |> Option.map firstLine with
+            | Some description when not (String.IsNullOrWhiteSpace description) -> $"- [{name}]({url}) — {description}"
+            | _ -> $"- [{name}]({url})"
+
+        let nowReleaseLine (release: ReleaseData) =
+            let name = ContentDomain.ContentTitle.value release.ReleaseName
+            let tag = ContentDomain.ContentTag.value release.ReleaseTag
+
+            let label =
+                if String.Equals(name, tag, StringComparison.Ordinal) then
+                    tag
+                else
+                    $"{name} ({tag})"
+
+            let url = ContentDomain.ContentUrl.value release.ReleaseUrl
+
+            let publishedAt =
+                release.ReleasePublishedAt.ToString("yyyy-MM-dd", Globalization.CultureInfo.InvariantCulture)
+
+            $"- [{label}]({url}) — {publishedAt}"
+
+        let nowActivityLine (kind: string, repository: string) =
+            let url = $"https://github.com/{repository}"
+
+            let action =
+                match kind with
+                | "CommitCommentEvent" -> "Commented on a commit in"
+                | "CreateEvent" -> "Created a branch or tag in"
+                | "DeleteEvent" -> "Deleted a branch or tag in"
+                | "ForkEvent" -> "Forked"
+                | "IssueCommentEvent" -> "Commented on an issue in"
+                | "IssuesEvent" -> "Worked on an issue in"
+                | "PullRequestEvent" -> "Worked on a pull request in"
+                | "PullRequestReviewEvent" -> "Reviewed a pull request in"
+                | "PullRequestReviewCommentEvent" -> "Commented on a pull request in"
+                | "PushEvent" -> "Pushed commits to"
+                | "ReleaseEvent" -> "Published a release in"
+                | "WatchEvent" -> "Starred"
+                | _ -> $"{kind} in"
+
+            $"- {action} [{repository}]({url})"
+
+        let nowSection heading emptyMessage lines =
+            [ ""; $"## {heading}"; "" ]
+            @ if List.isEmpty lines then [ emptyMessage ] else lines
+
+        let getNowFromGitHub cancellationToken =
+            task {
+                let applicationRepository =
+                    GitHubContentConfiguration.applicationRepository configuration
+
+                let! repository = getRepository applicationRepository cancellationToken
+
+                match repository with
+                | Error problem -> return Error problem
+                | Ok applicationRepositoryData ->
+                    let activityUri =
+                        apiUri
+                            $"users/{Uri.EscapeDataString(GitHubContentConfiguration.owner configuration)}/events/public?per_page={ContentDomain.PageItemLimit}"
+
+                    let! activityPayload = getJson activityUri cancellationToken
+                    let! profileReadme = getProfileReadme cancellationToken
+                    let! repositories = getOwnedRepositories cancellationToken
+                    let! releases = getPublishedReleases applicationRepositoryData cancellationToken
+
+                    match activityPayload, profileReadme, repositories, releases with
+                    | Error failure, _, _, _ -> return Error(mapFetchFailure failure)
+                    | _, Error problem, _, _
+                    | _, _, Error problem, _
+                    | _, _, _, Error problem -> return Error problem
+                    | Ok activityResponse, Ok profileReadme, Ok repositories, Ok(releases, _) ->
+                        match
+                            parseRecentActivity activityResponse.PayloadBody,
+                            cacheMetadata activityResponse,
+                            ContentDomain.RepositoryPath.tryCreate "now.path" "events",
+                            ContentDomain.ContentTitle.tryCreate "now.title" "Now"
+                        with
+                        | Ok activity, Ok metadata, Ok sourcePath, Ok title ->
+                            let profileLines =
+                                match profileReadme with
+                                | Some(_, readme) when not (String.IsNullOrWhiteSpace readme.ReadmeBody) ->
+                                    [ ""; "## Profile"; ""; readme.ReadmeBody.Trim() ]
+                                | _ -> []
+
+                            let repositoryLines = repositories |> List.truncate 6 |> List.map nowRepositoryLine
+
+                            let releaseLines = releases |> List.truncate 6 |> List.map nowReleaseLine
+                            let activityLines = activity |> List.map nowActivityLine
+
+                            let body =
+                                [ "# Now" ]
+                                @ profileLines
+                                @ nowSection
+                                    "Recent repositories"
+                                    "No recent public repositories are available."
+                                    repositoryLines
+                                @ nowSection "Recent releases" "No recent releases are available." releaseLines
+                                @ nowSection
+                                    "Recent public activity"
+                                    "No recent public activity is available."
+                                    activityLines
+                                |> String.concat "\n"
+
+                            match ContentDomain.MarkdownBody.tryCreate "now.body" body with
+                            | Error failure -> return Error(mapValidationFailure failure)
+                            | Ok markdown ->
+                                let! preview =
+                                    match profileReadme with
+                                    | Some(profileRepository, readme) ->
+                                        match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
+                                        | Error failure -> Task.FromResult(Error(mapValidationFailure failure))
+                                        | Ok profilePath ->
+                                            renderMarkdownPreview
+                                                profileRepository
+                                                profilePath
+                                                readme.ReadmeRevision
+                                                body
+                                                cancellationToken
+                                    | None ->
+                                        match ContentDomain.RepositoryPath.tryCreate "now.render_path" "README.md" with
+                                        | Error failure -> Task.FromResult(Error(mapValidationFailure failure))
+                                        | Ok renderPath ->
+                                            renderMarkdownPreview
+                                                applicationRepositoryData
+                                                renderPath
+                                                (ContentDomain.ContentRevision.value
+                                                    applicationRepositoryData.RepositoryDefaultBranch)
+                                                body
+                                                cancellationToken
+
+                                match preview with
+                                | Error problem -> return Error problem
+                                | Ok rendered ->
+                                    return
+                                        Ok(
+                                            ContentDomain.Now.create
+                                                title
+                                                markdown
+                                                rendered
+                                                applicationRepositoryData.RepositoryUpdatedAt
+                                                (repositorySource
+                                                    applicationRepositoryData
+                                                    sourcePath
+                                                    (repositoryRootUrl applicationRepositoryData))
+                                                metadata
+                                        )
+                        | Error _, _, _, _
+                        | _, Error _, _, _
+                        | _, _, Error _, _
+                        | _, _, _, Error _ -> return Error(invalidProblem ())
+            }
+
         let parseCommit (element: JsonElement) : Result<ContentDomain.Commit, string> =
             if element.ValueKind <> JsonValueKind.Object then
                 Error "Commit payload must be an object."
@@ -1294,21 +1634,6 @@ module GitHubContentClient =
 
             parseEntries entries []
 
-        let parseGitObjectReference (body: string) : Result<string * ContentDomain.CommitSha, string> =
-            parseJson body (fun root ->
-                if root.ValueKind <> JsonValueKind.Object then
-                    Error "Git reference responses must be objects."
-                else
-                    match property "object" root with
-                    | Some reference when reference.ValueKind = JsonValueKind.Object ->
-                        match requiredString "type" reference, requiredString "sha" reference with
-                        | Ok objectType, Ok sha ->
-                            toDomainResult (ContentDomain.CommitSha.tryCreate "git.object.sha" sha)
-                            |> Result.map (fun parsedSha -> objectType, parsedSha)
-                        | Error message, _
-                        | _, Error message -> Error message
-                    | _ -> Error "Git reference object must be an object.")
-
         let parseCommitReference (field: string) (element: JsonElement) : Result<ContentDomain.CommitSha, string> =
             match property field element with
             | Some reference when reference.ValueKind = JsonValueKind.Object ->
@@ -1341,24 +1666,6 @@ module GitHubContentClient =
                             | Ok("commit", commit) -> return Ok commit
                             | Error _
                             | Ok _ -> return Error(invalidProblem ())
-                    | Ok _ -> return Error(invalidProblem ())
-            }
-
-        let getDefaultBranchHead (repository: GitHubRepositoryData) cancellationToken =
-            task {
-                let fullName = repositoryName repository.RepositoryFullName
-
-                let branch =
-                    Uri.EscapeDataString(ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
-
-                let! reference = getJson (apiUri $"repos/{fullName}/git/ref/heads/{branch}") cancellationToken
-
-                match reference with
-                | Error failure -> return Error(mapFetchFailure failure)
-                | Ok response ->
-                    match parseGitObjectReference response.PayloadBody with
-                    | Ok("commit", commit) -> return Ok commit
-                    | Error _
                     | Ok _ -> return Error(invalidProblem ())
             }
 
@@ -1593,6 +1900,7 @@ module GitHubContentClient =
             (releaseRanges: (ReleaseData * ContentDomain.Commit list) list)
             (unreleased: ContentDomain.Commit list)
             (metadata: ContentDomain.CacheMetadata)
+            (preview: ContentDomain.RenderedHtml)
             =
             let createRelease (release: ReleaseData, commits: ContentDomain.Commit list) =
                 ContentDomain.Release.tryCreate
@@ -1621,7 +1929,58 @@ module GitHubContentClient =
                         metadata
                         unreleased
                         releaseGroups
+                        preview
                     |> Result.mapError mapValidationFailure)
+
+        let changelogMarkdown
+            (releaseRanges: (ReleaseData * ContentDomain.Commit list) list)
+            (unreleased: ContentDomain.Commit list)
+            =
+            let commitLine commit =
+                let summary = commit |> ContentDomain.Commit.summary |> ContentDomain.CommitSummary.value
+                let sha = commit |> ContentDomain.Commit.sha |> ContentDomain.CommitSha.value
+                $"- {summary} ({sha.Substring(0, 7)})"
+
+            let lines = ResizeArray<string>([ "# Changelog"; ""; "## Unreleased" ])
+
+            for commit in unreleased do
+                lines.Add(commitLine commit)
+
+            for release, commits in releaseRanges do
+                let name = ContentDomain.ContentTitle.value release.ReleaseName
+                let tag = ContentDomain.ContentTag.value release.ReleaseTag
+                lines.Add("")
+                lines.Add($"## {name} ({tag})")
+
+                if not (String.IsNullOrEmpty release.ReleaseBody) then
+                    lines.Add("")
+                    lines.Add(release.ReleaseBody)
+
+                for commit in commits do
+                    lines.Add(commitLine commit)
+
+            String.Join("\n", lines)
+
+        let completeChangelog repository releaseRanges unreleased metadata cancellationToken =
+            task {
+                match ContentDomain.RepositoryPath.tryCreate "changelog.render_path" "README.md" with
+                | Error failure -> return Error(mapValidationFailure failure)
+                | Ok renderPath ->
+                    let markdown = changelogMarkdown releaseRanges unreleased
+
+                    let! preview =
+                        renderMarkdownPreview
+                            repository
+                            renderPath
+                            (ContentDomain.ContentRevision.value repository.RepositoryDefaultBranch)
+                            markdown
+                            cancellationToken
+
+                    return
+                        preview
+                        |> Result.bind (fun rendered ->
+                            buildChangelog repository releaseRanges unreleased metadata rendered)
+            }
 
         let getChangelogFromGitHub cancellationToken =
             task {
@@ -1642,7 +2001,9 @@ module GitHubContentClient =
                         | Error problem -> return Error problem
                         | Ok metadata ->
                             match parsedReleases with
-                            | [] -> return buildChangelog applicationRepositoryData [] [] metadata
+                            | [] ->
+                                return!
+                                    completeChangelog applicationRepositoryData [] [] metadata cancellationToken
                             | _ ->
                                 let! boundaries =
                                     resolveReleaseBoundaries applicationRepositoryData parsedReleases cancellationToken
@@ -1687,12 +2048,13 @@ module GitHubContentClient =
                                                 match releaseRanges with
                                                 | Error problem -> return Error problem
                                                 | Ok ranges ->
-                                                    return
-                                                        buildChangelog
+                                                    return!
+                                                        completeChangelog
                                                             applicationRepositoryData
                                                             ranges
                                                             unreleasedCommits
                                                             metadata
+                                                            cancellationToken
             }
 
         { new ContentClient with
@@ -1809,62 +2171,101 @@ module GitHubContentClient =
                                             | Error _, _
                                             | _, Error _ -> return Error(invalidProblem ())
                                             | Ok documentHead, Ok blobSha ->
-                                                return
-                                                    buildDocument
+                                                let! preview =
+                                                    readFileHtml
                                                         input.CatalogRepository
-                                                        documentId
                                                         locator.ManifestDocumentPath
-                                                        locator.ManifestVirtualPath
-                                                        locator.ManifestUpdatedAt
-                                                        response
-                                                        (Some(documentHead, blobSha))
-                                                        markdown
+                                                        revision
+                                                        cancellationToken
+
+                                                match preview with
+                                                | Error problem -> return Error problem
+                                                | Ok rendered ->
+                                                    return
+                                                        buildDocument
+                                                            input.CatalogRepository
+                                                            documentId
+                                                            locator.ManifestDocumentPath
+                                                            locator.ManifestVirtualPath
+                                                            locator.ManifestUpdatedAt
+                                                            response
+                                                            (Some(documentHead, blobSha))
+                                                            markdown
+                                                            rendered
                             else
-                                let! payload =
-                                    readFile input.CatalogRepository locator.ManifestDocumentPath cancellationToken
+                                let! head = getDefaultBranchHead input.CatalogRepository cancellationToken
 
-                                match payload with
-                                | Ok documentPayload ->
-                                    return
-                                        buildDocument
+                                match head with
+                                | Error problem -> return Error problem
+                                | Ok headSha ->
+                                    let revision = ContentDomain.CommitSha.value headSha
+
+                                    let! payload =
+                                        readFileAtRevision
                                             input.CatalogRepository
-                                            documentId
                                             locator.ManifestDocumentPath
-                                            locator.ManifestVirtualPath
-                                            locator.ManifestUpdatedAt
-                                            documentPayload
-                                            None
-                                            documentPayload.PayloadBody
-                                | Error Missing when ContentDomain.ContentId.value documentId = "about" ->
-                                    let! profile = getProfileReadme cancellationToken
+                                            revision
+                                            cancellationToken
 
-                                    match profile with
-                                    | Error problem -> return Error problem
-                                    | Ok None ->
-                                        return
-                                            Error(
-                                                ContentDomain.Problem.create
-                                                    ContentDomain.NotFound
-                                                    "The requested document was not found."
-                                            )
-                                    | Ok(Some(profileRepository, profileBody, profilePayload)) ->
-                                        match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
-                                        | Error failure -> return Error(mapValidationFailure failure)
-                                        | Ok profilePath ->
-                                            let profileMarkdown =
-                                                String.concat "\n" [ "---"; "title = \"About\""; "---"; profileBody ]
+                                    match payload with
+                                    | Ok documentPayload ->
+                                        let! preview =
+                                            readFileHtml
+                                                input.CatalogRepository
+                                                locator.ManifestDocumentPath
+                                                revision
+                                                cancellationToken
 
+                                        match preview with
+                                        | Error problem -> return Error problem
+                                        | Ok rendered ->
                                             return
                                                 buildDocument
-                                                    profileRepository
+                                                    input.CatalogRepository
                                                     documentId
-                                                    profilePath
+                                                    locator.ManifestDocumentPath
                                                     locator.ManifestVirtualPath
                                                     locator.ManifestUpdatedAt
-                                                    profilePayload
+                                                    documentPayload
                                                     None
-                                                    profileMarkdown
-                                | Error failure -> return Error(mapFetchFailure failure)
+                                                    documentPayload.PayloadBody
+                                                    rendered
+                                    | Error Missing when ContentDomain.ContentId.value documentId = "about" ->
+                                        let! profile = getProfileReadme cancellationToken
+
+                                        match profile with
+                                        | Error problem -> return Error problem
+                                        | Ok None ->
+                                            return
+                                                Error(
+                                                    ContentDomain.Problem.create
+                                                        ContentDomain.NotFound
+                                                        "The requested document was not found."
+                                                )
+                                        | Ok(Some(profileRepository, readme)) ->
+                                            match ContentDomain.RepositoryPath.tryCreate "profile.path" "README.md" with
+                                            | Error failure -> return Error(mapValidationFailure failure)
+                                            | Ok profilePath ->
+                                                let profileMarkdown =
+                                                    String.concat
+                                                        "\n"
+                                                        [ "---"
+                                                          "title = \"About\""
+                                                          "---"
+                                                          readme.ReadmeBody ]
+
+                                                return
+                                                    buildDocument
+                                                        profileRepository
+                                                        documentId
+                                                        profilePath
+                                                        locator.ManifestVirtualPath
+                                                        locator.ManifestUpdatedAt
+                                                        readme.ReadmePayload
+                                                        None
+                                                        profileMarkdown
+                                                        readme.ReadmeRenderedHtml
+                                    | Error failure -> return Error(mapFetchFailure failure)
                 }
 
             member _.GetProjects cancellationToken = getProjectsFromGitHub cancellationToken

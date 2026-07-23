@@ -24,7 +24,10 @@ import {
   replaceShellLine,
   type ShellLine,
 } from "./ShellLine.ts";
-import type { VirtualDirectoryPath } from "../filesystem/VirtualFilesystem.ts";
+import type {
+  VirtualAbsolutePath,
+  VirtualDirectoryPath,
+} from "../filesystem/VirtualFilesystem.ts";
 import type {
   ViewerContent,
   ViewerOpenDisposition,
@@ -131,6 +134,20 @@ export type SecretPromptRequest = Readonly<{
   label: string;
 }>;
 
+export type ConfirmationPromptAction = Readonly<{
+  kind: "remove-path";
+  path: VirtualAbsolutePath;
+  recursive: boolean;
+  scope: "overlay" | "managed";
+  removeOverlayAfterManaged: boolean;
+}>;
+
+export type ConfirmationPromptRequest = Readonly<{
+  id: CommandId;
+  label: string;
+  action: ConfirmationPromptAction;
+}>;
+
 export type SecretPromptEffect =
   | Readonly<{
       kind: "secret-submitted";
@@ -140,6 +157,17 @@ export type SecretPromptEffect =
   | Readonly<{
       kind: "secret-cancelled";
       requestId: SecretPromptId;
+    }>;
+
+export type ConfirmationPromptEffect =
+  | Readonly<{
+      kind: "confirmation-submitted";
+      request: ConfirmationPromptRequest;
+      confirmed: boolean;
+    }>
+  | Readonly<{
+      kind: "confirmation-cancelled";
+      request: ConfirmationPromptRequest;
     }>;
 
 export type CommandEffect =
@@ -162,6 +190,10 @@ export type CommandEffect =
   | Readonly<{
       kind: "request-secret-prompt";
       request: SecretPromptRequest;
+    }>
+  | Readonly<{
+      kind: "request-confirmation-prompt";
+      request: ConfirmationPromptRequest;
     }>;
 
 export type CommandFailure =
@@ -291,6 +323,11 @@ export type SecretPromptState = Readonly<{
   line: ShellLine;
 }>;
 
+export type ConfirmationPromptState = Readonly<{
+  request: ConfirmationPromptRequest;
+  line: ShellLine;
+}>;
+
 export type ActiveShellPrompt =
   | Readonly<{
       kind: "command";
@@ -299,6 +336,10 @@ export type ActiveShellPrompt =
   | Readonly<{
       kind: "secret";
       prompt: SecretPromptState;
+    }>
+  | Readonly<{
+      kind: "confirmation";
+      prompt: ConfirmationPromptState;
     }>;
 
 export type SecretPrompt =
@@ -306,6 +347,13 @@ export type SecretPrompt =
   | Readonly<{
       kind: "active";
       prompt: SecretPromptState;
+    }>;
+
+export type ConfirmationPrompt =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{
+      kind: "active";
+      prompt: ConfirmationPromptState;
     }>;
 
 export type HistoryNavigation =
@@ -360,7 +408,8 @@ export type ShellEffect =
       kind: "cancel-command";
       commandId: CommandId;
     }>
-  | SecretPromptEffect;
+  | SecretPromptEffect
+  | ConfirmationPromptEffect;
 
 export type ShellState = Readonly<{
   id: ShellId;
@@ -368,6 +417,7 @@ export type ShellState = Readonly<{
   currentDirectory: VirtualDirectoryPath;
   input: ShellLine;
   secretPrompt: SecretPrompt;
+  confirmationPrompt: ConfirmationPrompt;
   lifecycle: CommandLifecycle;
   history: ReadonlyArray<ShellHistoryEntry>;
   scrollbackLimit: number;
@@ -384,6 +434,7 @@ export type ShellState = Readonly<{
 export type ShellStatus =
   | Readonly<{ kind: "ready" }>
   | Readonly<{ kind: "secret" }>
+  | Readonly<{ kind: "confirmation" }>
   | Readonly<{
       kind: "running";
       commandId: CommandId;
@@ -404,6 +455,7 @@ export type CreateShellStateOptions = Readonly<{
 
 export type CommandSubmission =
   | Readonly<{ kind: "secret" }>
+  | Readonly<{ kind: "confirmation" }>
   | Readonly<{
       kind: "command";
       persistence: CommandHistoryPersistence;
@@ -474,6 +526,10 @@ export type ShellAction =
   | Readonly<{
       kind: "secret-prompt.effect.consumed";
       requestId: SecretPromptId;
+    }>
+  | Readonly<{
+      kind: "confirmation-prompt.effect.consumed";
+      requestId: CommandId;
     }>;
 
 const stableIdentifierPattern = /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
@@ -490,7 +546,7 @@ function assertPositiveLimit(value: number, label: string): void {
   }
 }
 
-function createCommandId(
+export function createCommandId(
   sessionId: ShellSessionId,
   sequence: number,
 ): CommandId {
@@ -534,12 +590,26 @@ function appendCommandHistory(
 function canEditPrompt(state: ShellState): boolean {
   return (
     state.lifecycle.kind === "idle" &&
-    !isPendingSecretPromptEffect(state.pendingEffect)
+    !isPendingInteractivePromptEffect(state.pendingEffect)
   );
 }
 
 function isPendingSecretPromptEffect(effect: ShellEffect): effect is SecretPromptEffect {
   return effect.kind === "secret-submitted" || effect.kind === "secret-cancelled";
+}
+
+function isPendingConfirmationPromptEffect(
+  effect: ShellEffect,
+): effect is ConfirmationPromptEffect {
+  return effect.kind === "confirmation-submitted" ||
+    effect.kind === "confirmation-cancelled";
+}
+
+function isPendingInteractivePromptEffect(
+  effect: ShellEffect,
+): effect is SecretPromptEffect | ConfirmationPromptEffect {
+  return isPendingSecretPromptEffect(effect) ||
+    isPendingConfirmationPromptEffect(effect);
 }
 
 function createSecretPromptValue(value: string): SecretPromptValue {
@@ -551,11 +621,15 @@ function activePrompt(state: ShellState): ActiveShellPrompt {
     return { kind: "secret", prompt: state.secretPrompt.prompt };
   }
 
+  if (state.confirmationPrompt.kind === "active") {
+    return { kind: "confirmation", prompt: state.confirmationPrompt.prompt };
+  }
+
   return { kind: "command", line: state.input };
 }
 
 function promptLine(prompt: ActiveShellPrompt): ShellLine {
-  return prompt.kind === "secret" ? prompt.prompt.line : prompt.line;
+  return prompt.kind === "command" ? prompt.line : prompt.prompt.line;
 }
 
 function updateActivePromptLine(state: ShellState, line: ShellLine): ShellState {
@@ -571,6 +645,17 @@ function updateActivePromptLine(state: ShellState, line: ShellLine): ShellState 
       secretPrompt: {
         kind: "active",
         prompt: { ...state.secretPrompt.prompt, line },
+      },
+      completion: { kind: "idle" },
+    };
+  }
+
+  if (state.confirmationPrompt.kind === "active") {
+    return {
+      ...state,
+      confirmationPrompt: {
+        kind: "active",
+        prompt: { ...state.confirmationPrompt.prompt, line },
       },
       completion: { kind: "idle" },
     };
@@ -594,6 +679,12 @@ function createSecretPromptState(
   };
 }
 
+function createConfirmationPromptState(
+  request: ConfirmationPromptRequest,
+): ConfirmationPromptState {
+  return { request, line: createEmptyShellLine() };
+}
+
 function isMatchingCompletionRequest(
   state: ShellState,
   request: CompletionRequest,
@@ -608,7 +699,11 @@ function isMatchingCompletionRequest(
 }
 
 function browseOlderHistory(state: ShellState): ShellState {
-  if (state.secretPrompt.kind === "active" || state.commandHistory.length === 0) {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.confirmationPrompt.kind === "active" ||
+    state.commandHistory.length === 0
+  ) {
     return state;
   }
 
@@ -639,6 +734,7 @@ function browseOlderHistory(state: ShellState): ShellState {
 function browseNewerHistory(state: ShellState): ShellState {
   if (
     state.secretPrompt.kind === "active" ||
+    state.confirmationPrompt.kind === "active" ||
     state.historyNavigation.kind === "not-browsing"
   ) {
     return state;
@@ -704,6 +800,21 @@ function requestedSecretPrompt(
   return undefined;
 }
 
+function requestedConfirmationPrompt(
+  events: ReadonlyArray<CommandLineEvent>,
+): ConfirmationPromptState | undefined {
+  for (const event of events) {
+    if (
+      event.kind === "effect" &&
+      event.effect.kind === "request-confirmation-prompt"
+    ) {
+      return createConfirmationPromptState(event.effect.request);
+    }
+  }
+
+  return undefined;
+}
+
 function lastClearIndex(events: ReadonlyArray<CommandLineEvent>): number {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
@@ -754,7 +865,11 @@ function selectedCompletionCandidate(
 }
 
 function acceptSelectedCompletion(state: ShellState): ShellState | undefined {
-  if (state.secretPrompt.kind === "active" || state.completion.kind !== "suggestions") {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.confirmationPrompt.kind === "active" ||
+    state.completion.kind !== "suggestions"
+  ) {
     return undefined;
   }
 
@@ -776,7 +891,11 @@ function acceptSelectedCompletion(state: ShellState): ShellState | undefined {
 }
 
 function acceptPromptSuggestionAtLineEnd(state: ShellState): ShellState | undefined {
-  if (state.secretPrompt.kind === "active" || state.input.cursor !== state.input.text.length) {
+  if (
+    state.secretPrompt.kind === "active" ||
+    state.confirmationPrompt.kind === "active" ||
+    state.input.cursor !== state.input.text.length
+  ) {
     return undefined;
   }
 
@@ -873,6 +992,18 @@ export function createSecretPromptRequest(
   return { id, label };
 }
 
+export function createConfirmationPromptRequest(
+  id: CommandId,
+  label: string,
+  action: ConfirmationPromptAction,
+): ConfirmationPromptRequest {
+  if (label.length === 0 || label.trim() !== label) {
+    throw new Error("Confirmation prompt labels must be non-empty trimmed strings.");
+  }
+
+  return { id, label, action };
+}
+
 export function createShellState({
   id,
   sessionId,
@@ -890,6 +1021,7 @@ export function createShellState({
     currentDirectory,
     input: createEmptyShellLine(),
     secretPrompt: { kind: "none" },
+    confirmationPrompt: { kind: "none" },
     lifecycle: { kind: "idle" },
     history: [],
     scrollbackLimit,
@@ -911,6 +1043,7 @@ export function getActiveShellPrompt(state: ShellState): ActiveShellPrompt {
 export function getShellAutosuggestion(state: ShellState): ShellAutosuggestion {
   if (
     state.secretPrompt.kind === "active" ||
+    state.confirmationPrompt.kind === "active" ||
     state.lifecycle.kind !== "idle" ||
     state.completion.kind !== "idle" ||
     state.autosuggestion.kind === "dismissed" ||
@@ -942,6 +1075,10 @@ export function getShellAutosuggestion(state: ShellState): ShellAutosuggestion {
 export function getShellStatus(state: ShellState): ShellStatus {
   if (state.secretPrompt.kind === "active") {
     return { kind: "secret" };
+  }
+
+  if (state.confirmationPrompt.kind === "active") {
+    return { kind: "confirmation" };
   }
 
   switch (state.lifecycle.kind) {
@@ -1132,6 +1269,26 @@ export function reduceShellState(
         };
       }
 
+      if (state.confirmationPrompt.kind === "active") {
+        if (action.submission.kind !== "confirmation") {
+          return state;
+        }
+
+        const { request, line } = state.confirmationPrompt.prompt;
+        const answer = line.text.trim().toLowerCase();
+
+        return {
+          ...state,
+          confirmationPrompt: { kind: "none" },
+          completion: { kind: "idle" },
+          pendingEffect: {
+            kind: "confirmation-submitted",
+            request,
+            confirmed: answer === "y" || answer === "yes",
+          },
+        };
+      }
+
       if (!canEditPrompt(state) || state.input.text.trim().length === 0) {
         return state;
       }
@@ -1172,7 +1329,7 @@ export function reduceShellState(
       };
     }
     case "prompt.cancel":
-      if (isPendingSecretPromptEffect(state.pendingEffect)) {
+      if (isPendingInteractivePromptEffect(state.pendingEffect)) {
         return state;
       }
 
@@ -1187,6 +1344,17 @@ export function reduceShellState(
             kind: "secret-cancelled",
             requestId: request.id,
           },
+        };
+      }
+
+      if (state.confirmationPrompt.kind === "active") {
+        const { request } = state.confirmationPrompt.prompt;
+
+        return {
+          ...state,
+          confirmationPrompt: { kind: "none" },
+          completion: { kind: "idle" },
+          pendingEffect: { kind: "confirmation-cancelled", request },
         };
       }
 
@@ -1213,7 +1381,11 @@ export function reduceShellState(
         autosuggestion: { kind: "available" },
       };
     case "secret.begin":
-      if (!canEditPrompt(state) || state.secretPrompt.kind === "active") {
+      if (
+        !canEditPrompt(state) ||
+        state.secretPrompt.kind === "active" ||
+        state.confirmationPrompt.kind === "active"
+      ) {
         return state;
       }
 
@@ -1298,6 +1470,7 @@ export function reduceShellState(
         ? action.outcome.events
         : action.outcome.events.slice(clearIndex + 1);
       const secretPrompt = requestedSecretPrompt(action.outcome.events);
+      const confirmationPrompt = requestedConfirmationPrompt(action.outcome.events);
       const currentDirectory = changedCurrentDirectory(action.outcome.events);
       const commandHistory = clearsCommandHistory(action.outcome.events)
         ? []
@@ -1331,6 +1504,10 @@ export function reduceShellState(
           secretPrompt === undefined
             ? state.secretPrompt
             : { kind: "active", prompt: secretPrompt },
+        confirmationPrompt:
+          confirmationPrompt === undefined
+            ? state.confirmationPrompt
+            : { kind: "active", prompt: confirmationPrompt },
         nextHistorySequence: state.nextHistorySequence + 1,
         pendingEffect: { kind: "none" },
       };
@@ -1353,12 +1530,23 @@ export function reduceShellState(
           return { ...state, pendingEffect: { kind: "none" } };
         case "secret-submitted":
         case "secret-cancelled":
+        case "confirmation-submitted":
+        case "confirmation-cancelled":
           return state;
       }
     case "secret-prompt.effect.consumed":
       if (
         !isPendingSecretPromptEffect(state.pendingEffect) ||
         state.pendingEffect.requestId !== action.requestId
+      ) {
+        return state;
+      }
+
+      return { ...state, pendingEffect: { kind: "none" } };
+    case "confirmation-prompt.effect.consumed":
+      if (
+        !isPendingConfirmationPromptEffect(state.pendingEffect) ||
+        state.pendingEffect.request.id !== action.requestId
       ) {
         return state;
       }

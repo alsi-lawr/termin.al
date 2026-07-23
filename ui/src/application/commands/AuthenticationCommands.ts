@@ -136,7 +136,11 @@ export function cvViewerContent(markdown: string): ViewerContent {
   return createDocumentViewerContent({
     title: "cv.md",
     presentation: "inline",
-    document: { text: markdown, source: { path: "~/cv.md" } },
+    document: {
+      text: markdown,
+      source: { path: "~/cv.md" },
+      preview: { kind: "markdown" },
+    },
     statsIdentity: { kind: "uncounted" },
   });
 }

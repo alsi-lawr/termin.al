@@ -63,6 +63,7 @@ type PaneTreeViewProps = Readonly<{
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
+  onContentReload: () => void;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
@@ -144,6 +145,7 @@ function PaneLeaf({
   themeController,
   filesystem,
   onFilesystemChange,
+  onContentReload,
   documents,
   projectReadmes,
   readStats,
@@ -191,6 +193,7 @@ function PaneLeaf({
             themeController={themeController}
             filesystem={filesystem}
             onFilesystemChange={onFilesystemChange}
+            onContentReload={onContentReload}
             documents={documents}
             projectReadmes={projectReadmes}
             readStats={readStats}
@@ -337,6 +340,7 @@ export function PaneTreeView({
   themeController,
   filesystem,
   onFilesystemChange,
+  onContentReload,
   documents,
   projectReadmes,
   readStats,
@@ -366,6 +370,7 @@ export function PaneTreeView({
         themeController={themeController}
         filesystem={filesystem}
         onFilesystemChange={onFilesystemChange}
+        onContentReload={onContentReload}
         documents={documents}
         projectReadmes={projectReadmes}
         readStats={readStats}
@@ -423,6 +428,7 @@ export function PaneTreeView({
           themeController={themeController}
           filesystem={filesystem}
           onFilesystemChange={onFilesystemChange}
+          onContentReload={onContentReload}
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}
@@ -460,6 +466,7 @@ export function PaneTreeView({
           themeController={themeController}
           filesystem={filesystem}
           onFilesystemChange={onFilesystemChange}
+          onContentReload={onContentReload}
           documents={documents}
           projectReadmes={projectReadmes}
           readStats={readStats}

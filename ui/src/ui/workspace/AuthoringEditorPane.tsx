@@ -247,7 +247,11 @@ export function AuthoringEditorPane({
         viewer: createDocumentViewerContent({
           title: `${content.draft.virtualPath} preview`,
           presentation: "inline",
-          document: { text: publicationBodyFromSource(source), source: { path: content.draft.virtualPath } },
+          document: {
+            text: publicationBodyFromSource(source),
+            source: { path: content.draft.virtualPath },
+            preview: { kind: "markdown" },
+          },
           statsIdentity: { kind: "uncounted" },
         }),
       });

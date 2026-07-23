@@ -646,7 +646,11 @@ test("keeps protected CV bytes out of retained shell history", () => {
   const viewer = createDocumentViewerContent({
     title: "cv.md",
     presentation: "inline",
-    document: { text: "synthetic protected content", source: { path: "~/cv.md" } },
+    document: {
+      text: "synthetic protected content",
+      source: { path: "~/cv.md" },
+      preview: { kind: "markdown" },
+    },
     statsIdentity: { kind: "uncounted" },
   });
   const settled = applyPaneShellAction({
@@ -945,6 +949,7 @@ test("returns an asynchronous raw pager to its moved shell runtime", async () =>
     document: {
       text: "one\ntwo\nthree",
       source: { path: "~/notes/raw.txt" },
+      preview: { kind: "markdown" },
     },
     statsIdentity: { kind: "uncounted" },
   });
@@ -1091,7 +1096,11 @@ test("reports countable IDs only when inline and split document opens settle suc
   const viewer = createDocumentViewerContent({
     title: "About",
     presentation: "inline",
-    document: { text: "# About", source: { path: "~/about.md" } },
+    document: {
+      text: "# About",
+      source: { path: "~/about.md" },
+      preview: { kind: "markdown" },
+    },
     statsIdentity: { kind: "countable", contentId: aboutId },
   });
   const inline = createRunning();
@@ -1163,7 +1172,11 @@ test("does not report collection roots, uncounted viewers, failed commands, or c
   const uncounted = createDocumentViewerContent({
     title: "Synthetic",
     presentation: "raw-pager",
-    document: { text: "synthetic", source: { path: "synthetic" } },
+    document: {
+      text: "synthetic",
+      source: { path: "synthetic" },
+      preview: { kind: "markdown" },
+    },
     statsIdentity: { kind: "uncounted" },
   });
   const uncountedResult = applyPaneShellAction({

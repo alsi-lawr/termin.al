@@ -59,7 +59,7 @@ manual for a command.
 | Area | Commands |
 | --- | --- |
 | Portfolio | `about`, `skills`, `tools`, `projects`, `blog`, `notes`, `now`, `changelog`, `cv`, `stats` |
-| Files and text | `pwd`, `cd`, `ls`, `tree`, `find`, `cat`, `head`, `tail`, `grep`, `sed`, `echo` |
+| Files and text | `pwd`, `cd`, `ls`, `tree`, `find`, `cat`, `head`, `tail`, `grep`, `sed`, `echo`, `rm` |
 | Presentation | `open`, `less`, `man`, `help`, `history`, `clear`, `theme` |
 | Identity and authoring | `login`, `logout`, `whoami`, `edit` |
 | Workspace | `pane` |

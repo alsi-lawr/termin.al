@@ -8,11 +8,13 @@ import type { MarkdownDocument } from "./MarkdownDocument.ts";
 import { markdownFenceOpening } from "./MarkdownFence.ts";
 import {
   MarkdownRenderer,
+  markdownBlockCount,
   markdownSearchMatches,
 } from "./MarkdownRenderer.ts";
 
 const renderedMarkdown: MarkdownDocument = {
   source: { path: "~/rendered.md" },
+  preview: { kind: "markdown" },
   text: `# Heading
 
 Paragraph with **strong**, *emphasis*, ~~strike~~, \`code\`, https://example.com, and www.example.org.
@@ -89,10 +91,31 @@ test("renders themed safe GFM blocks and inline content", () => {
   assert.doesNotMatch(markup, /data:text/u);
 });
 
+test("renders the GitHub HTML preview while searching the raw Markdown", () => {
+  const document: MarkdownDocument = {
+    source: { path: "~/about.md" },
+    text: "# Profile\n\nA linked image",
+    preview: {
+      kind: "github-html",
+      html: '<h1>Profile</h1><p><a href="https://github.com/alsi-lawr"><img src="https://images.example.com/profile.png" alt="Profile"></a></p>',
+    },
+  };
+
+  const markup = render(document, 0);
+
+  assert.match(markup, /<h1>Profile<\/h1>/u);
+  assert.match(markup, /href="https:\/\/github\.com\/alsi-lawr"/u);
+  assert.match(markup, /src="https:\/\/images\.example\.com\/profile\.png"/u);
+  assert.match(markup, /data-markdown-current="true"/u);
+  assert.equal(markdownBlockCount(document), 1);
+  assert.deepEqual(markdownSearchMatches(document, "linked image"), [0]);
+});
+
 test("preserves allowed Markdown URL destinations", () => {
   const markup = render(
     {
       source: { path: "~/safe-destinations.md" },
+      preview: { kind: "markdown" },
       text: `[Relative](/guide)
 
 [Fragment](#details)
@@ -159,6 +182,7 @@ test("blocks control-obfuscated javascript Markdown links and images", () => {
     const markup = render(
       {
         source: { path: "~/obfuscated-destination.md" },
+        preview: { kind: "markdown" },
         text: `[Unsafe link](${destination})
 
 ![Unsafe image](${destination})`,
@@ -183,6 +207,7 @@ test("blocks protocol-relative, credentialed, malformed, and unsupported Markdow
     const markup = render(
       {
         source: { path: "~/blocked-destination.md" },
+        preview: { kind: "markdown" },
         text: `[Unsafe link](${destination})
 
 ![Unsafe image](${destination})`,
@@ -210,6 +235,7 @@ test("renders direct and supplier Markdown strings identically", async () => {
   const direct: MarkdownDocument = {
     source: { path: supplied.document.source.path },
     text: supplied.document.text,
+    preview: { kind: "markdown" },
   };
 
   assert.equal(render(direct, undefined), render(supplied.document, undefined));
@@ -237,6 +263,7 @@ test("uses GFM closing fences and keeps invalid closers in an unclosed block", (
   const closed = render(
     {
       source: { path: "~/closed.md" },
+      preview: { kind: "markdown" },
       text: "```ql\nselect valid\n  ````` \t\nOutside code",
     },
     undefined,
@@ -248,6 +275,7 @@ test("uses GFM closing fences and keeps invalid closers in an unclosed block", (
   const unclosed = render(
     {
       source: { path: "~/broken.md" },
+      preview: { kind: "markdown" },
       text: "```ql\nselect incomplete\n    ```\n``` trailing text\n~~~\nstill code",
     },
     undefined,

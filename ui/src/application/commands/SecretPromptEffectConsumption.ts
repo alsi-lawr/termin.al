@@ -145,6 +145,10 @@ export function consumePendingSecretPromptEffect({
     return { kind: "not-secret", state, effect };
   }
 
+  if (effect.kind !== "secret-submitted" && effect.kind !== "secret-cancelled") {
+    return { kind: "not-secret", state, effect };
+  }
+
   if (state.kind === "handled" && state.requestId === effect.requestId) {
     return { kind: "duplicate", state };
   }

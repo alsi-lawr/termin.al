@@ -1,5 +1,9 @@
 import type { ContentCorpus } from "../api/ContentClient.ts";
-import type { PublicationClient, PublicationMutation } from "../api/PublicationClient.ts";
+import type {
+  ManagedRemovalResult,
+  PublicationClient,
+  PublicationMutation,
+} from "../api/PublicationClient.ts";
 import type { AuthenticationController } from "../auth/Authentication.ts";
 import {
   normalizeVirtualPath,
@@ -48,6 +52,7 @@ export type AuthoringPublicationResult =
 
 const unavailablePublicationClient: PublicationClient = {
   mutate: () => Promise.resolve({ kind: "failed", message: "Publication failed." }),
+  removeManaged: () => Promise.resolve({ kind: "failed", message: "Removal failed." }),
 };
 
 export class AuthoringService {
@@ -166,6 +171,29 @@ export class AuthoringService {
 
   assets(draft: PublicationDraft): Promise<ReadonlyArray<StagedAsset>> {
     return this.#store.readAssets(draft.repositoryPath);
+  }
+
+  hasManagedRemovalCapability(): boolean {
+    const state = this.#authentication.snapshot();
+    return state.kind === "available" && state.session.kind === "owner";
+  }
+
+  removeManaged(
+    virtualPath: string,
+    recursive: boolean,
+    confirmation: string,
+    signal: AbortSignal,
+  ): Promise<ManagedRemovalResult> {
+    if (!this.hasManagedRemovalCapability()) {
+      return Promise.resolve({ kind: "failed", message: "Removal failed." });
+    }
+
+    return this.#publication.removeManaged(
+      virtualPath,
+      recursive,
+      confirmation,
+      signal,
+    );
   }
 
   async publish(

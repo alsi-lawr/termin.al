@@ -1,6 +1,8 @@
 import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
 import {
   PublicationOperation,
+  type ManagedRemovalRequest,
+  type ManagedRemovalResponse,
   type PublicationRequest as GrpcPublicationRequest,
   type PublicationResponse,
 } from "../generated/browser/browser.ts";
@@ -29,6 +31,10 @@ export type PublicationResult =
     }>
   | Readonly<{ kind: "failed"; message: "Publication failed." }>;
 
+export type ManagedRemovalResult =
+  | Readonly<{ kind: "removed"; sha: string; url: string }>
+  | Readonly<{ kind: "failed"; message: "Removal failed." }>;
+
 export interface PublicationClient {
   mutate(
     mutation: PublicationMutation,
@@ -38,6 +44,12 @@ export interface PublicationClient {
     removalConfirmation: string,
     signal: AbortSignal,
   ): Promise<PublicationResult>;
+  removeManaged(
+    virtualPath: string,
+    recursive: boolean,
+    confirmation: string,
+    signal: AbortSignal,
+  ): Promise<ManagedRemovalResult>;
 }
 
 type PublicationRpcClient = Readonly<{
@@ -45,6 +57,10 @@ type PublicationRpcClient = Readonly<{
     request: GrpcPublicationRequest,
     options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
   ) => Readonly<{ response: Promise<PublicationResponse> }>;
+  removeManaged: (
+    request: ManagedRemovalRequest,
+    options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
+  ) => Readonly<{ response: Promise<ManagedRemovalResponse> }>;
 }>;
 
 const publicationFailed = {
@@ -134,5 +150,25 @@ export class GrpcPublicationClient implements PublicationClient {
           defaultBranch: response.defaultBranch,
           documentBlobSha: response.documentBlobSha,
         };
+  }
+
+  async removeManaged(
+    virtualPath: string,
+    recursive: boolean,
+    confirmation: string,
+    signal: AbortSignal,
+  ): Promise<ManagedRemovalResult> {
+    const session = await this.#sessionClient.read(signal);
+
+    if (session.kind !== "available" || session.session.kind !== "owner") {
+      return { kind: "failed", message: "Removal failed." };
+    }
+
+    const response = await this.#client.removeManaged(
+      { virtualPath, recursive, confirmation },
+      { meta: this.#context.metadata(), abort: signal },
+    ).response;
+
+    return { kind: "removed", sha: response.sha, url: response.url };
   }
 }

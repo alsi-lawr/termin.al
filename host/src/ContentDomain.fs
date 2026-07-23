@@ -347,6 +347,20 @@ module ContentDomain =
 
         let value (MarkdownBody value) = value
 
+    type RenderedHtml = private RenderedHtml of string
+
+    [<RequireQualifiedAccess>]
+    module RenderedHtml =
+        let tryCreate field (value: string) : ValidationResult<RenderedHtml> =
+            if not (hasText value) then
+                invalid field "Rendered document HTML is required."
+            elif value.IndexOf('\u0000') >= 0 then
+                invalid field "Rendered document HTML must not contain a null character."
+            else
+                Ok(RenderedHtml value)
+
+        let value (RenderedHtml value) = value
+
     type ContentSource =
         { Repository: RepositoryName
           Path: RepositoryPath
@@ -705,6 +719,7 @@ module ContentDomain =
               UpdatedAt: Timestamp
               Metadata: ContentDocumentMetadata
               Body: MarkdownBody
+              RenderedHtml: RenderedHtml
               Source: ContentSource
               Base: (ContentRevision * ContentRevision) option
               Cache: CacheMetadata }
@@ -741,6 +756,7 @@ module ContentDomain =
             (baseRevisions: (ContentRevision * ContentRevision) option)
             (cache: CacheMetadata)
             (markdown: string)
+            (renderedHtml: RenderedHtml)
             : ValidationResult<ContentDocument> =
             FrontMatter.tryParse source.Path markdown
             |> Result.bind (fun frontMatter ->
@@ -774,6 +790,7 @@ module ContentDomain =
                           UpdatedAt = updatedAt
                           Metadata = frontMatter.Metadata
                           Body = frontMatter.Body
+                          RenderedHtml = renderedHtml
                           Source = source
                           Base = baseRevisions
                           Cache = cache })
@@ -784,6 +801,7 @@ module ContentDomain =
         let updatedAt document = document.UpdatedAt
         let metadata document = document.Metadata
         let body document = document.Body
+        let renderedHtml document = document.RenderedHtml
         let source document = document.Source
         let baseRevisions document = document.Base
         let cache document = document.Cache
@@ -826,14 +844,19 @@ module ContentDomain =
     type ProjectReadme =
         private
             { Project: Project
-              Body: MarkdownBody }
+              Body: MarkdownBody
+              RenderedHtml: RenderedHtml }
 
     [<RequireQualifiedAccess>]
     module ProjectReadme =
-        let create project body = { Project = project; Body = body }
+        let create project body renderedHtml =
+            { Project = project
+              Body = body
+              RenderedHtml = renderedHtml }
 
         let project readme = readme.Project
         let body readme = readme.Body
+        let renderedHtml readme = readme.RenderedHtml
 
     let private hasDuplicateProjectRepositoryIdentity (entries: Project list) =
         let repositories = HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -1126,12 +1149,13 @@ module ContentDomain =
         private
             { Unreleased: Commit list
               Releases: Release list
+              RenderedHtml: RenderedHtml
               Source: ContentSource
               Cache: CacheMetadata }
 
     [<RequireQualifiedAccess>]
     module Changelog =
-        let tryCreate source cache unreleased releases : ValidationResult<Changelog> =
+        let tryCreate source cache unreleased releases renderedHtml : ValidationResult<Changelog> =
             if List.length unreleased > PageItemLimit || List.length releases > PageItemLimit then
                 invalid "changelog" "Changelog groups cannot exceed 100 items."
             else
@@ -1146,11 +1170,13 @@ module ContentDomain =
                     Ok
                         { Unreleased = unreleased
                           Releases = releases
+                          RenderedHtml = renderedHtml
                           Source = source
                           Cache = cache }
 
         let unreleased changelog = changelog.Unreleased
         let releases changelog = changelog.Releases
+        let renderedHtml changelog = changelog.RenderedHtml
         let source changelog = changelog.Source
         let cache changelog = changelog.Cache
 
@@ -1158,21 +1184,24 @@ module ContentDomain =
         private
             { Title: ContentTitle
               Body: MarkdownBody
+              RenderedHtml: RenderedHtml
               UpdatedAt: Timestamp
               Source: ContentSource
               Cache: CacheMetadata }
 
     [<RequireQualifiedAccess>]
     module Now =
-        let create title body updatedAt source cache =
+        let create title body renderedHtml updatedAt source cache =
             { Title = title
               Body = body
+              RenderedHtml = renderedHtml
               UpdatedAt = updatedAt
               Source = source
               Cache = cache }
 
         let title value = value.Title
         let body value = value.Body
+        let renderedHtml value = value.RenderedHtml
         let updatedAt value = value.UpdatedAt
         let source value = value.Source
         let cache value = value.Cache

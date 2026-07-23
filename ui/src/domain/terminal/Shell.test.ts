@@ -4,9 +4,11 @@ import { demoContentCorpus } from "../../content/DemoContentCorpus.ts";
 import { createCompletionRequest } from "./Completion.ts";
 import {
   resolveVirtualDirectory,
+  resolveVirtualPath,
   virtualHomeDirectory,
 } from "../filesystem/VirtualFilesystem.ts";
 import {
+  createConfirmationPromptRequest,
   createSecretPromptId,
   createSecretPromptRequest,
   createShellDiagnosticId,
@@ -486,6 +488,83 @@ test("keeps secret values out of history, autosuggestion, and retained state", (
   });
 
   assert.equal(JSON.stringify(consumed).includes("sensitive-value"), false);
+});
+
+test("submits visible confirmations with a default negative answer", () => {
+  const running = submit(createState(), "rm about.md");
+
+  if (running.lifecycle.kind !== "running") {
+    assert.fail("Expected the rm command to be running.");
+  }
+
+  const target = resolveVirtualPath(
+    demoContentCorpus.filesystem,
+    virtualHomeDirectory(),
+    "about.md",
+  );
+
+  if (target.kind !== "found") {
+    assert.fail("Expected the confirmation target.");
+  }
+
+  const request = createConfirmationPromptRequest(
+    running.lifecycle.command.id,
+    "Remove ~/about.md? [y/N]",
+    {
+      kind: "remove-path",
+      path: target.path,
+      recursive: false,
+      scope: "overlay",
+      removeOverlayAfterManaged: false,
+    },
+  );
+  const prompted = reduceShellState(running, {
+    kind: "command.settled",
+    commandId: running.lifecycle.command.id,
+    outcome: {
+      kind: "succeeded",
+      events: [
+        {
+          kind: "effect",
+          effect: { kind: "request-confirmation-prompt", request },
+        },
+      ],
+    },
+  });
+  const active = getActiveShellPrompt(prompted);
+
+  assert.equal(active.kind, "confirmation");
+  assert.deepEqual(getShellStatus(prompted), { kind: "confirmation" });
+
+  const declined = reduceShellState(prompted, {
+    kind: "prompt.submit",
+    submission: { kind: "confirmation" },
+  });
+
+  assert.deepEqual(declined.pendingEffect, {
+    kind: "confirmation-submitted",
+    request,
+    confirmed: false,
+  });
+
+  const typed = reduceShellState(prompted, { kind: "input.insert", text: "y" });
+  const confirmed = reduceShellState(typed, {
+    kind: "prompt.submit",
+    submission: { kind: "confirmation" },
+  });
+
+  assert.deepEqual(confirmed.pendingEffect, {
+    kind: "confirmation-submitted",
+    request,
+    confirmed: true,
+  });
+  assert.deepEqual(
+    reduceShellState(confirmed, {
+      kind: "confirmation-prompt.effect.consumed",
+      requestId: request.id,
+    }).pendingEffect,
+    { kind: "none" },
+  );
 });
 
 test("uses one-line native replacements and preserves astral command input", () => {

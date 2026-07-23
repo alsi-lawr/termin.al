@@ -88,6 +88,10 @@ module private BrowserGrpcWire =
             |> ContentDomain.Timestamp.value
 
         response.Body <- value |> ContentDomain.ContentDocument.body |> ContentDomain.MarkdownBody.value
+        response.RenderedHtml <-
+            value
+            |> ContentDomain.ContentDocument.renderedHtml
+            |> ContentDomain.RenderedHtml.value
         response.Source <- value |> ContentDomain.ContentDocument.source |> source
         response.Cache <- value |> ContentDomain.ContentDocument.cache |> cache
 
@@ -150,6 +154,10 @@ module private BrowserGrpcWire =
         response.UpdatedAt <- project |> ContentDomain.Project.updatedAt |> ContentDomain.Timestamp.value
         response.Tags.Add(project |> ContentDomain.Project.tags |> List.map ContentDomain.ContentTag.value)
         response.Readme <- value |> ContentDomain.ProjectReadme.body |> ContentDomain.MarkdownBody.value
+        response.RenderedHtml <-
+            value
+            |> ContentDomain.ProjectReadme.renderedHtml
+            |> ContentDomain.RenderedHtml.value
         response
 
     let commit (value: ContentDomain.Commit) =
@@ -305,6 +313,7 @@ type ContentGrpcService(contentClient: ContentClient) =
                     NowResponse(
                         Title = (value |> ContentDomain.Now.title |> ContentDomain.ContentTitle.value),
                         Body = (value |> ContentDomain.Now.body |> ContentDomain.MarkdownBody.value),
+                        RenderedHtml = (value |> ContentDomain.Now.renderedHtml |> ContentDomain.RenderedHtml.value),
                         UpdatedAt = (value |> ContentDomain.Now.updatedAt |> ContentDomain.Timestamp.value),
                         Source = (value |> ContentDomain.Now.source |> BrowserGrpcWire.source),
                         Cache = (value |> ContentDomain.Now.cache |> BrowserGrpcWire.cache)
@@ -322,6 +331,8 @@ type ContentGrpcService(contentClient: ContentClient) =
                 response.Cache <- ContentDomain.Changelog.cache value |> BrowserGrpcWire.cache
                 response.Unreleased.Add(ContentDomain.Changelog.unreleased value |> List.map BrowserGrpcWire.commit)
                 response.Releases.Add(ContentDomain.Changelog.releases value |> List.map BrowserGrpcWire.release)
+                response.RenderedHtml <-
+                    value |> ContentDomain.Changelog.renderedHtml |> ContentDomain.RenderedHtml.value
                 return response
         }
 
@@ -395,6 +406,32 @@ type PublicationGrpcService(publication: GitHubPublication.Client) =
                                     HeadSha = conflict.HeadSha,
                                     BlobSha = conflict.BlobSha
                                 )
+        }
+
+    override _.RemoveManaged(request: ManagedRemovalRequest, context: ServerCallContext) =
+        task {
+            BrowserGrpcWire.noStore context
+            let httpContext = context.GetHttpContext()
+            let! validMutation = Auth.validateMutation httpContext
+
+            if not validMutation then
+                return raise (BrowserGrpcWire.generic StatusCode.PermissionDenied "Removal failed.")
+            else
+                match! Auth.resolveOwnerAccessToken httpContext with
+                | None -> return raise (BrowserGrpcWire.generic StatusCode.PermissionDenied "Removal failed.")
+                | Some ownerToken ->
+                    let removalRequest: GitHubPublication.ManagedRemovalRequest =
+                        { VirtualPath = request.VirtualPath
+                          Recursive = request.Recursive
+                          Confirmation = request.Confirmation }
+
+                    match! publication.RemoveManaged(ownerToken, removalRequest, context.CancellationToken) with
+                    | GitHubPublication.ManagedRemovalResult.Invalid ->
+                        return raise (BrowserGrpcWire.generic StatusCode.InvalidArgument "Removal failed.")
+                    | GitHubPublication.ManagedRemovalResult.Unavailable ->
+                        return raise (BrowserGrpcWire.generic StatusCode.Unavailable "Removal failed.")
+                    | GitHubPublication.ManagedRemovalResult.Removed commit ->
+                        return ManagedRemovalResponse(Sha = commit.Sha, Url = commit.Url)
         }
 
 type StatisticsGrpcService(runtime: Stats.BrowserRuntime) =

@@ -1,0 +1,43 @@
+RM(1)                           termin.al Manual                           RM(1)
+
+NAME
+     rm - Remove a browser file or owner-managed content.
+
+SYNOPSIS
+     rm [-r] <path>
+
+DESCRIPTION
+     Requests  confirmation  before  removing  one path from termin.al's virtual
+     filesystem. Browser-overlay files may be removed by  any  visitor.  GitHub-
+     backed blog and note files may be removed only by the live owner session.
+
+     Removing  an overlay that shadows managed content reveals the managed file.
+     A managed removal deletes its catalog entry  and  source  document  in  one
+     repository commit; retained asset directories are not deleted.
+
+OPTIONS
+     -r     Remove  one  directory subtree after a single confirmation. Directo‐
+            ries cannot be removed without this option.
+
+CONFIRMATION
+     The prompt displays Remove <path>? [y/N].  Only y or yes confirms  the  re‐
+     moval, ignoring case. An empty or other response cancels it.
+
+FAILURES
+     Exactly  one  literal  path is required. Globs, multiple paths, unsupported
+     options such as -f, the virtual root, locked  files,  generated  documents,
+     project  README  content,  and managed content outside an owner session are
+     rejected.
+
+NOTES
+     There is no force option. Recursive managed  removal  is  committed  atomi‐
+     cally. Browser-overlay removal persists in browser storage only.
+
+EXAMPLES
+     $ rm draft.md
+     $ rm -r notes/archive
+
+SEE ALSO
+     edit(1), ls(1), tree(1)
+
+termin.al                                                                  RM(1)

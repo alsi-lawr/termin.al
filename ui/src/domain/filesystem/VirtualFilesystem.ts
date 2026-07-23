@@ -129,6 +129,13 @@ export type VirtualFileWriteResult =
     }>
   | VirtualPathFailure;
 
+export type VirtualFileRemovalResult =
+  | Readonly<{
+      kind: "removed";
+      overlay: VirtualFilesystemOverlay;
+    }>
+  | Readonly<{ kind: "not-found"; path: VirtualAbsolutePath }>;
+
 export type VirtualPathNormalization =
   | Readonly<{
       kind: "normalized";
@@ -892,6 +899,26 @@ export function writeVirtualFile(
   return { kind: "written", path: normalization.path, overlay };
 }
 
+export function removeVirtualFiles(
+  filesystem: VirtualFilesystem,
+  path: VirtualAbsolutePath,
+  recursive: boolean,
+): VirtualFileRemovalResult {
+  const current = filesystem.writableFiles.current();
+  const prefix = `${path}/`;
+  const files = current.files.filter((file) =>
+    file.path !== path && !(recursive && file.path.startsWith(prefix))
+  );
+
+  if (files.length === current.files.length) {
+    return { kind: "not-found", path };
+  }
+
+  const overlay = { files } satisfies VirtualFilesystemOverlay;
+  filesystem.writableFiles.replace(overlay);
+  return { kind: "removed", overlay };
+}
+
 export function writableVirtualFileText(
   filesystem: VirtualFilesystem,
   path: VirtualAbsolutePath,
@@ -917,7 +944,11 @@ export function createWorkspaceVirtualDocumentSupplier(
         ? { kind: "cancelled" }
         : {
             kind: "available",
-            document: { text: file.text, source: { path: file.path } },
+            document: {
+              text: file.text,
+              source: { path: file.path },
+              preview: { kind: "markdown" },
+            },
             classification: { kind: "page" },
           });
     },

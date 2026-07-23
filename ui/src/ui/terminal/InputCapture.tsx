@@ -19,7 +19,7 @@ import type {
   MobileCtrlKeyInput,
 } from "../workspace/MobileCtrlModifier.ts";
 
-type InputCapturePromptKind = "command" | "secret";
+type InputCapturePromptKind = "command" | "confirmation" | "secret";
 
 export type InputCaptureHandle = Readonly<{
   focus: () => void;
@@ -302,6 +302,8 @@ export const InputCapture = forwardRef<InputCaptureHandle, InputCaptureProps>(
       spellCheck: false,
       "aria-label": props.promptKind === "secret"
         ? "Secret terminal input"
+        : props.promptKind === "confirmation"
+        ? "Terminal confirmation input"
         : "Terminal command input",
     };
 

@@ -26,6 +26,8 @@ function statusMessage(
       return undefined;
     case "secret":
       return "SECRET INPUT";
+    case "confirmation":
+      return "CONFIRMATION";
     case "running":
       return "RUNNING";
     case "cancelling":

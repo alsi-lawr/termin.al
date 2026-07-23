@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ContentClient, ContentCorpus } from "../api/ContentClient.ts";
 
 export type ContentCorpusState =
@@ -12,8 +12,9 @@ const loadingState: ContentCorpusState = { kind: "loading" };
 
 export function useContentCorpus(
   contentClient: ContentClient,
-): ContentCorpusState {
+): Readonly<{ state: ContentCorpusState; reload: () => void }> {
   const [state, setState] = useState<ContentCorpusState>(loadingState);
+  const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -54,7 +55,11 @@ export function useContentCorpus(
     return (): void => {
       controller.abort();
     };
-  }, [contentClient]);
+  }, [contentClient, revision]);
 
-  return state;
+  const reload = useCallback((): void => {
+    setRevision((current) => current + 1);
+  }, []);
+
+  return { state, reload };
 }

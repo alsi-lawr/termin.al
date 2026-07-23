@@ -23,6 +23,7 @@ type WorkspaceProps = Readonly<{
   statsClient: StatsClient;
   authentication: AuthenticationBinding;
   publicationClient: PublicationClient | undefined;
+  onContentReload: () => void;
 }>;
 
 export function Workspace({
@@ -31,6 +32,7 @@ export function Workspace({
   statsClient,
   authentication,
   publicationClient,
+  onContentReload,
 }: WorkspaceProps): ReactElement {
   const stats = useWorkspaceStats(statsClient, applicationMode);
   const controller = usePaneWorkspace(
@@ -86,6 +88,7 @@ export function Workspace({
             themeController={theme.controller}
             filesystem={controller.filesystem}
             onFilesystemChange={controller.onFilesystemChange}
+            onContentReload={onContentReload}
             documents={corpus.documents}
             projectReadmes={corpus.projectReadmes}
             readStats={stats.readStats}

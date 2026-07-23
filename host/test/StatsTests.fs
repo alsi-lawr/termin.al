@@ -86,6 +86,8 @@ module StatsTests =
                 project
                 (ContentDomain.MarkdownBody.tryCreate "test.project.readme" "# Sample Project"
                  |> requireValid)
+                (ContentDomain.RenderedHtml.tryCreate "test.project.rendered_html" "<h1>Sample Project</h1>"
+                 |> requireValid)
 
         let projects =
             ContentDomain.Projects.tryCreate (source ()) (cache ()) [ projectReadme ]

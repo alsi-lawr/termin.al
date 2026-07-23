@@ -555,15 +555,24 @@ function reachesInteractionBoundary(outcome: CommandOutcome): boolean {
     (effect) =>
       effect.kind === "open-viewer" ||
       effect.kind === "open-authoring-editor" ||
-      effect.kind === "request-secret-prompt",
+      effect.kind === "request-secret-prompt" ||
+      effect.kind === "request-confirmation-prompt",
   );
 }
 
 function expandCommandArguments(
   command: ParsedCommand,
+  definition: CommandDefinition,
   currentDirectory: VirtualDirectoryPath,
   options: ExecuteCommandLineOptions,
 ): ExpandedCommandArguments {
+  if (definition.argumentExpansion === "literal") {
+    return {
+      arguments: command.arguments.map((argument) => argument.value),
+      optionTerminator: command.optionTerminator,
+    };
+  }
+
   const expansions = command.arguments.map((argument) => {
     const matches = expandVirtualPathGlob({
       filesystem: options.registry.filesystem,
@@ -597,7 +606,12 @@ async function executeCommand(
   currentDirectory: VirtualDirectoryPath,
   options: ExecuteCommandLineOptions,
 ): Promise<CommandOutcome> {
-  const expanded = expandCommandArguments(command, currentDirectory, options);
+  const expanded = expandCommandArguments(
+    command,
+    definition,
+    currentDirectory,
+    options,
+  );
 
   try {
     return await definition.execute(
@@ -609,6 +623,7 @@ async function executeCommand(
         stdin,
       },
       {
+        commandId: options.request.id,
         shellId: options.request.shellId,
         sessionId: options.request.sessionId,
         currentDirectory,

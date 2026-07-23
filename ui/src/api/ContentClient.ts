@@ -89,6 +89,7 @@ type ContentProject = Readonly<{
   url: string;
   tags: ReadonlyArray<string>;
   readme: string;
+  renderedHtml: string;
 }>;
 
 type ContentProjects = Readonly<{
@@ -98,6 +99,7 @@ type ContentProjects = Readonly<{
 
 type ContentNow = Readonly<{
   body: string;
+  renderedHtml: string;
   updatedAt: string;
   cache: ContentCache;
 }>;
@@ -118,15 +120,17 @@ type ContentRelease = Readonly<{
 type ContentChangelog = Readonly<{
   unreleased: ReadonlyArray<ContentCommit>;
   releases: ReadonlyArray<ContentRelease>;
+  renderedHtml: string;
   cache: ContentCache;
 }>;
 
 type ContentDocument =
-  | Readonly<{ kind: "page"; path: string; body: string }>
+  | Readonly<{ kind: "page"; path: string; body: string; renderedHtml: string }>
   | Readonly<{
       kind: "blog" | "note";
       path: string;
       body: string;
+      renderedHtml: string;
       slug: string;
       title: string;
       summary: string;
@@ -146,6 +150,7 @@ type DerivedDocument = Readonly<{
   path: string;
   updatedAt: string;
   text: string;
+  renderedHtml: string;
 }>;
 
 type ContentRpcClient = Readonly<{
@@ -174,6 +179,14 @@ type ContentRpcClient = Readonly<{
     options: Readonly<{ meta: RpcMetadata; abort: AbortSignal }>,
   ) => Readonly<{ response: Promise<ChangelogResponse> }>;
 }>;
+
+function requiredMessage<Value>(value: Value | undefined): Value {
+  if (value === undefined) {
+    throw new Error("The content API response is incomplete.");
+  }
+
+  return value;
+}
 
 function grpcCatalogEntryKind(kind: CatalogEntryKind): "directory" | "file" | "locked-file" {
   switch (kind) {
@@ -243,6 +256,7 @@ function mapProject(value: GrpcProject): ContentProject {
     url: value.url,
     tags: value.tags,
     readme: value.readme,
+    renderedHtml: value.renderedHtml,
   };
 }
 
@@ -263,19 +277,25 @@ function mapRelease(value: GrpcRelease): ContentRelease {
 function mapDocument(value: DocumentResponse): ContentDocument {
   switch (value.kind) {
     case DocumentKind.PAGE:
-      return { kind: "page", path: value.path, body: value.body };
+      return {
+        kind: "page",
+        path: value.path,
+        body: value.body,
+        renderedHtml: value.renderedHtml,
+      };
     case DocumentKind.BLOG:
     case DocumentKind.NOTE:
       return {
         kind: value.kind === DocumentKind.BLOG ? "blog" : "note",
         path: value.path,
         body: value.body,
+        renderedHtml: value.renderedHtml,
         slug: value.slug,
         title: value.title,
         summary: value.summary,
         updatedAt: value.updatedAt,
         tags: value.tags,
-        base: value.base!,
+        base: requiredMessage(value.base),
       };
     case DocumentKind.UNSPECIFIED:
     default:
@@ -323,12 +343,14 @@ function derivedDocuments(
       path: "~/now.md",
       updatedAt: now.updatedAt,
       text: now.body,
+      renderedHtml: now.renderedHtml,
     },
     {
       handle: "changelog-api",
       path: "~/changelog.md",
       updatedAt: changelog.cache.fetchedAt,
       text: changelogDocumentText(changelog),
+      renderedHtml: changelog.renderedHtml,
     },
   ];
 }
@@ -347,6 +369,7 @@ function createProjectReadmes(
     document: {
       text: project.readme,
       source: { path: project.url },
+      preview: { kind: "github-html", html: project.renderedHtml },
     },
   }));
 }
@@ -406,6 +429,7 @@ function virtualCatalog(
     documentsByHandle.set(document.handle, {
       text: document.text,
       source: { path: document.path },
+      preview: { kind: "github-html", html: document.renderedHtml },
     });
   }
 
@@ -460,7 +484,7 @@ export class GrpcContentClient implements ContentClient {
       kind: "available",
       value: {
         entries: response.entries.map(mapCatalogEntry),
-        cache: mapCache(response.cache!),
+        cache: mapCache(requiredMessage(response.cache)),
       },
     };
   }
@@ -496,7 +520,7 @@ export class GrpcContentClient implements ContentClient {
       kind: "available",
       value: {
         projects: response.projects.map(mapProject),
-        cache: mapCache(response.cache!),
+        cache: mapCache(requiredMessage(response.cache)),
       },
     };
   }
@@ -521,8 +545,9 @@ export class GrpcContentClient implements ContentClient {
       kind: "available",
       value: {
         body: response.body,
+        renderedHtml: response.renderedHtml,
         updatedAt: response.updatedAt,
-        cache: mapCache(response.cache!),
+        cache: mapCache(requiredMessage(response.cache)),
       },
     };
   }
@@ -548,7 +573,8 @@ export class GrpcContentClient implements ContentClient {
       value: {
         unreleased: response.unreleased.map(mapCommit),
         releases: response.releases.map(mapRelease),
-        cache: mapCache(response.cache!),
+        renderedHtml: response.renderedHtml,
+        cache: mapCache(requiredMessage(response.cache)),
       },
     };
   }
@@ -654,9 +680,10 @@ export class GrpcContentClient implements ContentClient {
 
         switch (result.kind) {
           case "available": {
-            const document = {
+            const document: MarkdownDocument = {
               text: result.value.body,
               source: { path: result.value.path },
+              preview: { kind: "github-html", html: result.value.renderedHtml },
             };
 
             if (result.value.kind === "page") {

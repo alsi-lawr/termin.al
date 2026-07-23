@@ -71,6 +71,7 @@ function createDemoDocumentSupplier(
           document: {
             text: document.text,
             source: { path: document.path },
+            preview: { kind: "markdown" },
           },
           classification: { kind: "page" },
         });
@@ -81,6 +82,7 @@ function createDemoDocumentSupplier(
         document: {
           text: document.text,
           source: { path: document.path },
+          preview: { kind: "markdown" },
         },
         classification: {
           kind: "publication",
@@ -176,6 +178,7 @@ const projectReadmes = [
     document: {
       text: projectReadmeText,
       source: { path: "https://example.com/demo/sample-project" },
+      preview: { kind: "markdown" },
     },
   },
 ] satisfies ReadonlyArray<ProjectReadme>;

@@ -69,6 +69,7 @@ test("renders less as raw text with an inverse prompt above mobile controls", ()
     document: {
       text,
       source: { path: "~/notes/sample-note.md" },
+      preview: { kind: "markdown" },
     },
     statsIdentity: {
       kind: "countable",
@@ -119,6 +120,7 @@ test("renders complete vi manpages in the native read-only Vim editor", () => {
     document: {
       text,
       source: { path: "man/ls.1" },
+      preview: { kind: "markdown" },
     },
     statsIdentity: { kind: "uncounted" },
   });
@@ -176,7 +178,11 @@ test("renders hierarchical collections as terminal rows with explicit touch cont
             tags: ["typescript"],
             metadata: "alsi-lawr/termin.al",
             documentTitle: "termin.al README",
-            document: { text: "# termin.al", source: { path: "~/projects/termin.al" } },
+            document: {
+              text: "# termin.al",
+              source: { path: "~/projects/termin.al" },
+              preview: { kind: "markdown" },
+            },
             repositoryUrl: "https://github.com/alsi-lawr/termin.al",
             statsIdentity: {
               kind: "countable",

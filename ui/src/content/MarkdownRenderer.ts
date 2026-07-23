@@ -855,6 +855,10 @@ export function markdownSearchMatches(
     return [];
   }
 
+  if (document.preview.kind === "github-html") {
+    return document.text.toLowerCase().includes(normalizedQuery) ? [0] : [];
+  }
+
   const matches: Array<number> = [];
 
   for (const [index, block] of parseBlocks(document.text).entries()) {
@@ -867,6 +871,10 @@ export function markdownSearchMatches(
 }
 
 export function markdownBlockCount(document: MarkdownDocument): number {
+  if (document.preview.kind === "github-html") {
+    return 1;
+  }
+
   return parseBlocks(document.text).length;
 }
 
@@ -879,6 +887,23 @@ export function MarkdownRenderer({
   document,
   activeBlockIndex,
 }: MarkdownRendererProps): ReactElement {
+  if (document.preview.kind === "github-html") {
+    return createElement(
+      "article",
+      {
+        className: "min-w-0 pb-4 text-text-bright",
+        "aria-label": `GitHub-rendered Markdown from ${document.source.path}`,
+      },
+      createElement("div", {
+        className: activeBlockIndex === 0 ? "rounded ring-1 ring-ui-search" : undefined,
+        "data-markdown-block-index": 0,
+        "data-markdown-current": activeBlockIndex === 0 ? "true" : undefined,
+        "aria-current": activeBlockIndex === 0 ? "true" : undefined,
+        dangerouslySetInnerHTML: { __html: document.preview.html },
+      }),
+    );
+  }
+
   return createElement(
     "article",
     {

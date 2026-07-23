@@ -8,6 +8,7 @@ import {
   createVirtualFilesystem,
   createWorkspaceVirtualDocumentSupplier,
   createWorkspaceVirtualFilesystem,
+  writeVirtualFile,
   virtualHomeDirectory,
   type VirtualCorpusCatalogEntry,
   type VirtualDirectoryPath,
@@ -119,7 +120,11 @@ function createGrepFixture(
 
       return Promise.resolve({
         kind: "available",
-        document: { text: file.text, source: { path: file.path } },
+        document: {
+          text: file.text,
+          source: { path: file.path },
+          preview: { kind: "markdown" },
+        },
         classification: { kind: "page" },
       });
     },
@@ -345,6 +350,7 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
       "ls",
       "cd",
       "cat",
+      "rm",
       "pwd",
       "tree",
       "find",
@@ -360,6 +366,74 @@ test("registers the accepted read-only GNU-like corpus without list", () => {
     ],
   );
   assert.equal(resolveCommand(registry, "list").kind, "missing");
+});
+
+test("prompts before overlay and owner-managed removals and rejects protected paths", async () => {
+  const filesystem = createWorkspaceVirtualFilesystem(demoContentCorpus.filesystem);
+  const overlay = writeVirtualFile(
+    filesystem,
+    virtualHomeDirectory(),
+    "about.md",
+    "browser shadow",
+  );
+
+  if (overlay.kind !== "written") {
+    assert.fail("Expected the removable browser overlay fixture.");
+  }
+
+  const registry = createCommandRegistry({
+    filesystem,
+    documents: demoContentCorpus.documents,
+    onFilesystemChange: () => {},
+    commands: createReadOnlyCommandDefinitions({
+      filesystem,
+      documents: demoContentCorpus.documents,
+      manpages: generatedManpages,
+      recursiveEntryLimit: 100,
+      managedRemoval: { hasManagedRemovalCapability: () => true },
+    }),
+  });
+  const overlayOutcome = succeeded(await execute("rm about.md", registry));
+  const overlayPrompt = overlayOutcome.effects[0];
+
+  assert.equal(overlayPrompt?.kind, "request-confirmation-prompt");
+  if (overlayPrompt?.kind !== "request-confirmation-prompt") {
+    assert.fail("Expected an overlay removal confirmation.");
+  }
+  assert.equal(overlayPrompt.request.label, "Remove ~/about.md? [y/N]");
+  assert.equal(overlayPrompt.request.action.scope, "overlay");
+
+  const managedOutcome = succeeded(
+    await execute(
+      "rm notes/field-notes/filesystems/sample-note.md",
+      registry,
+    ),
+  );
+  const managedPrompt = managedOutcome.effects[0];
+
+  assert.equal(managedPrompt?.kind, "request-confirmation-prompt");
+  if (managedPrompt?.kind !== "request-confirmation-prompt") {
+    assert.fail("Expected a managed removal confirmation.");
+  }
+  assert.equal(managedPrompt.request.action.scope, "managed");
+  assert.equal(managedPrompt.request.action.recursive, false);
+
+  assert.equal(
+    failureMessage(await execute("rm cv.md", registry)),
+    "Access is locked: ~/cv.md",
+  );
+  assert.equal(
+    failureMessage(await execute("rm notes", createRegistry())),
+    "Cannot remove a directory without -r: ~/notes",
+  );
+  assert.equal(
+    failureMessage(await execute("rm -r notes", createRegistry())),
+    "Managed content removal requires the live owner session.",
+  );
+  assert.equal(
+    failureMessage(await execute("rm '*.md'", registry)),
+    "Path not found: ~/*.md",
+  );
 });
 
 test("derives explicit credential-argument persistence policy from parsed commands", () => {
@@ -1185,7 +1259,11 @@ test("cancellation discards accumulated grep and sed output", async () => {
 
       return Promise.resolve({
         kind: "available",
-        document: { text: "hit", source: { path: "~/a.txt" } },
+        document: {
+          text: "hit",
+          source: { path: "~/a.txt" },
+          preview: { kind: "markdown" },
+        },
         classification: { kind: "page" },
       });
     },

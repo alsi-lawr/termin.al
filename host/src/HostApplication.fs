@@ -88,7 +88,7 @@ module HostApplication =
 
         application.Use(fun (context: HttpContext) (next: RequestDelegate) ->
             context.Response.Headers.ContentSecurityPolicy <-
-                "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https://github.com https://*.githubusercontent.com; object-src 'none'; script-src 'self'; style-src 'self'"
+                "default-src 'none'; base-uri 'none'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; img-src 'self' data: blob: https:; object-src 'none'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'"
 
             context.Response.Headers["Permissions-Policy"] <-
                 "camera=(), geolocation=(), microphone=(), payment=(), usb=()"

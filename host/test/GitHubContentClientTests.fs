@@ -21,6 +21,15 @@ module GitHubContentClientTests =
           IfNoneMatch: string option
           Authorization: string option }
 
+    let private respondWithRenderedMarkdown request respond =
+        if request.PathAndQuery = "/markdown" then
+            new HttpResponseMessage(
+                HttpStatusCode.OK,
+                Content = new StringContent("<h1>Rendered Markdown</h1>", Encoding.UTF8, "text/html")
+            )
+        else
+            respond request
+
     type private FakeHandler(respond: Request -> HttpResponseMessage) =
         inherit HttpMessageHandler()
 
@@ -53,7 +62,7 @@ module GitHubContentClientTests =
                         Some(request.Headers.Authorization.ToString()) }
 
             lock requestsLock (fun () -> requests.Add captured)
-            Task.FromResult(respond captured)
+            Task.FromResult(respondWithRenderedMarkdown captured respond)
 
     type private RequestGate() =
         let requestEntered =
@@ -105,9 +114,9 @@ module GitHubContentClientTests =
                 task {
                     gate.Enter()
                     do! gate.WaitForRelease()
-                    return respond captured
+                    return respondWithRenderedMarkdown captured respond
                 }
-            | None -> Task.FromResult(respond captured)
+            | None -> Task.FromResult(respondWithRenderedMarkdown captured respond)
 
     type private CancelledHandler() =
         inherit HttpMessageHandler()
@@ -615,11 +624,12 @@ module GitHubContentClientTests =
 
     let private testDifferentKeysRemainParallel () =
         let contentRepositoryPath = "/repos/example-owner/content"
+        let headSha = String('a', 40)
 
         let catalogPath =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
-        let documentPath = "/repos/example-owner/content/contents/content/about.md?ref=main"
+        let documentPath = $"/repos/example-owner/content/contents/content/about.md?ref={headSha}"
 
         let projectsPath =
             "/repos/example-owner/content/contents/content/projects.json?ref=main"
@@ -640,6 +650,8 @@ module GitHubContentClientTests =
                             (repositoryJson "example-owner/content" "\"Content repository\"")
                             (Some "\"content-v1\"")
                     | path when path = catalogPath -> response HttpStatusCode.OK catalogManifest (Some "\"catalog-v1\"")
+                    | "/repos/example-owner/content/git/ref/heads/main" ->
+                        response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
                     | path when path = documentPath ->
                         response HttpStatusCode.OK "---\ntitle = \"About\"\n---\n# About\n" (Some "\"about-v1\"")
                     | path when path = projectsPath ->
@@ -679,7 +691,7 @@ module GitHubContentClientTests =
         let requests = handler.Requests
 
         if
-            countRequests documentPath requests <> 1
+            countRequests documentPath requests <> 2
             || countRequests projectsPath requests <> 1
         then
             failwith "Different cache keys must retain independent parallel upstream requests."
@@ -710,12 +722,18 @@ module GitHubContentClientTests =
                 | "/repos/example-owner/content/git/ref/heads/main" ->
                     response HttpStatusCode.OK (gitObjectJson "commit" headSha) None
                 | path when path = $"/repos/example-owner/content/contents/blog/validated-metadata.md?ref={headSha}" ->
-                    let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
+                    if request.Accept = "application/vnd.github.html+json" then
+                        response
+                            HttpStatusCode.OK
+                            "<p><a href=\"../assets/diagram.svg\">Diagram</a><img src=\"images/cover.png\"></p>"
+                            None
+                    else
+                        let encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(markdown))
 
-                    response
-                        HttpStatusCode.OK
-                        $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}"
-                        None
+                        response
+                            HttpStatusCode.OK
+                            $"{{\"sha\":\"{blobSha}\",\"encoding\":\"base64\",\"content\":\"{encoded}\"}}"
+                            None
                 | _ -> response HttpStatusCode.NotFound "" None)
 
         let createdHttpClient, contentClient =
@@ -775,6 +793,27 @@ module GitHubContentClientTests =
                 ->
                 ()
             | _ -> failwith "Publication reads must carry the current head and existing blob SHA."
+
+        let renderedHtml =
+            document
+            |> ContentDomain.ContentDocument.renderedHtml
+            |> ContentDomain.RenderedHtml.value
+
+        if
+            not (
+                renderedHtml.Contains(
+                    $"href=\"https://github.com/example-owner/content/blob/{headSha}/assets/diagram.svg\"",
+                    StringComparison.Ordinal
+                )
+            )
+            || not (
+                renderedHtml.Contains(
+                    $"src=\"https://raw.githubusercontent.com/example-owner/content/{headSha}/blog/images/cover.png\"",
+                    StringComparison.Ordinal
+                )
+            )
+        then
+            failwith "GitHub-rendered document links and images must resolve against their repository path."
 
     let private testPublicationFrontMatterContract () =
         let path =
@@ -883,16 +922,16 @@ module GitHubContentClientTests =
             "/repos/example-owner/content/contents/content/catalog.json?ref=main"
 
         let ordinalFirstTieDocumentPath =
-            "/repos/example-owner/content/contents/content/cache-document-001.md?ref=main"
+            $"/repos/example-owner/content/contents/content/cache-document-001.md?ref={cacheHead}"
 
         let ordinalSecondTieDocumentPath =
-            "/repos/example-owner/content/contents/content/cache-document-002.md?ref=main"
+            $"/repos/example-owner/content/contents/content/cache-document-002.md?ref={cacheHead}"
 
         let projectsPath =
             "/repos/example-owner/content/contents/content/projects.json?ref=main"
 
         let documents =
-            [ 1 .. ContentDomain.PageItemLimit - 1 ]
+            [ 1..41 ]
             |> List.map (fun index ->
                 let id = cacheDocumentId index
                 let path = cacheDocumentPath index
@@ -912,7 +951,7 @@ module GitHubContentClientTests =
 
         let documentResponses =
             documents
-            |> List.map (fun (_, path, body) -> $"/repos/example-owner/content/contents/{path}?ref=main", body)
+            |> List.map (fun (_, path, body) -> $"/repos/example-owner/content/contents/{path}?ref={cacheHead}", body)
             |> Map.ofList
 
         let cacheReleaseResponses =
@@ -945,6 +984,7 @@ module GitHubContentClientTests =
 
         let releasesPath = "/repos/example-owner/application/releases?per_page=100"
         let releasesPageTwo = "/repos/example-owner/application/releases?page=2"
+        let releasesPageThree = "/repos/example-owner/application/releases?page=3"
         let ownedRepositoriesPageTwo = "/users/example-owner/repos?page=2"
         let comparisonPrefix = "/repos/example-owner/application/compare/"
 
@@ -967,6 +1007,12 @@ module GitHubContentClientTests =
                         cacheReleases
                         (Some "\"cache-releases\"")
                         $"https://api.github.com{releasesPageTwo}"
+                elif stage = 2 && path = releasesPageTwo then
+                    linkResponse
+                        HttpStatusCode.OK
+                        "[]"
+                        (Some "\"cache-releases-page-two\"")
+                        $"https://api.github.com{releasesPageThree}"
                 elif request.IfNoneMatch.IsSome then
                     response HttpStatusCode.NotModified "" None
                 else
@@ -984,6 +1030,8 @@ module GitHubContentClientTests =
                             response HttpStatusCode.OK cacheCatalogManifest (Some "\"cache-catalog\"")
                         | "/repos/example-owner/content/contents/content/projects.json?ref=main" ->
                             response HttpStatusCode.OK emptyProjectsManifest (Some "\"cache-projects\"")
+                        | "/repos/example-owner/content/git/ref/heads/main" ->
+                            response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-content-head\"")
                         | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                             linkResponse
                                 HttpStatusCode.OK
@@ -1002,23 +1050,32 @@ module GitHubContentClientTests =
                                 HttpStatusCode.OK
                                 (repositoryJson "example-owner/profile" "\"Profile repository\"")
                                 (Some "\"cache-profile\"")
+                        | "/repos/example-owner/profile/git/ref/heads/main" ->
+                            response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-profile-head\"")
                         | "/users/example-owner/events/public?per_page=100" ->
                             response HttpStatusCode.OK "[]" (Some "\"cache-activity\"")
                         | "/repos/example-owner/application/readme?ref=main" ->
                             response HttpStatusCode.OK "# Application" (Some "\"cache-application-readme\"")
-                        | "/repos/example-owner/profile/readme?ref=main" ->
+                        | profileReadme when profileReadme = $"/repos/example-owner/profile/readme?ref={cacheHead}" ->
                             response HttpStatusCode.OK "# Profile" (Some "\"cache-profile-readme\"")
                         | "/repos/example-owner/application/releases?per_page=100" ->
                             response HttpStatusCode.OK cacheReleases (Some "\"cache-releases\"")
                         | "/repos/example-owner/application/releases?page=2" ->
                             response HttpStatusCode.OK "[]" (Some "\"cache-releases-page-two\"")
+                        | "/repos/example-owner/application/releases?page=3" ->
+                            response HttpStatusCode.OK "[]" (Some "\"cache-releases-page-three\"")
                         | "/repos/example-owner/application/git/ref/heads/main" ->
                             response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-head\"")
                         | projectReadme when
                             projectReadme.StartsWith("/repos/example-owner/cache-project-", StringComparison.Ordinal)
-                            && projectReadme.EndsWith("/readme?ref=main", StringComparison.Ordinal)
+                            && projectReadme.EndsWith($"/readme?ref={cacheHead}", StringComparison.Ordinal)
                             ->
                             response HttpStatusCode.OK "# Cache project" (Some "\"cache-project-readme\"")
+                        | projectHead when
+                            projectHead.StartsWith("/repos/example-owner/cache-project-", StringComparison.Ordinal)
+                            && projectHead.EndsWith("/git/ref/heads/main", StringComparison.Ordinal)
+                            ->
+                            response HttpStatusCode.OK (gitObjectJson "commit" cacheHead) (Some "\"cache-project-head\"")
                         | comparison when comparison.StartsWith(comparisonPrefix, StringComparison.Ordinal) ->
                             let range =
                                 comparison
@@ -1093,8 +1150,8 @@ module GitHubContentClientTests =
         let initialPayloadRequests =
             handler.Requests |> List.filter (fun request -> request.IfNoneMatch.IsNone)
 
-        if initialPayloadRequests |> List.length <> 512 then
-            failwithf "Expected 512 retained payload requests, but received %d." (initialPayloadRequests |> List.length)
+        if initialPayloadRequests |> List.length <> 511 then
+            failwithf "Expected 511 retained payload requests, but received %d." (initialPayloadRequests |> List.length)
 
         stage <- 1
         now <- now.AddMinutes(6.0)
@@ -1214,6 +1271,8 @@ module GitHubContentClientTests =
         | _ -> failwith "Fractional catalog byte sizes must not pass the host contract."
 
     let private testProjectsPaginationAndReadmes () =
+        let projectHead = String('c', 40)
+
         match ContentDomain.ProjectManifest.tryParse projectsManifest with
         | Ok _ -> ()
         | Error failure -> failwithf "Projects fixture is invalid: %s" failure.Message
@@ -1238,7 +1297,9 @@ module GitHubContentClientTests =
                         HttpStatusCode.OK
                         (repositoryJson "Example-Owner/Curated-Project" "\"Curated project summary\"")
                         None
-                | "/repos/Example-Owner/Curated-Project/readme?ref=main" ->
+                | "/repos/Example-Owner/Curated-Project/git/ref/heads/main" ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" projectHead) None
+                | curatedReadme when curatedReadme = $"/repos/Example-Owner/Curated-Project/readme?ref={projectHead}" ->
                     response HttpStatusCode.OK "# Curated Project README\n\nThis is the supplied curated README." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     linkResponse
@@ -1250,7 +1311,12 @@ module GitHubContentClientTests =
                 | "/users/example-owner/repos?page=2" -> response HttpStatusCode.OK repositoryRows None
                 | path when
                     path.StartsWith("/repos/example-owner/recent-", StringComparison.Ordinal)
-                    && path.EndsWith("/readme?ref=main", StringComparison.Ordinal)
+                    && path.EndsWith("/git/ref/heads/main", StringComparison.Ordinal)
+                    ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" projectHead) None
+                | path when
+                    path.StartsWith("/repos/example-owner/recent-", StringComparison.Ordinal)
+                    && path.EndsWith($"/readme?ref={projectHead}", StringComparison.Ordinal)
                     ->
                     response
                         HttpStatusCode.OK
@@ -1318,6 +1384,8 @@ module GitHubContentClientTests =
             failwith "Repository pagination must follow the GitHub Link next relation."
 
     let private testProjectsDeduplicateCaseInsensitiveRepositoryIdentity () =
+        let projectHead = String('c', 40)
+
         let caseOnlyCandidate =
             repositoryJson "Example-Owner/Curated-Project" "\"Repository summary\""
 
@@ -1333,7 +1401,9 @@ module GitHubContentClientTests =
                         HttpStatusCode.OK
                         (repositoryJson "example-owner/curated-project" "\"Curated project summary\"")
                         None
-                | "/repos/example-owner/curated-project/readme?ref=main" ->
+                | "/repos/example-owner/curated-project/git/ref/heads/main" ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" projectHead) None
+                | curatedReadme when curatedReadme = $"/repos/example-owner/curated-project/readme?ref={projectHead}" ->
                     response HttpStatusCode.OK "# Curated Project README\n\nThis is the supplied curated README." None
                 | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
                     response HttpStatusCode.OK $"[{caseOnlyCandidate}]" None
@@ -1369,11 +1439,71 @@ module GitHubContentClientTests =
             [ "/repos/example-owner/content"
               "/repos/example-owner/content/contents/content/projects.json?ref=main"
               "/repos/example-owner/curated-project"
-              "/repos/example-owner/curated-project/readme?ref=main"
+              "/repos/example-owner/curated-project/git/ref/heads/main"
+              $"/repos/example-owner/curated-project/readme?ref={projectHead}"
+              $"/repos/example-owner/curated-project/readme?ref={projectHead}"
               "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ]
 
         if requestedPaths <> expectedPaths then
             failwithf "Case-only generated candidates must be excluded before README requests: %A." requestedPaths
+
+    let private testNowCombinesProfileRepositoriesReleasesAndActivity () =
+        let profileHead = String('d', 40)
+
+        let recentRepository =
+            repositoryJson "example-owner/recent-project" "\"A recent project.\""
+
+        let handler =
+            new FakeHandler(fun request ->
+                match request.PathAndQuery with
+                | "/repos/example-owner/application" ->
+                    response
+                        HttpStatusCode.OK
+                        (repositoryJson "example-owner/application" "\"Application repository\"")
+                        None
+                | "/users/example-owner/events/public?per_page=100" ->
+                    response
+                        HttpStatusCode.OK
+                        "[{\"type\":\"PushEvent\",\"repo\":{\"name\":\"example-owner/recent-project\"}}]"
+                        None
+                | "/repos/example-owner/profile" ->
+                    response HttpStatusCode.OK (repositoryJson "example-owner/profile" "\"Profile repository\"") None
+                | "/repos/example-owner/profile/git/ref/heads/main" ->
+                    response HttpStatusCode.OK (gitObjectJson "commit" profileHead) None
+                | profileReadme when profileReadme = $"/repos/example-owner/profile/readme?ref={profileHead}" ->
+                    response HttpStatusCode.OK "# Example owner\n\nBuilding useful software." None
+                | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
+                    response HttpStatusCode.OK $"[{recentRepository}]" None
+                | "/repos/example-owner/application/releases?per_page=100" ->
+                    response HttpStatusCode.OK (releasePage [ releaseJson "v1.0.0" "2026-07-20T00:00:00Z" ]) None
+                | _ -> response HttpStatusCode.NotFound "" None)
+
+        let createdHttpClient, contentClient =
+            createClient handler (fun () -> DateTimeOffset.UtcNow)
+
+        use httpClient = createdHttpClient
+
+        let body =
+            contentClient.GetNow(CancellationToken.None).GetAwaiter().GetResult()
+            |> expectOk
+            |> ContentDomain.Now.body
+            |> ContentDomain.MarkdownBody.value
+
+        let expectedFragments =
+            [ "## Profile\n\n# Example owner\n\nBuilding useful software."
+              "## Recent repositories\n\n- [example-owner/recent-project](https://github.com/example-owner/recent-project) — A recent project."
+              "## Recent releases\n\n- [v1.0.0](https://github.com/example-owner/application/releases/tag/v1.0.0) — 2026-07-20"
+              "## Recent public activity\n\n- Pushed commits to [example-owner/recent-project](https://github.com/example-owner/recent-project)" ]
+
+        for fragment in expectedFragments do
+            if not (body.Contains(fragment, StringComparison.Ordinal)) then
+                failwithf "Now content is missing the expected fragment: %s" fragment
+
+        if
+            handler.Requests
+            |> List.exists (fun request -> request.PathAndQuery = "/repos/example-owner/application/readme?ref=main")
+        then
+            failwith "Now must use the configured profile README rather than the application README."
 
     let private testMissingProfileAndReleaseTagChangelog () =
         let v1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -1399,8 +1529,9 @@ module GitHubContentClientTests =
                         (repositoryJson "example-owner/application" "\"Application repository\"")
                         None
                 | "/users/example-owner/events/public?per_page=100" -> response HttpStatusCode.OK "[]" None
-                | "/repos/example-owner/application/readme?ref=main" -> response HttpStatusCode.NotFound "" None
                 | "/repos/example-owner/profile" -> response HttpStatusCode.NotFound "" None
+                | "/users/example-owner/repos?type=owner&sort=updated&direction=desc&per_page=100" ->
+                    response HttpStatusCode.OK "[]" None
                 | "/repos/example-owner/application/releases?per_page=100" -> response HttpStatusCode.OK releases None
                 | "/repos/example-owner/application/git/ref/tags/v3.0.0" ->
                     response HttpStatusCode.OK (gitObjectJson "tag" annotatedTag) None
@@ -1668,7 +1799,12 @@ module GitHubContentClientTests =
         then
             failwith "No releases must return an empty bounded changelog rather than a latest-commits approximation."
 
-        if handler.Requests |> List.length <> 2 then
+        if
+            handler.Requests
+            |> List.exists (fun request ->
+                request.PathAndQuery.Contains("/git/ref/", StringComparison.Ordinal)
+                || request.PathAndQuery.Contains("/compare/", StringComparison.Ordinal))
+        then
             failwith "No releases must not resolve a branch head, tags, or commit comparisons."
 
     let private testChangelogRejectsNonComparableAndOversizedRanges () =
@@ -1775,6 +1911,7 @@ module GitHubContentClientTests =
         testFractionalCatalogSize ()
         testProjectsPaginationAndReadmes ()
         testProjectsDeduplicateCaseInsensitiveRepositoryIdentity ()
+        testNowCombinesProfileRepositoriesReleasesAndActivity ()
         testMissingProfileAndReleaseTagChangelog ()
         testChangelogReleasePaginationBound ()
         testChangelogRejectsMissingTag ()

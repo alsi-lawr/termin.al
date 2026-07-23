@@ -1,10 +1,12 @@
 import {
   listVirtualDirectory,
   matchesVirtualPathGlob,
+  normalizeVirtualPath,
   resolveVirtualDirectory,
   resolveVirtualPath,
   traverseVirtualDirectory,
   type VirtualDirectoryNode,
+  type VirtualAbsolutePath,
   type VirtualDocumentSupplier,
   type VirtualFileNode,
   type VirtualFilesystem,
@@ -17,6 +19,7 @@ import { createDocumentViewerContent } from "../../content/ViewerContent.ts";
 import type { ManpageCorpus } from "../../content/ManpageCorpus.ts";
 import { ContentId } from "../../api/ContentContracts.ts";
 import {
+  createConfirmationPromptRequest,
   createShellDiagnosticId,
   createShellOutputId,
   type CommandEffect,
@@ -24,6 +27,9 @@ import {
   type ShellDiagnostic,
   type ShellOutput,
 } from "../../domain/terminal/Shell.ts";
+export type ManagedRemovalService = Readonly<{
+  hasManagedRemovalCapability: () => boolean;
+}>;
 import {
   resolveCommand,
   type CommandDefinition,
@@ -41,6 +47,7 @@ export type CreateReadOnlyCommandDefinitionsOptions = Readonly<{
   documents: VirtualDocumentSupplier;
   manpages: ManpageCorpus;
   recursiveEntryLimit: number;
+  managedRemoval?: ManagedRemovalService;
 }>;
 
 type OptionParseResult<Value> =
@@ -76,6 +83,11 @@ type TreeExecutionOptions = Readonly<{
   commandName: "ls" | "tree";
   showAll: boolean;
   maximumDepth: number;
+  path: string;
+}>;
+
+type RmOptions = Readonly<{
+  recursive: boolean;
   path: string;
 }>;
 
@@ -321,6 +333,35 @@ function parseNoOptionPaths(
   }
 
   return { kind: "parsed", value: invocation.arguments };
+}
+
+function parseRmOptions(
+  invocation: CommandInvocation,
+): OptionParseResult<RmOptions> {
+  const boundary = optionBoundary(invocation);
+  let recursive = false;
+  const operands: string[] = [];
+
+  for (const [index, value] of invocation.arguments.entries()) {
+    if (index < boundary && hasOptionPrefix(value)) {
+      if (value === "-r") {
+        recursive = true;
+        continue;
+      }
+
+      return { kind: "invalid", message: `Unsupported option: ${value}.` };
+    }
+
+    operands.push(value);
+  }
+
+  const path = operands[0];
+
+  if (operands.length !== 1 || path === undefined) {
+    return { kind: "invalid", message: "Usage: rm [-r] <path>" };
+  }
+
+  return { kind: "parsed", value: { recursive, path } };
 }
 
 function parseLsOptions(
@@ -1312,6 +1353,168 @@ function createLsCommand(
   };
 }
 
+function pathIsWithin(
+  candidate: VirtualAbsolutePath,
+  target: VirtualAbsolutePath,
+): boolean {
+  return candidate.startsWith(`${target}/`);
+}
+
+function isGeneratedDocument(node: VirtualNode): boolean {
+  if (node.kind !== "file") {
+    return false;
+  }
+
+  return node.documentHandle === "now-api" ||
+    node.documentHandle === "changelog-api" ||
+    node.documentHandle === "now" ||
+    node.documentHandle === "changelog";
+}
+
+function createRmCommand(
+  filesystem: VirtualFilesystem,
+  managedRemoval: ManagedRemovalService | undefined,
+): CommandDefinition {
+  return {
+    metadata: {
+      group: "gnu-like",
+      name: "rm",
+      aliases: [],
+      summary: "Remove a browser file or owner-managed content.",
+      usage: "rm [-r] <path>",
+      examples: ["rm draft.md", "rm -r notes/archive"],
+    },
+    argumentExpansion: "literal",
+    pipeline: "effects",
+    execute: async (invocation, context) => {
+      const parsed = parseRmOptions(invocation);
+
+      if (parsed.kind === "invalid") {
+        return rejectedOutcome("rm", parsed.message);
+      }
+
+      const normalized = normalizeVirtualPath(
+        context.currentDirectory,
+        parsed.value.path,
+      );
+
+      if (normalized.kind === "invalid-path") {
+        return failureOutcome("rm", normalized);
+      }
+
+      const path = normalized.path;
+
+      if (path === filesystem.root.path) {
+        return rejectedOutcome("rm", "The virtual filesystem root cannot be removed.");
+      }
+
+      const overlayFiles = filesystem.writableFiles.current().files.filter(
+        (file) =>
+          file.path === path ||
+          (parsed.value.recursive && pathIsWithin(file.path, path)),
+      );
+      const exactOverlay = overlayFiles.some((file) => file.path === path);
+
+      if (exactOverlay) {
+        return succeededOutcome([], [
+          {
+            kind: "request-confirmation-prompt",
+            request: createConfirmationPromptRequest(
+              context.commandId,
+              `Remove ${path}? [y/N]`,
+              {
+                kind: "remove-path",
+                path,
+                recursive: parsed.value.recursive,
+                scope: "overlay",
+                removeOverlayAfterManaged: false,
+              },
+            ),
+          },
+        ]);
+      }
+
+      const resolution = resolveVirtualPath(
+        filesystem,
+        context.currentDirectory,
+        parsed.value.path,
+      );
+
+      if (resolution.kind !== "found") {
+        return failureOutcome("rm", resolution);
+      }
+
+      if (resolution.node.kind === "directory" && !parsed.value.recursive) {
+        return rejectedOutcome("rm", `Cannot remove a directory without -r: ${path}`);
+      }
+
+      const baseNodes = [...filesystem.nodesByPath.values()].filter((node) =>
+        node.path === path ||
+        (parsed.value.recursive && pathIsWithin(node.path, path))
+      );
+      const protectedNode = baseNodes.find((node) =>
+        node.kind === "locked-file" || isGeneratedDocument(node)
+      );
+
+      if (protectedNode !== undefined) {
+        return rejectedOutcome("rm", `Path is protected: ${protectedNode.path}`);
+      }
+
+      const managedFiles = baseNodes.filter((node) => node.kind === "file");
+
+      if (managedFiles.length === 0) {
+        if (parsed.value.recursive && overlayFiles.length > 0) {
+          return succeededOutcome([], [
+            {
+              kind: "request-confirmation-prompt",
+              request: createConfirmationPromptRequest(
+                context.commandId,
+                `Remove ${path}? [y/N]`,
+                {
+                  kind: "remove-path",
+                  path,
+                  recursive: true,
+                  scope: "overlay",
+                  removeOverlayAfterManaged: false,
+                },
+              ),
+            },
+          ]);
+        }
+
+        return rejectedOutcome("rm", `Path is not removable: ${path}`);
+      }
+
+      if (
+        managedRemoval === undefined ||
+        !managedRemoval.hasManagedRemovalCapability()
+      ) {
+        return rejectedOutcome(
+          "rm",
+          "Managed content removal requires the live owner session.",
+        );
+      }
+
+      return succeededOutcome([], [
+        {
+          kind: "request-confirmation-prompt",
+          request: createConfirmationPromptRequest(
+            context.commandId,
+            `Remove ${path}? [y/N]`,
+            {
+              kind: "remove-path",
+              path,
+              recursive: parsed.value.recursive,
+              scope: "managed",
+              removeOverlayAfterManaged: overlayFiles.length > 0,
+            },
+          ),
+        },
+      ]);
+    },
+  };
+}
+
 function createCdCommand(filesystem: VirtualFilesystem): CommandDefinition {
   return {
     metadata: {
@@ -2105,6 +2308,7 @@ function createLessCommand(
             document: {
               text: document.text,
               source: { path: document.sourcePath },
+              preview: { kind: "markdown" },
             },
             statsIdentity: contentId.kind === "valid"
               ? { kind: "countable", contentId: contentId.value }
@@ -2315,6 +2519,7 @@ function createManCommand(manpages: ManpageCorpus): CommandDefinition {
             document: {
               text: manual.manpage.text,
               source: { path: manual.manpage.metadata.sourcePath },
+              preview: { kind: "markdown" },
             },
             statsIdentity: { kind: "uncounted" },
           }),
@@ -2346,6 +2551,7 @@ export function createReadOnlyCommandDefinitions({
   documents,
   manpages,
   recursiveEntryLimit,
+  managedRemoval,
 }: CreateReadOnlyCommandDefinitionsOptions): ReadonlyArray<CommandDefinition> {
   if (!Number.isSafeInteger(recursiveEntryLimit) || recursiveEntryLimit < 1) {
     throw new Error("Recursive command limits must be positive safe integers.");
@@ -2355,6 +2561,7 @@ export function createReadOnlyCommandDefinitions({
     createLsCommand(filesystem, recursiveEntryLimit),
     createCdCommand(filesystem),
     createCatCommand(filesystem, documents),
+    createRmCommand(filesystem, managedRemoval),
     createPwdCommand(),
     createTreeCommand(filesystem, recursiveEntryLimit),
     createFindCommand(filesystem, recursiveEntryLimit),

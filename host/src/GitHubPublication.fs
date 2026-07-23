@@ -51,6 +51,19 @@ module GitHubPublication =
           HeadSha: string
           BlobSha: string }
 
+    type ManagedRemovalRequest =
+        { VirtualPath: string
+          Recursive: bool
+          Confirmation: string }
+
+    type ManagedRemovalCommit = { Sha: string; Url: string }
+
+    [<RequireQualifiedAccess>]
+    type ManagedRemovalResult =
+        | Removed of ManagedRemovalCommit
+        | Invalid
+        | Unavailable
+
     [<RequireQualifiedAccess>]
     type Result =
         | Published of Commit
@@ -60,6 +73,8 @@ module GitHubPublication =
 
     type Client =
         abstract Publish: Auth.OwnerAccessToken * Request * CancellationToken -> Task<Result>
+        abstract RemoveManaged:
+            Auth.OwnerAccessToken * ManagedRemovalRequest * CancellationToken -> Task<ManagedRemovalResult>
 
     type private RepositoryState =
         { DefaultBranch: string
@@ -70,6 +85,7 @@ module GitHubPublication =
 
     type private CatalogEntry =
         { Element: JsonElement
+          Kind: string
           Id: string
           Path: string
           DocumentHandle: string option
@@ -249,6 +265,7 @@ module GitHubPublication =
                 (manifest.ManifestRawEntries, manifest.ManifestCatalogEntries)
                 ||> List.map2 (fun element domainEntry ->
                     { Element = element
+                      Kind = tryString "kind" element |> Option.defaultValue ""
                       Id = domainEntry |> ContentDomain.CatalogEntry.id |> ContentDomain.CatalogId.value
                       Path =
                         domainEntry
@@ -584,6 +601,103 @@ module GitHubPublication =
                     | Some assetEntries -> return Some(documentSha, documentEntry :: assetEntries)
         }
 
+    type private ManagedRemovalPlan =
+        { CatalogPaths: Set<string>
+          SourcePaths: string list
+          Subject: string }
+
+    let private managedRemovalSubject (virtualPath: string) =
+        let relative = virtualPath.Substring(2)
+        let separator = relative.IndexOf('/')
+
+        if separator < 0 then
+            $"content: remove {relative}"
+        else
+            let root = relative.Substring(0, separator)
+            let path = relative.Substring(separator + 1)
+
+            match root with
+            | "blog" -> $"blogs: remove {path}"
+            | "notes" -> $"notes: remove {path}"
+            | _ -> $"content: remove {relative}"
+
+    let private managedRemovalPlan (request: ManagedRemovalRequest) (catalog: CatalogState) =
+        match ContentDomain.VirtualPath.tryCreate "removal.virtual_path" request.VirtualPath with
+        | Error _ -> None
+        | Ok virtualPath ->
+            let target = ContentDomain.VirtualPath.value virtualPath
+
+            if target = "~" || request.Confirmation <> target then
+                None
+            else
+                let prefix = target + "/"
+
+                let matchesTarget (entry: CatalogEntry) =
+                    entry.Path = target
+                    || (request.Recursive && entry.Path.StartsWith(prefix, StringComparison.Ordinal))
+
+                let matching = catalog.Entries |> List.filter matchesTarget
+                let exact = matching |> List.tryFind (fun entry -> entry.Path = target)
+
+                let validTarget =
+                    match exact with
+                    | Some entry when request.Recursive -> entry.Kind = "directory" || entry.Kind = "file"
+                    | Some entry -> entry.Kind = "file"
+                    | None -> false
+
+                let protectedEntry (entry: CatalogEntry) =
+                    entry.Kind = "locked-file"
+                    || (entry.Kind = "file" && entry.SourcePath.IsNone)
+
+                let sourcePaths =
+                    matching
+                    |> List.choose (fun entry ->
+                        if entry.Kind = "file" then entry.SourcePath else None)
+                    |> List.distinct
+                    |> List.sort
+
+                if
+                    not validTarget
+                    || List.isEmpty sourcePaths
+                    || matching |> List.exists protectedEntry
+                then
+                    None
+                else
+                    Some
+                        { CatalogPaths = matching |> List.map (fun entry -> entry.Path) |> Set.ofList
+                          SourcePaths = sourcePaths
+                          Subject = managedRemovalSubject target }
+
+    let private managedRemovalCatalogBytes (plan: ManagedRemovalPlan) (catalog: CatalogState) =
+        use stream = new MemoryStream()
+        use writer = new Utf8JsonWriter(stream, JsonWriterOptions(Indented = false))
+        writer.WriteStartObject()
+        writer.WritePropertyName("entries")
+        writer.WriteStartArray()
+
+        for entry in catalog.Entries do
+            if not (plan.CatalogPaths.Contains entry.Path) then
+                entry.Element.WriteTo writer
+
+        writer.WriteEndArray()
+        writer.WriteEndObject()
+        writer.Flush()
+        let bytes = stream.ToArray()
+        let generated = Encoding.UTF8.GetString bytes
+
+        if parseCatalogBody generated catalog.BlobSha |> Option.isSome then
+            Some bytes
+        else
+            None
+
+    let private managedRemovalTreeEntries (plan: ManagedRemovalPlan) =
+        plan.SourcePaths
+        |> List.map (fun path ->
+            { Path = path
+              Mode = "100644"
+              Type = "blob"
+              Sha = None })
+
     let live
         (httpClient: HttpClient)
         (configuration: GitHubContentConfiguration)
@@ -765,8 +879,96 @@ module GitHubPublication =
                                 gate.Release() |> ignore
                         with :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
                             return raise error
+                }
+
+            member _.RemoveManaged(ownerToken, request, cancellationToken) =
+                task {
+                    let token = Auth.ownerAccessTokenValue ownerToken
+                    let gate = writeGates.GetOrAdd(repository, fun _ -> new SemaphoreSlim(1, 1))
+
+                    try
+                        do! gate.WaitAsync(cancellationToken)
+
+                        try
+                            match! readRepositoryState httpClient token repository cancellationToken with
+                            | None -> return ManagedRemovalResult.Unavailable
+                            | Some state ->
+                                match! readCatalog httpClient token repository state.HeadSha cancellationToken with
+                                | None -> return ManagedRemovalResult.Unavailable
+                                | Some catalog ->
+                                    match managedRemovalPlan request catalog with
+                                    | None -> return ManagedRemovalResult.Invalid
+                                    | Some plan ->
+                                        match managedRemovalCatalogBytes plan catalog with
+                                        | None -> return ManagedRemovalResult.Unavailable
+                                        | Some catalogContent ->
+                                            match!
+                                                createBlob
+                                                    httpClient
+                                                    token
+                                                    repository
+                                                    catalogContent
+                                                    cancellationToken
+                                            with
+                                            | None -> return ManagedRemovalResult.Unavailable
+                                            | Some catalogBlobSha ->
+                                                let treeEntries =
+                                                    managedRemovalTreeEntries plan
+                                                    @ [ { Path = "content/catalog.json"
+                                                          Mode = "100644"
+                                                          Type = "blob"
+                                                          Sha = Some catalogBlobSha } ]
+
+                                                match!
+                                                    createTree
+                                                        httpClient
+                                                        token
+                                                        repository
+                                                        state.TreeSha
+                                                        treeEntries
+                                                        cancellationToken
+                                                with
+                                                | None -> return ManagedRemovalResult.Unavailable
+                                                | Some treeSha ->
+                                                    match!
+                                                        createCommit
+                                                            httpClient
+                                                            token
+                                                            repository
+                                                            plan.Subject
+                                                            treeSha
+                                                            state.HeadSha
+                                                            cancellationToken
+                                                    with
+                                                    | None -> return ManagedRemovalResult.Unavailable
+                                                    | Some commitSha ->
+                                                        match!
+                                                            updateReference
+                                                                httpClient
+                                                                token
+                                                                repository
+                                                                state.DefaultBranch
+                                                                commitSha
+                                                                cancellationToken
+                                                        with
+                                                        | HttpStatusCode.OK ->
+                                                            generation.Advance commitSha |> ignore
+
+                                                            return
+                                                                ManagedRemovalResult.Removed
+                                                                    { Sha = commitSha
+                                                                      Url =
+                                                                        $"https://github.com/{repository}/commit/{commitSha}" }
+                                                        | _ -> return ManagedRemovalResult.Unavailable
+                        finally
+                            gate.Release() |> ignore
+                    with :? OperationCanceledException as error when cancellationToken.IsCancellationRequested ->
+                        return raise error
                 } }
 
     let unavailable: Client =
         { new Client with
-            member _.Publish(_, _, _) = Task.FromResult(Result.Unavailable) }
+            member _.Publish(_, _, _) = Task.FromResult(Result.Unavailable)
+
+            member _.RemoveManaged(_, _, _) =
+                Task.FromResult(ManagedRemovalResult.Unavailable) }

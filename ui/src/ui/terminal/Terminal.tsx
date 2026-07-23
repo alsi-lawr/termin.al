@@ -20,7 +20,10 @@ import type {
   VirtualFilesystem,
   VirtualFilesystemOverlay,
 } from "../../domain/filesystem/VirtualFilesystem.ts";
-import { createWorkspaceVirtualDocumentSupplier } from "../../domain/filesystem/VirtualFilesystem.ts";
+import {
+  createWorkspaceVirtualDocumentSupplier,
+  removeVirtualFiles,
+} from "../../domain/filesystem/VirtualFilesystem.ts";
 import type { PaneId } from "../../domain/workspace/PaneTree.ts";
 import type { ThemeController } from "../../theme/Theme.ts";
 import type {
@@ -49,7 +52,10 @@ import {
 } from "./InputCapture";
 import { TerminalViewport } from "./TerminalViewport";
 import { TerminalTranscript } from "./TerminalViewport";
-import { useShellEngine } from "./useShellEngine";
+import {
+  useShellEngine,
+  type ConfirmationPromptSubmissionHandler,
+} from "./useShellEngine";
 import {
   MobilePaneControls,
   type MobilePaneControl,
@@ -92,6 +98,7 @@ type TerminalProps = Readonly<{
   themeController: ThemeController;
   filesystem: VirtualFilesystem;
   onFilesystemChange: (overlay: VirtualFilesystemOverlay) => void;
+  onContentReload: () => void;
   documents: VirtualDocumentSupplier;
   projectReadmes: ReadonlyArray<ProjectReadme>;
   readStats: PortfolioStatsReader;
@@ -123,6 +130,7 @@ export function Terminal({
   themeController,
   filesystem,
   onFilesystemChange,
+  onContentReload,
   documents,
   projectReadmes,
   readStats,
@@ -159,6 +167,7 @@ export function Terminal({
           documents: workspaceDocuments,
           manpages: generatedManpageCorpus,
           recursiveEntryLimit: 100,
+          managedRemoval: authoring,
         }),
         ...createPortfolioCommandDefinitions({
           filesystem,
@@ -181,6 +190,57 @@ export function Terminal({
         currentDirectory: state.currentDirectory,
       }),
     });
+  const handleConfirmationPrompt = useCallback<ConfirmationPromptSubmissionHandler>(
+    async (effect) => {
+      const action = effect.request.action;
+
+      if (action.scope === "overlay") {
+        const result = removeVirtualFiles(
+          filesystem,
+          action.path,
+          action.recursive,
+        );
+
+        if (result.kind === "not-found") {
+          return { kind: "failed", message: `Path not found: ${result.path}` };
+        }
+
+        onFilesystemChange(result.overlay);
+        return { kind: "succeeded" };
+      }
+
+      if (authoring === undefined) {
+        return { kind: "failed", message: "Managed content removal requires the live owner session." };
+      }
+
+      const result = await authoring.removeManaged(
+        action.path,
+        action.recursive,
+        action.path,
+        new AbortController().signal,
+      );
+
+      if (result.kind === "failed") {
+        return result;
+      }
+
+      if (action.removeOverlayAfterManaged) {
+        const overlayResult = removeVirtualFiles(
+          filesystem,
+          action.path,
+          action.recursive,
+        );
+
+        if (overlayResult.kind === "removed") {
+          onFilesystemChange(overlayResult.overlay);
+        }
+      }
+
+      onContentReload();
+      return { kind: "succeeded" };
+    },
+    [authoring, filesystem, onContentReload, onFilesystemChange],
+  );
   const shell = useShellEngine({
     state,
     onAction: dispatchShellAction,
@@ -189,14 +249,15 @@ export function Terminal({
     registry,
     completionService,
     secretPromptSubmissionHandler,
+    confirmationPromptSubmissionHandler: handleConfirmationPrompt,
   });
   const activePrompt = getActiveShellPrompt(shell.state);
-  const promptLine =
-    activePrompt.kind === "secret"
-      ? activePrompt.prompt.line
-      : activePrompt.line;
-  const promptLabel =
-    activePrompt.kind === "secret" ? activePrompt.prompt.request.label : undefined;
+  const promptLine = activePrompt.kind === "command"
+    ? activePrompt.line
+    : activePrompt.prompt.line;
+  const promptLabel = activePrompt.kind === "command"
+    ? undefined
+    : activePrompt.prompt.request.label;
   const displayInput =
     activePrompt.kind === "secret"
       ? "•".repeat(Array.from(promptLine.text).length)

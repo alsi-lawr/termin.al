@@ -276,6 +276,17 @@
       "sha256": "f21ebc94410bbe38853ff99e9a06bc5af05338f8d565b661ce13fda5c31c84cd"
     },
     {
+      "name": "rm",
+      "section": 1,
+      "usage": "rm [-r] <path>",
+      "summary": "Remove a browser file or owner-managed content.",
+      "sourcePath": "man/rm.1",
+      "artifactPath": "ui/src/generated/manpages/rm.txt",
+      "byteCount": 1576,
+      "lineCount": 43,
+      "sha256": "77cbfc8368b1f0cbfb79923256e1fb6ed10d9144575d55481d00cf97af6042ea"
+    },
+    {
       "name": "sed",
       "section": 1,
       "usage": "sed [-n] [-e script]... [script] [path ...]",

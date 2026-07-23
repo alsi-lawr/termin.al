@@ -5,6 +5,7 @@ import {
   createWorkspaceVirtualFilesystem,
   expandVirtualPathGlob,
   listVirtualDirectory,
+  removeVirtualFiles,
   resolveVirtualDirectory,
   resolveVirtualPath,
   traverseVirtualDirectory,
@@ -229,5 +230,42 @@ test("writes one visible overlay without shadowing locked nodes or directories",
       protectedMetacharacterOffsets: [],
     }),
     ["~/projects/new.txt"],
+  );
+});
+
+test("removes exact and recursive overlay files without deleting corpus nodes", () => {
+  const workspace = createWorkspaceVirtualFilesystem(filesystem);
+  const shadow = writeVirtualFile(
+    workspace,
+    virtualHomeDirectory(),
+    "about.md",
+    "shadow",
+  );
+  const nested = writeVirtualFile(
+    workspace,
+    virtualHomeDirectory(),
+    "projects/new.txt",
+    "new",
+  );
+
+  if (shadow.kind !== "written" || nested.kind !== "written") {
+    assert.fail("Expected removable overlay fixtures.");
+  }
+
+  const removedShadow = removeVirtualFiles(workspace, shadow.path, false);
+  const removedTree = removeVirtualFiles(
+    workspace,
+    projectsDirectory().path,
+    true,
+  );
+
+  assert.equal(removedShadow.kind, "removed");
+  assert.equal(removedTree.kind, "removed");
+  assert.equal(writableVirtualFileText(workspace, shadow.path), undefined);
+  assert.equal(resolveVirtualPath(workspace, virtualHomeDirectory(), "about.md").kind, "found");
+  assert.equal(writableVirtualFileText(workspace, nested.path), undefined);
+  assert.equal(
+    removeVirtualFiles(workspace, nested.path, false).kind,
+    "not-found",
   );
 });

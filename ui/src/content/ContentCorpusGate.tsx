@@ -44,7 +44,7 @@ export function ContentCorpusGate({
   authentication,
   publicationClient,
 }: ContentCorpusGateProps): ReactElement {
-  const state = useContentCorpus(contentClient);
+  const { state, reload } = useContentCorpus(contentClient);
 
   switch (state.kind) {
     case "loading":
@@ -68,14 +68,14 @@ export function ContentCorpusGate({
         <ContentStatus role="alert" title="Content unavailable" message={state.message} />
       );
     case "available":
-      return <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} />;
+      return <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} onContentReload={reload} />;
     case "stale":
       return (
         <div className="min-h-dvh bg-surface-deepest">
           <p className="border-b border-ui-subtle bg-surface-raised px-4 py-2 text-center text-sm text-foreground-muted" role="status">
             Displaying recently cached content while GitHub is unavailable.
           </p>
-          <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} />
+          <Workspace applicationMode={applicationMode} authentication={authentication} corpus={state.corpus} publicationClient={publicationClient} statsClient={statsClient} onContentReload={reload} />
         </div>
       );
   }

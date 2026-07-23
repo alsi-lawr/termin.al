@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { RpcMetadata } from "@protobuf-ts/runtime-rpc";
-import type { PublicationRequest, PublicationResponse } from "../generated/browser/browser.ts";
+import type {
+  ManagedRemovalResponse,
+  PublicationRequest,
+  PublicationResponse,
+} from "../generated/browser/browser.ts";
 import { PublicationOperation } from "../generated/browser/browser.ts";
 import type { PublicationDraft, StagedAsset } from "../authoring/PublicationDraft.ts";
 import { minimalPublicationSource, validatePublicationSource } from "../authoring/PublicationDraft.ts";
@@ -58,6 +62,9 @@ test("generated publication client sends binary-unary domain values with antifor
       };
       return { response: Promise.resolve(response) };
     },
+    removeManaged: () => ({
+      response: Promise.resolve({ sha: "f".repeat(40), url: "https://example.invalid/commit/f" } satisfies ManagedRemovalResponse),
+    }),
   };
   const client = new GrpcPublicationClient(context, ownerSession, rpc);
   const asset: StagedAsset = {
@@ -96,6 +103,9 @@ test("generated publication client returns direct conflict values", async () => 
         headSha: "b".repeat(40),
         blobSha: "c".repeat(40),
       } satisfies PublicationResponse),
+    }),
+    removeManaged: () => ({
+      response: Promise.resolve({ sha: "f".repeat(40), url: "https://example.invalid/commit/f" } satisfies ManagedRemovalResponse),
     }),
   };
   const client = new GrpcPublicationClient(new BrowserGrpcContext(), ownerSession, conflictRpc);

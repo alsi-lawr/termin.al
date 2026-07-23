@@ -1,0 +1,42 @@
+.\" termin.al-name: rm
+.\" termin.al-usage: rm [-r] <path>
+.\" termin.al-summary: Remove a browser file or owner-managed content.
+.TH RM 1 "" "termin.al" "termin.al Manual"
+.ftr B R
+.ftr I R
+.ftr BI R
+.SH NAME
+rm \- Remove a browser file or owner-managed content.
+.SH SYNOPSIS
+.nf
+rm [-r] <path>
+.fi
+.SH DESCRIPTION
+Requests confirmation before removing one path from termin.al's virtual filesystem. Browser-overlay files may be removed by any visitor. GitHub-backed blog and note files may be removed only by the live owner session.
+.PP
+Removing an overlay that shadows managed content reveals the managed file. A managed removal deletes its catalog entry and source document in one repository commit; retained asset directories are not deleted.
+.SH OPTIONS
+.TP
+.B -r
+Remove one directory subtree after a single confirmation. Directories cannot be removed without this option.
+.SH CONFIRMATION
+The prompt displays
+.BR "Remove <path>? [y/N]" .
+Only
+.B y
+or
+.B yes
+confirms the removal, ignoring case. An empty or other response cancels it.
+.SH FAILURES
+Exactly one literal path is required. Globs, multiple paths, unsupported options such as
+.BR -f ,
+the virtual root, locked files, generated documents, project README content, and managed content outside an owner session are rejected.
+.SH NOTES
+There is no force option. Recursive managed removal is committed atomically. Browser-overlay removal persists in browser storage only.
+.SH EXAMPLES
+.nf
+$ rm draft.md
+$ rm -r notes/archive
+.fi
+.SH SEE ALSO
+edit(1), ls(1), tree(1)

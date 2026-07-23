@@ -9,6 +9,7 @@ import {
   type PaneOperation,
 } from "../../domain/workspace/PaneTree.ts";
 import {
+  createCommandId,
   createShellId,
   createShellSessionId,
 } from "../../domain/terminal/Shell.ts";
@@ -71,6 +72,7 @@ test("executes parsed pane operations through the existing command registry cont
       stdin: { kind: "none" },
     },
     {
+      commandId: createCommandId(createShellSessionId("session"), 1),
       shellId: createShellId("shell"),
       sessionId: createShellSessionId("session"),
       currentDirectory: virtualHomeDirectory(),

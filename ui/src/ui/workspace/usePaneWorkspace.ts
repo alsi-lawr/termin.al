@@ -272,6 +272,7 @@ export function usePaneWorkspace(
       reportFilesystemStorageFailure(
         writeVirtualFilesystemOverlay(filesystemStorage, overlay),
       );
+      setFilesystemRevision((current) => current + 1);
     },
     [filesystemStorage, reportFilesystemStorageFailure],
   );

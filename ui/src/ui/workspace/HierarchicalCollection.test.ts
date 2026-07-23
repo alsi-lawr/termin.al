@@ -22,7 +22,11 @@ function leaf(id: string, title: string, path: string): ViewerCollectionLeaf {
     tags: ["typed"],
     metadata: "2026-07-16",
     documentTitle: title,
-    document: { text: `# ${title}`, source: { path } },
+    document: {
+      text: `# ${title}`,
+      source: { path },
+      preview: { kind: "markdown" },
+    },
     repositoryUrl: undefined,
     statsIdentity: { kind: "uncounted" },
   };
