@@ -152,7 +152,6 @@ function waitForPopup(
     const finish = (result: boolean): void => {
       window.removeEventListener("message", onMessage);
       signal.removeEventListener("abort", onAbort);
-      window.clearTimeout(timeout);
       resolve(result);
     };
     const onMessage = (event: MessageEvent<unknown>): void => {
@@ -168,14 +167,9 @@ function waitForPopup(
     };
     const onAbort = (): void => {
       window.removeEventListener("message", onMessage);
-      window.clearTimeout(timeout);
       popup.close();
       reject(new DOMException("Authentication was cancelled.", "AbortError"));
     };
-    const timeout = window.setTimeout(() => {
-      popup.close();
-      finish(false);
-    }, 5_000);
 
     window.addEventListener("message", onMessage);
     signal.addEventListener("abort", onAbort, { once: true });
