@@ -1964,6 +1964,34 @@ test("applies exact character visual delete change and yank", () => {
   assert.equal(vimBufferText(changed), "X beta");
 });
 
+test("swaps case across character, line, and block visual selections", () => {
+  const character = press(
+    createVimBuffer({ text: "aBcD", mode: VimMode.Normal }),
+    "v", "l", "l", "~",
+  );
+  const characterUndone = press(character, "u");
+  const line = press(
+    createVimBuffer({ text: "Ab\ncD\nEf", mode: VimMode.Normal }),
+    "V", "j", "~",
+  );
+  const blockStart = press(
+    createVimBuffer({ text: "aBc\nD\nxYz", mode: VimMode.Normal }),
+    "l",
+  );
+  const block = press(pressControl(blockStart, "v"), "l", "j", "j", "~");
+
+  assert.equal(vimBufferText(character), "AbCD");
+  assert.equal(character.mode.kind, "normal");
+  assert.deepEqual(character.selection, { kind: "none" });
+  assert.deepEqual(character.cursor, { line: 0, column: 0 });
+  assert.equal(character.undoStack.length, 1);
+  assert.equal(vimBufferText(characterUndone), "aBcD");
+  assert.equal(vimBufferText(line), "aB\nCd\nEf");
+  assert.deepEqual(line.cursor, { line: 0, column: 0 });
+  assert.equal(vimBufferText(block), "abC\nD\nxyZ");
+  assert.deepEqual(block.cursor, { line: 0, column: 1 });
+});
+
 test("extends shared text objects in character, line, and block visual modes", () => {
   const start = press(
     createVimBuffer({ text: "one two\nthree", mode: VimMode.Normal }),

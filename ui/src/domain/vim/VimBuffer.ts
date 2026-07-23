@@ -994,6 +994,87 @@ function applyVisualOperator(
   );
 }
 
+function swapCharacterCase(character: string): string {
+  const lower = character.toLowerCase();
+  const upper = character.toUpperCase();
+
+  if (character === lower && character !== upper) {
+    return upper;
+  }
+
+  if (character === upper && character !== lower) {
+    return lower;
+  }
+
+  return character;
+}
+
+function swapTextCase(text: string): string {
+  return Array.from(text, swapCharacterCase).join("");
+}
+
+function swapVisualCase(buffer: VimBuffer): VimBuffer {
+  const range = vimVisualRange(buffer.lines, buffer.selection);
+  const oldText = joinLines(buffer.lines);
+  let lines: ReadonlyArray<string>;
+  let cursor: VimPosition;
+
+  switch (range.kind) {
+    case "character": {
+      const text = oldText.slice(0, range.start) +
+        swapTextCase(oldText.slice(range.start, range.end)) +
+        oldText.slice(range.end);
+      lines = splitText(text);
+      cursor = positionForTextOffset(lines, range.start, VimMode.Normal);
+      break;
+    }
+    case "line":
+      lines = buffer.lines.map((line, lineIndex) =>
+        lineIndex >= range.startLine && lineIndex <= range.endLine
+          ? swapTextCase(line)
+          : line
+      );
+      cursor = { line: range.startLine, column: 0 };
+      break;
+    case "block":
+      lines = buffer.lines.map((line, lineIndex) => {
+        if (
+          lineIndex < range.startLine ||
+          lineIndex > range.endLine ||
+          line.length <= range.startColumn
+        ) {
+          return line;
+        }
+
+        const start = normalizeUnicodeCursorOffset(line, range.startColumn);
+        const end = normalizeUnicodeCursorOffset(
+          line,
+          Math.min(line.length, range.endColumn),
+        );
+        return line.slice(0, start) +
+          swapTextCase(line.slice(start, Math.max(start, end))) +
+          line.slice(Math.max(start, end));
+      });
+      cursor = topLeftCursor(lines, range, VimMode.Normal);
+      break;
+  }
+
+  const editSource: VimBuffer = {
+    ...buffer,
+    mode: VimMode.Normal,
+    selection: { kind: "none" },
+    insertSession: { kind: "ordinary" },
+  };
+  const newText = joinLines(lines);
+
+  return commitEdit(
+    editSource,
+    createTextState(lines, cursor, VimMode.Normal, { kind: "none" }),
+    buffer.register,
+    [editInterval(oldText, newText)],
+  );
+}
+
 function applyOperatorRange(
   buffer: VimBuffer,
   operator: VimOperator,
@@ -2512,6 +2593,10 @@ function literalCapabilityClassification(
   }
 
   switch (value) {
+    case "~":
+      return visual
+        ? { kind: "text-mutation", source }
+        : noCapabilityOperation;
     case "d":
     case "c":
     case "x":
@@ -2716,6 +2801,10 @@ function applyLiteral(buffer: VimBuffer, value: string): VimBuffer {
       return isVimVisualMode(buffer.mode)
         ? applyVisualOperator(buffer, "delete")
         : deleteCharacters(buffer);
+    case "~":
+      return isVimVisualMode(buffer.mode)
+        ? swapVisualCase(buffer)
+        : invalidInput(buffer, pendingSource(buffer) + value);
     case "p":
       return isVimVisualMode(buffer.mode)
         ? invalidInput(buffer, pendingSource(buffer) + value)
